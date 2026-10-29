@@ -5,6 +5,7 @@ import { Loader2, Mic, Wand2, Upload, FileAudio2, Music2, ChevronDown, ChevronRi
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import KaraokePaywall from "@/components/media/KaraokePaywall";
+import KaraokeTranscriber from "@/components/media/KaraokeTranscriber";
 
 function readAccessToken() {
   if (typeof window === "undefined" || !window.localStorage) return "";
@@ -187,12 +188,35 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
   const loadCatalog = useCallback(async () => {
     setCatalogLoading(true);
     try {
-      const [catRes, genreRes] = await Promise.all([
-        apiClient.karaoke.getCatalog({ pageSize: 200 }),
-        apiClient.karaoke.getGenres(),
-      ]);
-      setCatalog(catRes?.grouped || []);
+      const pageSize = 400;
+      let page = 1;
+      let total = Number.POSITIVE_INFINITY;
+      const groupedMap = new Map();
+      while (((page - 1) * pageSize) < total && page <= 8) {
+        const catRes = await apiClient.karaoke.getCatalog({ page, pageSize, includeExternal: true });
+        total = Number(catRes?.total || 0);
+        for (const group of catRes?.grouped || []) {
+          const key = group?.genre || "Other";
+          const existing = groupedMap.get(key) || [];
+          const merged = [...existing, ...(group?.tracks || [])];
+          const deduped = Array.from(new Map(merged.map((t) => [String(t.id), t])).values());
+          groupedMap.set(key, deduped);
+        }
+        if ((catRes?.items || []).length === 0) break;
+        page += 1;
+      }
+
+      const grouped = Array.from(groupedMap.entries()).map(([genre, tracks]) => ({ genre, tracks }));
+      const genreRes = await apiClient.karaoke.getGenres();
+      const discoveredGenres = Array.from(new Set(grouped.map((g) => g.genre).filter(Boolean)));
+      setCatalog(grouped);
       setCatalogGenres(["All", ...(genreRes?.genres || [])]);
+      if (discoveredGenres.length > 0) {
+        setCatalogGenres((prev) => {
+          const merged = new Set([...(prev || ["All"]), ...discoveredGenres]);
+          return ["All", ...Array.from(merged).filter((g) => g !== "All").sort((a, b) => a.localeCompare(b))];
+        });
+      }
     } catch {
       // catalog unavailable — graceful degradation
     } finally {
@@ -287,8 +311,10 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
     setWordCount(null);
     setVocalsIsolated(false);
 
-    // Record a play
-    apiClient.karaoke.recordPlay(track.id).catch(() => {});
+    // Record a play for DB-backed tracks only.
+    if (track?.sourceType !== "external") {
+      apiClient.karaoke.recordPlay(track.id).catch(() => {});
+    }
 
     // If the track already has LRC content or plain lyrics — show immediately
     if (track.lrcContent) {
@@ -448,6 +474,7 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
                                     {track.artist}
                                     {track.year ? ` · ${track.year}` : ""}
                                     {" · "}
+                                    {track.source ? `${track.source} · ` : ""}
                                     <span className={`capitalize ${isReady ? "text-green-500" : "text-muted-foreground"}`}>
                                       {track.status?.toLowerCase()}
                                     </span>
@@ -603,6 +630,20 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
             </p>
           </div>
         )}
+
+        <KaraokeTranscriber
+          sessionId={catalogTrack?.id || selectedSource?.id || undefined}
+          songMetadata={
+            catalogTrack
+              ? {
+                  trackId: catalogTrack.id,
+                  language: catalogTrack.language || "",
+                  languageCodes: catalogTrack.language ? [catalogTrack.language] : [],
+                }
+              : null
+          }
+          referenceLyrics={catalogTrack?.plainLyrics || ""}
+        />
 
         {lyrics && (
           <div className="rounded-lg border border-accent/40 bg-accent/5 p-4 space-y-3">

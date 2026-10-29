@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Wiseravenshare.Server.Services.CrossPlatform;
 
@@ -44,11 +45,12 @@ public class ZernioWebhookController : ControllerBase
             ?? _configuration["ZERNIO_WEBHOOK_SECRET"]
             ?? _configuration["ZERNIO_WEBHOOKS_SECRET"]
             ?? string.Empty).Trim();
+        var signatureHeader = ResolveSignatureHeader(Request.Headers);
 
         if (!VerifySignatureIfConfigured(
                 webhookSecret,
                 rawBody,
-                Request.Headers["X-Zernio-Signature"].ToString()))
+                signatureHeader))
         {
             return Unauthorized(new { error = "Invalid webhook signature." });
         }
@@ -69,7 +71,7 @@ public class ZernioWebhookController : ControllerBase
             var eventId = ReadString(root, "id")
                 ?? Request.Headers["X-Zernio-Event-Id"].ToString()
                 ?? Request.Headers["X-Late-Event-Id"].ToString();
-            var eventType = ReadString(root, "event") ?? "unknown";
+            var eventType = ReadString(root, "event") ?? ReadString(root, "type") ?? "unknown";
 
             if (string.IsNullOrWhiteSpace(eventId))
             {
@@ -130,38 +132,47 @@ public class ZernioWebhookController : ControllerBase
         {
             using var payload = JsonDocument.Parse(rawBody);
             var root = payload.RootElement;
-            if (eventType.Equals("account.connected", StringComparison.OrdinalIgnoreCase))
-            {
-                var accountNode = root.TryGetProperty("account", out var account) ? account : default;
-                var platform = accountNode.ValueKind != JsonValueKind.Undefined ? ReadString(accountNode, "platform") : null;
-                var username = accountNode.ValueKind != JsonValueKind.Undefined ? ReadString(accountNode, "username") : null;
-                var resolvedAccountId = accountNode.ValueKind != JsonValueKind.Undefined
-                    ? ReadString(accountNode, "accountId") ?? ReadString(accountNode, "id") ?? accountId
-                    : accountId;
-                var resolvedProfileId = accountNode.ValueKind != JsonValueKind.Undefined
-                    ? ReadString(accountNode, "profileId") ?? profileId
-                    : profileId;
+            var accountNode = root.TryGetProperty("account", out var account) ? account : default;
+            var platform = accountNode.ValueKind != JsonValueKind.Undefined ? ReadString(accountNode, "platform") : null;
+            var username = accountNode.ValueKind != JsonValueKind.Undefined ? ReadString(accountNode, "username") : null;
+            var resolvedAccountId = accountNode.ValueKind != JsonValueKind.Undefined
+                ? ReadString(accountNode, "accountId") ?? ReadString(accountNode, "id") ?? accountId
+                : accountId;
+            var resolvedProfileId = accountNode.ValueKind != JsonValueKind.Undefined
+                ? ReadString(accountNode, "profileId") ?? profileId
+                : profileId;
 
-                if (!string.IsNullOrWhiteSpace(resolvedAccountId))
+            if (string.IsNullOrWhiteSpace(resolvedProfileId) &&
+                root.TryGetProperty("profiles", out var profilesNode) &&
+                profilesNode.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var profile in profilesNode.EnumerateArray())
                 {
-                    await _webhookStore.UpsertAccountMappingAsync(
-                        resolvedAccountId,
-                        NullIfWhiteSpace(resolvedProfileId),
-                        NullIfWhiteSpace(platform),
-                        NullIfWhiteSpace(username));
+                    resolvedProfileId = ReadString(profile, "profileId") ?? ReadString(profile, "id");
+                    if (!string.IsNullOrWhiteSpace(resolvedProfileId))
+                    {
+                        break;
+                    }
                 }
             }
-            else if (eventType.Equals("account.disconnected", StringComparison.OrdinalIgnoreCase))
-            {
-                var accountNode = root.TryGetProperty("account", out var account) ? account : default;
-                var resolvedAccountId = accountNode.ValueKind != JsonValueKind.Undefined
-                    ? ReadString(accountNode, "accountId") ?? ReadString(accountNode, "id") ?? accountId
-                    : accountId;
 
+            if (eventType.Equals("account.disconnected", StringComparison.OrdinalIgnoreCase))
+            {
                 if (!string.IsNullOrWhiteSpace(resolvedAccountId))
                 {
                     await _webhookStore.SetAccountConnectionStateAsync(resolvedAccountId, isConnected: false);
                 }
+            }
+            else if (!string.IsNullOrWhiteSpace(resolvedAccountId) &&
+                     (eventType.Equals("account.connected", StringComparison.OrdinalIgnoreCase) ||
+                      eventType.Equals("analytics.synced", StringComparison.OrdinalIgnoreCase) ||
+                      eventType.Equals("profile.synced", StringComparison.OrdinalIgnoreCase)))
+            {
+                await _webhookStore.UpsertAccountMappingAsync(
+                    resolvedAccountId,
+                    NullIfWhiteSpace(resolvedProfileId),
+                    NullIfWhiteSpace(platform),
+                    NullIfWhiteSpace(username));
             }
 
             await _webhookStore.MarkProcessedAsync(eventId, "processed", null);
@@ -212,31 +223,100 @@ public class ZernioWebhookController : ControllerBase
             return false;
         }
 
-        var expectedHex = ComputeHmacHex(secret, rawBody);
-        return FixedTimeEqualsHex(expectedHex, signatureHeader.Trim());
+        var expectedBytes = ComputeHmacBytes(secret, rawBody);
+        foreach (var candidate in ParseSignatureCandidates(signatureHeader))
+        {
+            if (TryDecodeSignature(candidate, out var presentedBytes) &&
+                presentedBytes.Length == expectedBytes.Length &&
+                CryptographicOperations.FixedTimeEquals(expectedBytes, presentedBytes))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
-    private static string ComputeHmacHex(string secret, string rawBody)
+    private static string ResolveSignatureHeader(IHeaderDictionary headers)
+    {
+        var candidates = new[]
+        {
+            "X-Zernio-Signature",
+            "X-Zernio-Webhook-Signature",
+            "X-Zernio-Signature-256",
+            "X-Webhook-Signature",
+            "X-Signature"
+        };
+
+        foreach (var headerName in candidates)
+        {
+            var value = headers[headerName].ToString();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static byte[] ComputeHmacBytes(string secret, string rawBody)
     {
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(rawBody));
-        return Convert.ToHexString(hash).ToLowerInvariant();
+        return hmac.ComputeHash(Encoding.UTF8.GetBytes(rawBody));
     }
 
-    private static bool FixedTimeEqualsHex(string expectedHex, string presentedHex)
+    private static IEnumerable<string> ParseSignatureCandidates(string headerValue)
     {
-        if (!TryHexToBytes(expectedHex, out var expectedBytes) ||
-            !TryHexToBytes(presentedHex, out var presentedBytes))
+        foreach (var rawToken in headerValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.IsNullOrWhiteSpace(rawToken))
+            {
+                continue;
+            }
+
+            yield return rawToken;
+            var separatorIndex = rawToken.IndexOf('=');
+            if (separatorIndex > -1 && separatorIndex < rawToken.Length - 1)
+            {
+                yield return rawToken[(separatorIndex + 1)..];
+            }
+        }
+    }
+
+    private static bool TryDecodeSignature(string candidate, out byte[] bytes)
+    {
+        bytes = Array.Empty<byte>();
+        if (string.IsNullOrWhiteSpace(candidate))
         {
             return false;
         }
 
-        if (expectedBytes.Length != presentedBytes.Length)
+        var normalized = candidate.Trim();
+        if (normalized.StartsWith("sha256=", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[7..].Trim();
+        }
+
+        if (normalized.StartsWith("v1=", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[3..].Trim();
+        }
+
+        if (TryHexToBytes(normalized, out bytes))
+        {
+            return true;
+        }
+
+        try
+        {
+            bytes = Convert.FromBase64String(normalized);
+            return true;
+        }
+        catch
         {
             return false;
         }
-
-        return CryptographicOperations.FixedTimeEquals(expectedBytes, presentedBytes);
     }
 
     private static bool TryHexToBytes(string hex, out byte[] bytes)

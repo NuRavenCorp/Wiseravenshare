@@ -747,10 +747,11 @@ export const apiClient = {
     },
   },
   karaoke: {
-    getCatalog({ genre, status, page = 1, pageSize = 60 } = {}) {
+    getCatalog({ genre, status, includeExternal = true, page = 1, pageSize = 60 } = {}) {
       const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-      if (genre)  q.set("genre",  genre);
+      if (genre && String(genre).toLowerCase() !== "all") q.set("genre", genre);
       if (status) q.set("status", status);
+      if (includeExternal) q.set("includeExternal", "true");
       return requestJson(`/api/karaoke/db-catalog?${q.toString()}`, { method: "GET" });
     },
     getGenres() {
@@ -758,6 +759,18 @@ export const apiClient = {
     },
     recordPlay(trackId) {
       return requestJson(`/api/karaoke/db-catalog/${encodeURIComponent(trackId)}/play`, { method: "POST" });
+    },
+    issueStreamToken(payload = {}) {
+      return requestJson("/api/karaoke/speech/stream-token", {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      });
+    },
+    persistFinalizedTurn(payload) {
+      return requestJson("/api/karaoke/speech/turns/finalized", {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      });
     },
   },
   radio: {

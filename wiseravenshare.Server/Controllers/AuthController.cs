@@ -576,7 +576,10 @@ public class AuthController : ControllerBase
                 $"{normalizedProvider} sign-in is not configured. Add OAuth credentials in Authentication:OAuthProviders."));
         }
 
-        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider, providerConfig);
+        var callbackUrl = BuildOAuthCallbackUrl(
+            normalizedProvider,
+            providerConfig,
+            useLegacyConnectPath: IsLegacyConnectOAuthPath(Request.Path));
         if (string.IsNullOrWhiteSpace(callbackUrl))
         {
             return Redirect(BuildOAuthErrorRedirect(normalizedReturnUrl, normalizedProvider, "Unable to resolve OAuth callback URL."));
@@ -628,7 +631,10 @@ public class AuthController : ControllerBase
             return Conflict(new { message = $"{normalizedPlatform} OAuth is not configured in Authentication:OAuthProviders." });
         }
 
-        var callbackUrl = BuildOAuthCallbackUrl(normalizedPlatform, providerConfig);
+        var callbackUrl = BuildOAuthCallbackUrl(
+            normalizedPlatform,
+            providerConfig,
+            useLegacyConnectPath: IsLegacyConnectOAuthPath(Request.Path));
         if (string.IsNullOrWhiteSpace(callbackUrl))
         {
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Unable to resolve OAuth callback URL." });
@@ -881,7 +887,7 @@ public class AuthController : ControllerBase
             return Redirect(missingCodeUrl);
         }
 
-        var callbackUrl = BuildOAuthCallbackUrl(normalizedProvider, providerConfig);
+        var callbackUrl = ResolveOAuthCallbackUrlForTokenExchange(normalizedProvider, providerConfig);
         if (string.IsNullOrWhiteSpace(callbackUrl))
         {
             var callbackErrorUrl = BuildOAuthErrorRedirect(stateRecord.ReturnUrl, normalizedProvider, "Unable to resolve OAuth callback URL.");
@@ -979,6 +985,25 @@ public class AuthController : ControllerBase
         SetRefreshCookie(refreshToken);
         var successUrl = BuildOAuthSuccessRedirect(stateRecord.ReturnUrl, normalizedProvider, token, refreshToken, adminPassToken);
         return Redirect(successUrl);
+    }
+
+    [HttpGet("/api/v1/connect/{provider}/start")]
+    [AllowAnonymous]
+    public IActionResult StartLegacyOAuth(string provider, [FromQuery] string? returnUrl = null)
+    {
+        return StartOAuth(provider, returnUrl);
+    }
+
+    [HttpGet("/api/v1/connect/{provider}/callback")]
+    [AllowAnonymous]
+    public Task<IActionResult> LegacyOAuthCallback(
+        string provider,
+        [FromQuery] string? code = null,
+        [FromQuery] string? state = null,
+        [FromQuery] string? error = null,
+        [FromQuery(Name = "error_description")] string? errorDescription = null)
+    {
+        return OAuthCallback(provider, code, state, error, errorDescription);
     }
 
     [HttpPost("team-access/invites")]
@@ -2456,9 +2481,11 @@ public class AuthController : ControllerBase
         return string.Empty;
     }
 
-    private string BuildOAuthCallbackUrl(string provider, OAuthProviderConfig? providerConfig = null)
+    private string BuildOAuthCallbackUrl(string provider, OAuthProviderConfig? providerConfig = null, bool useLegacyConnectPath = false)
     {
-        var callbackPath = $"/api/auth/oauth/{provider}/callback";
+        var callbackPath = useLegacyConnectPath
+            ? $"/api/v1/connect/{provider}/callback"
+            : $"/api/auth/oauth/{provider}/callback";
 
         var configuredRedirectUri = providerConfig?.RedirectUri ?? string.Empty;
         if (Uri.TryCreate(configuredRedirectUri, UriKind.Absolute, out var explicitRedirectUri)
@@ -2479,6 +2506,29 @@ public class AuthController : ControllerBase
             ? $"{Request.Scheme}://{Request.Host}".TrimEnd('/')
             : ResolvePublicAppOrigin();
         return $"{requestOrigin}{callbackPath}";
+    }
+
+    private string ResolveOAuthCallbackUrlForTokenExchange(string provider, OAuthProviderConfig providerConfig)
+    {
+        var configuredRedirectUri = providerConfig.RedirectUri;
+        if (Uri.TryCreate(configuredRedirectUri, UriKind.Absolute, out _))
+        {
+            return configuredRedirectUri;
+        }
+
+        if (Request.Host.HasValue)
+        {
+            return $"{Request.Scheme}://{Request.Host}{Request.PathBase}{Request.Path}";
+        }
+
+        return BuildOAuthCallbackUrl(provider, providerConfig);
+    }
+
+    private static bool IsLegacyConnectOAuthPath(PathString path)
+    {
+        return path.HasValue &&
+               path.Value is not null &&
+               path.Value.StartsWith("/api/v1/connect/", StringComparison.OrdinalIgnoreCase);
     }
 
     private string ResolveOAuthReturnUrl(string? returnUrl)
@@ -3026,7 +3076,12 @@ public class AuthController : ControllerBase
         {
             ProviderUserId = userNode.TryGetProperty("open_id", out var openIdNode) ? openIdNode.GetString() ?? string.Empty : string.Empty,
             Name = !string.IsNullOrWhiteSpace(displayName) ? displayName : "TikTok User",
-            Email = string.Empty
+            Email = string.Empty,
+            AccessToken = tokenPayload.AccessToken,
+            RefreshToken = tokenPayload.RefreshToken,
+            TokenExpiresAt = tokenPayload.TokenExpiresAt,
+            DestinationId = userNode.TryGetProperty("open_id", out var destinationIdNode) ? destinationIdNode.GetString() ?? string.Empty : string.Empty,
+            DestinationName = !string.IsNullOrWhiteSpace(displayName) ? displayName : "TikTok User"
         };
     }
 
@@ -3037,13 +3092,16 @@ public class AuthController : ControllerBase
         await using var stream = await response.Content.ReadAsStreamAsync();
         using var tokenJson = await JsonDocument.ParseAsync(stream);
         var root = tokenJson.RootElement;
+        var payloadRoot = root.TryGetProperty("data", out var nestedDataNode) && nestedDataNode.ValueKind == JsonValueKind.Object
+            ? nestedDataNode
+            : root;
 
         return new TokenExchangePayload
         {
-            AccessToken = root.TryGetProperty("access_token", out var accessTokenNode) ? accessTokenNode.GetString() ?? string.Empty : string.Empty,
-            RefreshToken = root.TryGetProperty("refresh_token", out var refreshTokenNode) ? refreshTokenNode.GetString() ?? string.Empty : string.Empty,
-            IdToken = root.TryGetProperty("id_token", out var idTokenNode) ? idTokenNode.GetString() ?? string.Empty : string.Empty,
-            TokenExpiresAt = root.TryGetProperty("expires_in", out var expiresInNode)
+            AccessToken = payloadRoot.TryGetProperty("access_token", out var accessTokenNode) ? accessTokenNode.GetString() ?? string.Empty : string.Empty,
+            RefreshToken = payloadRoot.TryGetProperty("refresh_token", out var refreshTokenNode) ? refreshTokenNode.GetString() ?? string.Empty : string.Empty,
+            IdToken = payloadRoot.TryGetProperty("id_token", out var idTokenNode) ? idTokenNode.GetString() ?? string.Empty : string.Empty,
+            TokenExpiresAt = payloadRoot.TryGetProperty("expires_in", out var expiresInNode)
                 && expiresInNode.TryGetInt32(out var expiresInSeconds)
                 && expiresInSeconds > 0
                     ? DateTimeOffset.UtcNow.AddSeconds(expiresInSeconds)

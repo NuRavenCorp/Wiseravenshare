@@ -2587,7 +2587,7 @@ builder.Services.AddCors(options =>
         else
         {
             // Fail-safe: block cross-origin in production if CLIENT_ORIGIN is missing
-            policy.WithOrigins("https://wise-ravens.com", "https://www.wise-ravens.com")
+            policy.WithOrigins("https://wiseravenshare.com", "https://www.wiseravenshare.com")
                   .AllowCredentials();
         }
     });
