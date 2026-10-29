@@ -1795,6 +1795,57 @@ CREATE INDEX IF NOT EXISTS ""IX_UserBlocks_BlockedId""
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
+static async Task EnsureKaraokeScoringTablesAsync(string connectionString, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+    const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.performances (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL,
+    song_id UUID NOT NULL,
+    status INTEGER NOT NULL DEFAULT 0,
+    started_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ NULL,
+    lyric_score NUMERIC(5,2) NULL,
+    matches INTEGER NULL,
+    substitutions INTEGER NULL,
+    missing INTEGER NULL,
+    extras INTEGER NULL,
+    alignment_blob_name TEXT NULL,
+    recording_blob_name TEXT NULL,
+    recording_upload_expires_at TIMESTAMPTZ NULL,
+    failure_reason TEXT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_data.performance_turns (
+    id BIGSERIAL PRIMARY KEY,
+    performance_id UUID NOT NULL REFERENCES app_data.performances(id) ON DELETE CASCADE,
+    turn_order INTEGER NOT NULL,
+    transcript TEXT NOT NULL,
+    start_milliseconds BIGINT NULL,
+    end_milliseconds BIGINT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_performance_turns_unique_order
+    ON app_data.performance_turns (performance_id, turn_order);
+CREATE INDEX IF NOT EXISTS idx_performances_user_started_at
+    ON app_data.performances (user_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_performances_song_score
+    ON app_data.performances (song_id, lyric_score);
+
+ALTER TABLE IF EXISTS app_data.performances
+    ADD COLUMN IF NOT EXISTS recording_upload_expires_at TIMESTAMPTZ NULL;
+";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
 static async Task EnsureZernioWebhookTablesAsync(string connectionString, CancellationToken cancellationToken = default)
 {
     if (string.IsNullOrWhiteSpace(connectionString)) return;
@@ -2065,6 +2116,29 @@ builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assist
     WiseRavenShare.Server.Application.Services.Assistant.TextToSpeechService>();
 builder.Services.AddHttpClient<WiseRavenShare.Server.Application.Services.Assistant.IWebGroundingService,
     WiseRavenShare.Server.Application.Services.Assistant.WebGroundingService>();
+builder.Services.AddHttpClient("assemblyai", client =>
+{
+    client.BaseAddress = new Uri("https://streaming.assemblyai.com");
+    var apiKey = builder.Configuration["ASSEMBLYAI_API_KEY"]
+        ?? builder.Configuration["AssemblyAI:ApiKey"]
+        ?? throw new InvalidOperationException("ASSEMBLYAI_API_KEY is missing");
+    client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", apiKey);
+});
+builder.Services.AddHttpClient<Wiseravenshare.Server.Services.LyricScoringClient>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["LyricScorer:BaseUrl"] ?? "http://127.0.0.1:8100/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+builder.Services.AddSingleton(_ =>
+{
+    var blobConnectionString =
+        builder.Configuration["ConnectionStrings:BlobStorage"] ??
+        builder.Configuration["ConnectionStrings__BlobStorage"] ??
+        throw new InvalidOperationException("ConnectionStrings:BlobStorage is not configured.");
+    return new Azure.Storage.Blobs.BlobServiceClient(blobConnectionString);
+});
+builder.Services.AddScoped<Wiseravenshare.Server.Services.KaraokePersistenceService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.PerformanceCompletionService>();
 
 // ── ML Microservice (behavioral recommendations) ─────────────────────────────
 builder.Services.AddHttpClient<Wiseravenshare.Server.Services.MlClient>(c =>
@@ -2822,6 +2896,15 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "Zernio webhook tables bootstrap failed during startup.");
+    }
+
+    try
+    {
+        await EnsureKaraokeScoringTablesAsync(defaultConnectionString);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Karaoke scoring tables bootstrap failed during startup.");
     }
 
     try

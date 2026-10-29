@@ -105,6 +105,8 @@ public class AppDbContext : DbContext
     // Karaoke
     public DbSet<KaraokeTrack> KaraokeTracks => Set<KaraokeTrack>();
     public DbSet<KaraokeTrackPlay> KaraokeTrackPlays => Set<KaraokeTrackPlay>();
+    public DbSet<Performance> Performances => Set<Performance>();
+    public DbSet<PerformanceTurn> PerformanceTurns => Set<PerformanceTurn>();
 
     // Personalization
     public DbSet<UserLearningEvent> UserLearningEvents => Set<UserLearningEvent>();
@@ -255,6 +257,31 @@ public class AppDbContext : DbContext
             entity.HasIndex(r => r.AbsoluteExpiration);
             entity.Property(r => r.JsonData).HasColumnType("text");
             entity.Property(r => r.CacheKey).HasMaxLength(512);
+        });
+
+        modelBuilder.Entity<Performance>(entity =>
+        {
+            entity.ToTable("performances");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.LyricScore).HasPrecision(5, 2);
+            entity.Property(x => x.FailureReason).HasMaxLength(2_000);
+            entity.Property(x => x.AlignmentBlobName).HasMaxLength(512);
+            entity.Property(x => x.RecordingBlobName).HasMaxLength(512);
+            entity.HasIndex(x => new { x.UserId, x.StartedAt });
+            entity.HasIndex(x => new { x.SongId, x.LyricScore });
+        });
+
+        modelBuilder.Entity<PerformanceTurn>(entity =>
+        {
+            entity.ToTable("performance_turns");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Transcript).HasMaxLength(8_000);
+            entity.HasIndex(x => new { x.PerformanceId, x.TurnOrder }).IsUnique();
+
+            entity.HasOne(x => x.Performance)
+                .WithMany(x => x.Turns)
+                .HasForeignKey(x => x.PerformanceId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<UserActivity>(entity =>
