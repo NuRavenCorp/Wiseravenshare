@@ -7,6 +7,7 @@ Lyrics:   LRCLIB (free) → Genius (fallback)    →  source-of-truth text
 """
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -16,13 +17,16 @@ import shutil
 import tempfile
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import aiofiles
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+import websockets
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 # ---------------------------------------------------------------------------
@@ -33,6 +37,15 @@ MODELS_CACHE_DIR = Path(os.getenv("MODELS_CACHE_DIR", "/app/models_cache"))
 OUTPUT_BASE_DIR = Path(os.getenv("OUTPUT_BASE_DIR", "/tmp/karaoke_jobs"))
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 MAX_JOB_AGE_HOURS = int(os.getenv("MAX_JOB_AGE_HOURS", "24"))
+ASSEMBLYAI_API_KEY = (os.getenv("ASSEMBLYAI_API_KEY") or "").strip()
+ASSEMBLYAI_REALTIME_WS = (os.getenv("ASSEMBLYAI_REALTIME_WS") or "wss://streaming.assemblyai.com/v3/ws").strip()
+ASSEMBLYAI_SAMPLE_RATE = int(os.getenv("ASSEMBLYAI_SAMPLE_RATE", "16000"))
+MAX_CONCURRENT_CAPTION_STREAMS = max(1, int(os.getenv("MAX_CONCURRENT_CAPTION_STREAMS", "100")))
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in (os.getenv("CORS_ALLOWED_ORIGINS") or "").split(",")
+    if origin.strip()
+]
 
 # Separation config
 SEPARATOR_MODEL = os.getenv(
@@ -76,6 +89,17 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="WiseRavenShare Karaoke Engine", version="1.0.0", lifespan=lifespan)
+if CORS_ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+_active_caption_streams = 0
+_active_caption_lock = asyncio.Lock()
 
 @app.middleware("http")
 async def require_internal_token(request: Request, call_next):
@@ -95,7 +119,178 @@ async def require_internal_token(request: Request, call_next):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "karaoke"}
+    return {
+        "status": "ok",
+        "service": "karaoke",
+        "assemblyai_realtime_enabled": bool(ASSEMBLYAI_API_KEY),
+    }
+
+
+def _parse_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_realtime_uri(websocket: WebSocket) -> tuple[str, dict[str, str]]:
+    sample_rate_raw = websocket.query_params.get("sample_rate", str(ASSEMBLYAI_SAMPLE_RATE))
+    token = (websocket.query_params.get("token") or "").strip()
+    language_code = (websocket.query_params.get("language_code") or "").strip()
+    format_turns = _parse_bool(websocket.query_params.get("format_turns"), default=True)
+
+    try:
+        sample_rate = max(8000, min(48000, int(sample_rate_raw)))
+    except (TypeError, ValueError):
+        sample_rate = ASSEMBLYAI_SAMPLE_RATE
+
+    query: dict[str, str] = {
+        "sample_rate": str(sample_rate),
+        "format_turns": "true" if format_turns else "false",
+    }
+    if language_code:
+        query["language_code"] = language_code
+    if token:
+        query["token"] = token
+
+    headers: dict[str, str] = {}
+    if not token:
+        if not ASSEMBLYAI_API_KEY:
+            raise RuntimeError("ASSEMBLYAI_API_KEY is missing and no websocket token was supplied.")
+        headers["Authorization"] = ASSEMBLYAI_API_KEY
+
+    return f"{ASSEMBLYAI_REALTIME_WS}?{urlencode(query)}", headers
+
+
+async def _proxy_realtime_caption_stream(websocket: WebSocket) -> None:
+    global _active_caption_streams
+
+    if INTERNAL_TOKEN:
+        supplied = websocket.headers.get("x-internal-token", "")
+        if not supplied or not hmac.compare_digest(supplied, INTERNAL_TOKEN):
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
+
+    async with _active_caption_lock:
+        if _active_caption_streams >= MAX_CONCURRENT_CAPTION_STREAMS:
+            await websocket.close(code=1013, reason="Stream capacity reached")
+            return
+        _active_caption_streams += 1
+
+    await websocket.accept()
+    log.info("Live caption websocket accepted from %s", websocket.client)
+
+    try:
+        realtime_uri, headers = _build_realtime_uri(websocket)
+    except Exception as err:  # noqa: BLE001
+        await websocket.send_json({"type": "error", "detail": str(err)})
+        await websocket.close(code=1008, reason="Invalid realtime configuration")
+        return
+
+    async def send_upstream_json(upstream: Any, payload: dict) -> None:
+        backoffs = (0.0, 0.25, 0.75)
+        last_error: Exception | None = None
+        for idx, delay_seconds in enumerate(backoffs):
+            if delay_seconds > 0:
+                await asyncio.sleep(delay_seconds)
+            try:
+                await upstream.send(json.dumps(payload))
+                return
+            except Exception as err:  # noqa: BLE001
+                last_error = err
+                if idx == len(backoffs) - 1:
+                    break
+        if last_error is not None:
+            raise last_error
+
+    try:
+        async with websockets.connect(
+            realtime_uri,
+            extra_headers=headers or None,
+            ping_interval=20,
+            ping_timeout=20,
+            max_size=4 * 1024 * 1024,
+        ) as upstream:
+            async def browser_to_assembly() -> None:
+                while True:
+                    try:
+                        message = await websocket.receive()
+                    except WebSocketDisconnect:
+                        with suppress(Exception):
+                            await send_upstream_json(upstream, {"terminate_session": True})
+                        break
+
+                    if message.get("type") == "websocket.disconnect":
+                        with suppress(Exception):
+                            await send_upstream_json(upstream, {"terminate_session": True})
+                        break
+
+                    chunk = message.get("bytes")
+                    if chunk is not None:
+                        payload = {"audio_data": base64.b64encode(chunk).decode("ascii")}
+                        await send_upstream_json(upstream, payload)
+                        continue
+
+                    text = message.get("text")
+                    if text is None:
+                        continue
+
+                    try:
+                        control = json.loads(text)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if not isinstance(control, dict):
+                        continue
+
+                    if control.get("terminate_session") is True or str(control.get("command", "")).lower() == "terminate":
+                        await send_upstream_json(upstream, {"terminate_session": True})
+                        continue
+
+                    if isinstance(control.get("audio_data"), str):
+                        await send_upstream_json(upstream, {"audio_data": control["audio_data"]})
+
+            async def assembly_to_browser() -> None:
+                async for upstream_message in upstream:
+                    if isinstance(upstream_message, bytes):
+                        await websocket.send_bytes(upstream_message)
+                    else:
+                        await websocket.send_text(upstream_message)
+
+            browser_task = asyncio.create_task(browser_to_assembly())
+            assembly_task = asyncio.create_task(assembly_to_browser())
+
+            done, pending = await asyncio.wait(
+                {browser_task, assembly_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            for task in pending:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            for task in done:
+                with suppress(asyncio.CancelledError):
+                    await task
+    except Exception as err:  # noqa: BLE001
+        log.exception("Live caption websocket proxy failed: %s", err)
+        with suppress(Exception):
+            await websocket.send_json({"type": "error", "detail": str(err)})
+    finally:
+        async with _active_caption_lock:
+            _active_caption_streams = max(0, _active_caption_streams - 1)
+        with suppress(Exception):
+            await websocket.close()
+        log.info("Live caption websocket closed for %s", websocket.client)
+
+
+@app.websocket("/ws/stt")
+async def stt_stream_socket(websocket: WebSocket):
+    await _proxy_realtime_caption_stream(websocket)
+
+
+@app.websocket("/ws/live-caption")
+async def live_caption_socket(websocket: WebSocket):
+    await _proxy_realtime_caption_stream(websocket)
 
 
 # ---------------------------------------------------------------------------
