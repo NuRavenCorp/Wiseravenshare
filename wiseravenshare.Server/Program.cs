@@ -2129,12 +2129,17 @@ builder.Services.AddHttpClient<Wiseravenshare.Server.Services.LyricScoringClient
     client.BaseAddress = new Uri(builder.Configuration["LyricScorer:BaseUrl"] ?? "http://127.0.0.1:8100/");
     client.Timeout = TimeSpan.FromSeconds(15);
 });
-builder.Services.AddSingleton(_ =>
+builder.Services.AddSingleton<Azure.Storage.Blobs.BlobServiceClient?>(sp =>
 {
     var blobConnectionString =
         builder.Configuration["ConnectionStrings:BlobStorage"] ??
-        builder.Configuration["ConnectionStrings__BlobStorage"] ??
-        throw new InvalidOperationException("ConnectionStrings:BlobStorage is not configured.");
+        builder.Configuration["ConnectionStrings__BlobStorage"];
+    if (string.IsNullOrWhiteSpace(blobConnectionString))
+    {
+        sp.GetRequiredService<ILogger<Program>>()
+            .LogWarning("ConnectionStrings:BlobStorage is not configured. Karaoke recording upload and blob features will be unavailable.");
+        return null;
+    }
     return new Azure.Storage.Blobs.BlobServiceClient(blobConnectionString);
 });
 builder.Services.AddScoped<Wiseravenshare.Server.Services.KaraokePersistenceService>();
