@@ -387,33 +387,12 @@ public class PaymentsController : ControllerBase
             _ => "CreatorPro"
         };
 
-        var envToken = normalizedPlan.ToLowerInvariant() switch
-        {
-            "ip_basic" => "IP_BASIC",
-            "rights_basic" => "IP_BASIC",
-            "ip_standard" => "IP_STANDARD",
-            "rights_standard" => "IP_STANDARD",
-            "ip_pro" => "IP_PRO",
-            "rights_pro" => "IP_PRO",
-            "creator_pro" => "CREATOR_PRO",
-            "growth_suite" => "GROWTH_SUITE",
-            "studio_plus" => "STUDIO_PLUS",
-            "karaoke" => "KARAOKE_PRO",
-            "karaoke_pro" => "KARAOKE_PRO",
-            "podcast" => "PODCAST_PRO",
-            "podcast_pro" => "PODCAST_PRO",
-            _ => "CREATOR_PRO"
-        };
-
         var sectionKey = normalizedCycle == "annual"
             ? $"Stripe:Price{planKey}AnnualId"
             : $"Stripe:Price{planKey}MonthlyId";
 
-        var envKey = normalizedCycle == "annual"
-            ? $"STRIPE_PRICE_{envToken}_ANNUAL_ID"
-            : $"STRIPE_PRICE_{envToken}_MONTHLY_ID";
-
-        var resolved = ResolveConfig(sectionKey, envKey);
+        var envKeys = ResolvePriceEnvKeys(normalizedPlan, normalizedCycle);
+        var resolved = ResolveConfig(sectionKey, envKeys);
         if (!string.IsNullOrWhiteSpace(resolved))
         {
             return resolved;
@@ -447,6 +426,42 @@ public class PaymentsController : ControllerBase
     private static bool IsStripePriceId(string? value)
     {
         return !string.IsNullOrWhiteSpace(value) && value.Trim().StartsWith("price_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string[] ResolvePriceEnvKeys(string normalizedPlan, string normalizedCycle)
+    {
+        var isAnnual = string.Equals(normalizedCycle, "annual", StringComparison.OrdinalIgnoreCase);
+        return normalizedPlan.ToLowerInvariant() switch
+        {
+            // Keep compatibility with both historical and current env names.
+            "rights_basic" or "ip_basic" => isAnnual
+                ? ["STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_BASIC_ANNUAL_ID", "STRIPE_PRICE_IP_BASIC_ANNUAL_ID"]
+                : ["STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_BASIC_MONTHLY_ID", "STRIPE_PRICE_IP_BASIC_MONTHLY_ID"],
+            "rights_standard" or "ip_standard" => isAnnual
+                ? ["STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_STANDARD_ANNUAL_ID", "STRIPE_PRICE_IP_STANDARD_ANNUAL_ID"]
+                : ["STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_STANDARD_MONTHLY_ID", "STRIPE_PRICE_IP_STANDARD_MONTHLY_ID"],
+            "rights_pro" or "ip_pro" => isAnnual
+                ? ["STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_PRO_ANNUAL_ID", "STRIPE_PRICE_IP_PRO_ANNUAL_ID"]
+                : ["STRIPE_PRICE_MUSIC_STUDIO_RIGHTS_PRO_MONTHLY_ID", "STRIPE_PRICE_IP_PRO_MONTHLY_ID"],
+            "creator_pro" => isAnnual
+                ? ["STRIPE_PRICE_CREATOR_PRO_ANNUAL_ID", "STRIPE_PRICE_CREATORPRO_ANNUAL_ID"]
+                : ["STRIPE_PRICE_CREATOR_PRO_MONTHLY_ID", "STRIPE_PRICE_CREATORPRO_MONTHLY_ID"],
+            "growth_suite" => isAnnual
+                ? ["STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID", "STRIPE_PRICE_GROWTHSUITE_ANNUAL_ID"]
+                : ["STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID", "STRIPE_PRICE_GROWTHSUITE_MONTHLY_ID"],
+            "studio_plus" => isAnnual
+                ? ["STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID", "STRIPE_PRICE_STUDIOPLUS_ANNUAL_ID"]
+                : ["STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID", "STRIPE_PRICE_STUDIOPLUS_MONTHLY_ID"],
+            "karaoke" or "karaoke_pro" => isAnnual
+                ? ["STRIPE_PRICE_KARAOKE_PRO_ANNUAL_ID"]
+                : ["STRIPE_PRICE_KARAOKE_PRO_MONTHLY_ID"],
+            "podcast" or "podcast_pro" => isAnnual
+                ? ["STRIPE_PRICE_PODCAST_PRO_ANNUAL_ID"]
+                : ["STRIPE_PRICE_PODCAST_PRO_MONTHLY_ID"],
+            _ => isAnnual
+                ? ["STRIPE_PRICE_CREATOR_PRO_ANNUAL_ID", "STRIPE_PRICE_CREATORPRO_ANNUAL_ID"]
+                : ["STRIPE_PRICE_CREATOR_PRO_MONTHLY_ID", "STRIPE_PRICE_CREATORPRO_MONTHLY_ID"]
+        };
     }
 
     private string ResolveConfig(string sectionKey, params string[] envKeys)

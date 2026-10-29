@@ -21,6 +21,20 @@ export default function PodcastForm({ onCreate }) {
         subject_matter: subjectMatter,
         is_premium: true,
         price_monthly: 499,
+        ai_pricing: {
+          assemblyai_setup: {
+            automatic_transcription: true,
+            speaker_diarization: true,
+            auto_chapters: true,
+            content_insights: true,
+            voice_agent: false,
+            speaker_labels: true,
+            iab_categories: true,
+            sentiment_analysis: true,
+            provider: "assemblyai",
+            updated_at: new Date().toISOString(),
+          },
+        },
       });
       setTitle("");
       setEpisodeNumber("");

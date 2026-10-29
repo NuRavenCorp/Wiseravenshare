@@ -642,7 +642,6 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
                 }
               : null
           }
-          referenceLyrics={catalogTrack?.plainLyrics || ""}
         />
 
         {lyrics && (
