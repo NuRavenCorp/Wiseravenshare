@@ -772,6 +772,99 @@ export const apiClient = {
         body: JSON.stringify(payload || {}),
       });
     },
+    completePerformance(performanceId, payload) {
+      return requestJson(`/api/karaoke/speech/performances/${encodeURIComponent(performanceId)}/complete`, {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      });
+    },
+    startPerformance(performanceId, payload) {
+      return requestJson(`/api/karaoke/speech/performances/${encodeURIComponent(performanceId)}`, {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      });
+    },
+    getPerformances({ page = 1, pageSize = 20 } = {}) {
+      return requestJson(`/api/performances?page=${page}&pageSize=${pageSize}`, { method: "GET" });
+    },
+    getPerformance(id) {
+      return requestJson(`/api/performances/${encodeURIComponent(id)}`, { method: "GET" });
+    },
+    deletePerformance(id) {
+      return requestJson(`/api/performances/${encodeURIComponent(id)}`, { method: "DELETE" });
+    },
+    requestRecordingUploadTicket(performanceId, contentType = "audio/ogg;codecs=opus") {
+      return requestJson(`/api/performances/${encodeURIComponent(performanceId)}/recording-upload-ticket`, {
+        method: "POST",
+        body: JSON.stringify({ contentType }),
+      });
+    },
+    confirmRecording(performanceId) {
+      return requestJson(`/api/performances/${encodeURIComponent(performanceId)}/recording-confirm`, {
+        method: "POST",
+      });
+    },
+    uploadRecordingBlob(sasUrl, blob, { onProgress, signal } = {}) {
+      const NON_RETRYABLE = new Set([400, 401, 403, 404, 409, 422]);
+      const MAX_RETRIES = 3;
+
+      function attempt(retryIndex) {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("PUT", sasUrl);
+          xhr.setRequestHeader("x-ms-blob-type", "BlockBlob");
+          xhr.setRequestHeader("x-ms-version", "2020-08-04");
+          xhr.setRequestHeader("Content-Type", blob.type || "audio/ogg");
+
+          if (onProgress) {
+            xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) onProgress(e.loaded / e.total, retryIndex);
+            };
+          }
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve();
+            } else {
+              const err = new Error(`Upload failed: ${xhr.status}`);
+              err.status = xhr.status;
+              reject(err);
+            }
+          };
+          xhr.onerror = () => reject(new Error("Network error during upload"));
+          xhr.ontimeout = () => reject(new Error("Upload timed out"));
+
+          if (signal) {
+            signal.addEventListener("abort", () => {
+              xhr.abort();
+              reject(new DOMException("Upload aborted", "AbortError"));
+            }, { once: true });
+          }
+
+          xhr.send(blob);
+        });
+      }
+
+      async function run() {
+        let lastError;
+        for (let i = 0; i <= MAX_RETRIES; i++) {
+          try {
+            await attempt(i);
+            return;
+          } catch (err) {
+            lastError = err;
+            if (err.name === "AbortError") throw err;
+            if (NON_RETRYABLE.has(err.status)) throw err;
+            if (i < MAX_RETRIES) {
+              await new Promise((res) => setTimeout(res, Math.min(1000 * Math.pow(2, i), 8000)));
+            }
+          }
+        }
+        throw lastError;
+      }
+
+      return run();
+    },
   },
   radio: {
     getChannels() { return requestJson('/api/radio/channels', { method: 'GET' }); },

@@ -313,24 +313,32 @@ public sealed class KaraokeController : ControllerBase
             ? string.Empty
             : (genre ?? string.Empty).Trim();
 
-        var query = _db.KaraokeTracks
-            .AsNoTracking()
-            .Where(t => t.IsPublic && !t.IsDeleted);
+        var allTracks = new List<KaraokeCatalogTrackDto>();
+        try
+        {
+            var query = _db.KaraokeTracks
+                .AsNoTracking()
+                .Where(t => t.IsPublic && !t.IsDeleted);
 
-        if (!string.IsNullOrWhiteSpace(normalisedGenre))
-            query = query.Where(t => EF.Functions.ILike(t.Genre ?? "", $"%{normalisedGenre}%"));
+            if (!string.IsNullOrWhiteSpace(normalisedGenre))
+                query = query.Where(t => EF.Functions.ILike(t.Genre ?? "", $"%{normalisedGenre}%"));
 
-        if (!string.IsNullOrWhiteSpace(status) &&
-            Enum.TryParse<KaraokeTrackStatus>(status, ignoreCase: true, out var parsedStatus))
-            query = query.Where(t => t.Status == parsedStatus);
+            if (!string.IsNullOrWhiteSpace(status) &&
+                Enum.TryParse<KaraokeTrackStatus>(status, ignoreCase: true, out var parsedStatus))
+                query = query.Where(t => t.Status == parsedStatus);
 
-        var dbTracks = await query
-            .OrderBy(t => t.Genre)
-            .ThenBy(t => t.Artist)
-            .ThenBy(t => t.Title)
-            .ToListAsync(cancellationToken);
+            var dbTracks = await query
+                .OrderBy(t => t.Genre)
+                .ThenBy(t => t.Artist)
+                .ThenBy(t => t.Title)
+                .ToListAsync(cancellationToken);
 
-        var allTracks = dbTracks.Select(MapTrack).ToList();
+            allTracks.AddRange(dbTracks.Select(MapTrack));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Karaoke DB catalog query failed. Falling back to external catalog only.");
+        }
 
         if (includeExternal)
         {
@@ -366,13 +374,21 @@ public sealed class KaraokeController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> GetGenres(CancellationToken cancellationToken)
     {
-        var genres = await _db.KaraokeTracks
-            .AsNoTracking()
-            .Where(t => t.IsPublic && !t.IsDeleted && t.Genre != null)
-            .Select(t => t.Genre!)
-            .Distinct()
-            .OrderBy(g => g)
-            .ToListAsync(cancellationToken);
+        List<string> genres = [];
+        try
+        {
+            genres = await _db.KaraokeTracks
+                .AsNoTracking()
+                .Where(t => t.IsPublic && !t.IsDeleted && t.Genre != null)
+                .Select(t => t.Genre!)
+                .Distinct()
+                .OrderBy(g => g)
+                .ToListAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Karaoke DB genres query failed. Falling back to external genres.");
+        }
 
         // Normalise and de-dup (e.g. "Blues / R&B" and "Blues" → one entry)
         var normalised = genres
@@ -380,6 +396,18 @@ public sealed class KaraokeController : ControllerBase
             .Select(NormaliseGenre)
             .Where(g => g.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g)
+            .ToList();
+
+        var externalGenres = (await GetExternalCatalogTracksAsync(string.Empty, cancellationToken))
+            .Select(t => NormaliseGenre(t.Genre))
+            .Where(g => g.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g)
+            .ToList();
+
+        normalised = normalised
+            .Union(externalGenres, StringComparer.OrdinalIgnoreCase)
             .OrderBy(g => g)
             .ToList();
 

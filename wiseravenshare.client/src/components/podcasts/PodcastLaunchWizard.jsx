@@ -58,6 +58,34 @@ const STEPS = [
   { id: "video", label: "Video Upload", icon: Upload },
 ];
 
+const PODCAST_AI_FEATURES = [
+  {
+    key: "automatic_transcription",
+    label: "Automatic transcription",
+    description: "Convert episode audio into high-accuracy text.",
+  },
+  {
+    key: "speaker_diarization",
+    label: "Speaker diarization",
+    description: "Label host and guest speakers in transcript output.",
+  },
+  {
+    key: "auto_chapters",
+    label: "Auto chapters",
+    description: "Split long episodes into topic chapters automatically.",
+  },
+  {
+    key: "content_insights",
+    label: "Content insights & summarization",
+    description: "Generate categories, sentiment, summary, and action items.",
+  },
+  {
+    key: "voice_agent",
+    label: "Voice agent / interactive mode",
+    description: "Enable real-time conversational voice experiences.",
+  },
+];
+
 export default function PodcastLaunchWizard({ onComplete, onCancel }) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -69,6 +97,13 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
   const [episodeNumber, setEpisodeNumber] = useState("");
   const [subjectMatter, setSubjectMatter] = useState("");
   const [episodeScript, setEpisodeScript] = useState("");
+  const [podcastAiSetup, setPodcastAiSetup] = useState({
+    automatic_transcription: true,
+    speaker_diarization: true,
+    auto_chapters: true,
+    content_insights: true,
+    voice_agent: false,
+  });
 
   // Step 2: video
   const [videoUri, setVideoUri] = useState("");
@@ -82,6 +117,17 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
 
   const createdRef = useRef(null);
 
+  const buildAiPricingPayload = () => ({
+    assemblyai_setup: {
+      ...podcastAiSetup,
+      speaker_labels: Boolean(podcastAiSetup.speaker_diarization),
+      iab_categories: Boolean(podcastAiSetup.content_insights),
+      sentiment_analysis: Boolean(podcastAiSetup.content_insights),
+      provider: "assemblyai",
+      updated_at: new Date().toISOString(),
+    },
+  });
+
   const createPodcastIfNeeded = async () => {
     if (createdRef.current) return createdRef.current;
     const pod = await apiClient.entities.Podcast.create({
@@ -93,6 +139,7 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
       status: "planning",
       is_premium: true,
       price_monthly: 499,
+      ai_pricing: buildAiPricingPayload(),
     });
     createdRef.current = pod;
     return pod;
@@ -150,6 +197,9 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
     setError("");
     try {
       const pod = await createPodcastIfNeeded();
+      const updatePayload = {
+        ai_pricing: buildAiPricingPayload(),
+      };
 
       // Create team if team name provided
       if (teamName.trim()) {
@@ -162,9 +212,7 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
           focus: subjectMatter,
           purpose: purpose.trim(),
         });
-        await apiClient.entities.Podcast.update(pod.id, {
-          team_ids: [...(pod.team_ids || []), team.id],
-        });
+        updatePayload.team_ids = [...(pod.team_ids || []), team.id];
 
         // Invite each member
         for (const m of members) {
@@ -179,6 +227,7 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
         }
       }
 
+      await apiClient.entities.Podcast.update(pod.id, updatePayload);
       onComplete(pod);
     } catch (e) {
       setError(e?.response?.data?.error || e?.message || "Failed to create episode");
@@ -357,6 +406,34 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
               placeholder="Write script lines. Each non-empty line can be shown as a cue card while recording."
               className="min-h-[160px]"
             />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">Podcast AI setup</Label>
+            <div className="space-y-2">
+              {PODCAST_AI_FEATURES.map((feature) => (
+                <label
+                  key={feature.key}
+                  className="flex items-start gap-3 p-3 rounded-lg border border-border bg-card cursor-pointer hover:border-primary/30 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={Boolean(podcastAiSetup[feature.key])}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setPodcastAiSetup((prev) => ({
+                        ...prev,
+                        [feature.key]: checked,
+                      }));
+                    }}
+                    className="w-4 h-4 rounded mt-0.5"
+                  />
+                  <div className="space-y-0.5">
+                    <p className="text-sm text-foreground">{feature.label}</p>
+                    <p className="text-xs text-muted-foreground">{feature.description}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
           <div className="flex justify-between">
             <Button variant="ghost" onClick={() => setStep(0)}>

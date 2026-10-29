@@ -24,6 +24,7 @@ import JournalismDashboard from '@/pages/JournalismDashboard';
 import Ravensight from '@/pages/Ravensight';
 import Podcasts from '@/pages/Podcasts';
 import Performance from '@/pages/Performance';
+import KaraokePage from '@/pages/KaraokePage';
 import Library from '@/pages/Library';
 import Media from '@/pages/Media';
 import FMRadioPage from '@/pages/FMRadioPage';
@@ -85,6 +86,7 @@ const AuthenticatedApp = () => {
         <Route path="/ravensight" element={<Ravensight />} />
         <Route path="/podcasts" element={<Podcasts />} />
         <Route path="/performance" element={<Performance />} />
+        <Route path="/karaoke" element={<KaraokePage />} />
         <Route path="/library" element={<Library />} />
         <Route path="/python-features" element={<Navigate to="/" replace />} />
         <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
