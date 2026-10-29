@@ -544,6 +544,23 @@ export const apiClient = {
         body: JSON.stringify({ token: resetToken, newPassword }),
       });
     },
+    changePassword({ currentPassword, newPassword }) {
+      return requestJson("/api/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+    },
+  },
+  users: {
+    getById(id) {
+      return requestJson(`/api/users/${encodeURIComponent(id)}`, { method: "GET" });
+    },
+    updateProfile(id, payload) {
+      return requestJson(`/api/users/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    },
   },
   app: {
     async getPublicSettings() {

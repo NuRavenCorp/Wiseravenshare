@@ -10,10 +10,10 @@ public sealed class KaraokePersistenceService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _db;
-    private readonly BlobServiceClient _blobs;
+    private readonly BlobServiceClient? _blobs;
     private readonly string _containerName;
 
-    public KaraokePersistenceService(AppDbContext db, BlobServiceClient blobs, IConfiguration configuration)
+    public KaraokePersistenceService(AppDbContext db, BlobServiceClient? blobs, IConfiguration configuration)
     {
         _db = db;
         _blobs = blobs;
@@ -81,36 +81,41 @@ public sealed class KaraokePersistenceService
             .SingleOrDefaultAsync(x => x.Id == performanceId, cancellationToken)
             ?? throw new KeyNotFoundException("Performance not found.");
 
-        var container = _blobs.GetBlobContainerClient(_containerName);
-        await container.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: cancellationToken);
+        string? blobName = null;
+        if (_blobs is not null)
+        {
+            var container = _blobs.GetBlobContainerClient(_containerName);
+            await container.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: cancellationToken);
 
-        var blobName = $"performances/{performanceId:N}/alignment.json";
-        var blob = container.GetBlobClient(blobName);
-        var payload = JsonSerializer.SerializeToUtf8Bytes(result, JsonOptions);
+            blobName = $"performances/{performanceId:N}/alignment.json";
+            var blob = container.GetBlobClient(blobName);
+            var payload = JsonSerializer.SerializeToUtf8Bytes(result, JsonOptions);
 
-        await using var stream = new MemoryStream(payload);
-        await blob.UploadAsync(
-            stream,
-            new BlobUploadOptions
-            {
-                HttpHeaders = new BlobHttpHeaders
+            await using var stream = new MemoryStream(payload);
+            await blob.UploadAsync(
+                stream,
+                new BlobUploadOptions
                 {
-                    ContentType = "application/json; charset=utf-8"
+                    HttpHeaders = new BlobHttpHeaders
+                    {
+                        ContentType = "application/json; charset=utf-8"
+                    },
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["performanceId"] = performanceId.ToString("N"),
+                        ["schemaVersion"] = "1"
+                    }
                 },
-                Metadata = new Dictionary<string, string>
-                {
-                    ["performanceId"] = performanceId.ToString("N"),
-                    ["schemaVersion"] = "1"
-                }
-            },
-            cancellationToken);
+                cancellationToken);
+        }
 
         performance.LyricScore = Convert.ToDecimal(result.Score);
         performance.Matches = result.Matches;
         performance.Substitutions = result.Substitutions;
         performance.Missing = result.Missing;
         performance.Extras = result.Extras;
-        performance.AlignmentBlobName = blobName;
+        if (blobName is not null)
+            performance.AlignmentBlobName = blobName;
         performance.CompletedAt = DateTimeOffset.UtcNow;
         performance.Status = Entities.Karaoke.PerformanceStatus.Completed;
         performance.FailureReason = null;
