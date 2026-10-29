@@ -17,13 +17,12 @@ function readAccessToken() {
 async function transcribeFile(file) {
   const token = readAccessToken();
   const endpoints = [
-    // Primary: vocal isolation + Whisper word timestamps (best quality for music)
-    "/api/karaoke/speech/transcribe/words",
-    // Secondary: generic karaoke transcribe
-    "/api/karaoke/speech/transcribe",
-    // Legacy compat fallbacks.
+    // Legacy compat endpoints are the most widely deployed.
     "/api/functions/transcribe-local-file",
     "/api/functions/words-karaoke",
+    // Dedicated karaoke endpoints (newer deployments).
+    "/api/karaoke/speech/transcribe",
+    "/api/karaoke/speech/transcribe/words",
     // Assistant endpoint requires auth and feature gate; keep as last resort.
     ...(token ? ["/api/assistant/audio/transcribe"] : []),
   ];

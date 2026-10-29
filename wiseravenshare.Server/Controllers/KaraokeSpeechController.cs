@@ -274,12 +274,24 @@ public sealed class KaraokeSpeechController : ControllerBase
         _logger.LogInformation("Karaoke STT WebSocket accepted.");
 
         var speechServiceBase = _configuration["KaraokeSpeechService:BaseUrl"] ?? "http://localhost:8003";
-        var wsUri = new Uri(speechServiceBase
-            .Replace("http://", "ws://")
-            .Replace("https://", "wss://")
-            + "/ws/stt");
+        var incomingQuery = HttpContext.Request.QueryString.HasValue
+            ? HttpContext.Request.QueryString.Value
+            : string.Empty;
+        var wsUri = new Uri(
+            speechServiceBase
+                .Replace("http://", "ws://")
+                .Replace("https://", "wss://")
+                .TrimEnd('/')
+            + "/ws/stt"
+            + incomingQuery);
 
         using var pythonSocket = new ClientWebSocket();
+        var internalToken = _configuration["KaraokeService:InternalToken"]
+            ?? _configuration["KaraokeService__InternalToken"];
+        if (!string.IsNullOrWhiteSpace(internalToken))
+        {
+            pythonSocket.Options.SetRequestHeader("X-Internal-Token", internalToken);
+        }
 
         try
         {
