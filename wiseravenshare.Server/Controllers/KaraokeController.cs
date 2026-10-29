@@ -1,8 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Wiseravenshare.Server.Entities.Karaoke;
+using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Shared;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -23,16 +27,22 @@ public sealed class KaraokeController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<KaraokeController> _logger;
+    private readonly AppDbContext _db;
+    private readonly IBlobStorageService _blob;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public KaraokeController(
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        ILogger<KaraokeController> logger)
+        ILogger<KaraokeController> logger,
+        AppDbContext db,
+        IBlobStorageService blob)
     {
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
+        _db = db;
+        _blob = blob;
     }
 
     [HttpGet("health")]
@@ -273,6 +283,189 @@ public sealed class KaraokeController : ControllerBase
             _logger.LogWarning(ex, "Karaoke purchase proxy failed.");
             return StatusCode(503, new { message = "Karaoke purchase service is unavailable." });
         }
+    }
+
+    // ── DB Catalog endpoints ──────────────────────────────────────────────
+
+    /// <summary>
+    /// GET /api/karaoke/db-catalog
+    /// Returns all public KaraokeTracks from the DB, with resolved CDN URLs,
+    /// grouped by genre. Status filter defaults to Ready+Pending so both
+    /// processed tracks and those awaiting the python engine are visible.
+    /// </summary>
+    [HttpGet("db-catalog")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetDbCatalog(
+        [FromQuery] string? genre = null,
+        [FromQuery] string? status = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 60,
+        CancellationToken cancellationToken = default)
+    {
+        pageSize = Math.Clamp(pageSize, 1, 200);
+        page     = Math.Max(1, page);
+
+        var query = _db.KaraokeTracks
+            .AsNoTracking()
+            .Where(t => t.IsPublic && !t.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(genre))
+            query = query.Where(t => EF.Functions.ILike(t.Genre ?? "", $"%{genre}%"));
+
+        if (!string.IsNullOrWhiteSpace(status) &&
+            Enum.TryParse<KaraokeTrackStatus>(status, ignoreCase: true, out var parsedStatus))
+            query = query.Where(t => t.Status == parsedStatus);
+
+        var total = await query.CountAsync(cancellationToken);
+        var tracks = await query
+            .OrderBy(t => t.Genre)
+            .ThenBy(t => t.Artist)
+            .ThenBy(t => t.Title)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var items = tracks.Select(t => MapTrack(t)).ToList();
+
+        // Group by genre for the UI — grouping on the raw entity avoids
+        // the anonymous-type reflection issue with LINQ GroupBy.
+        var grouped = tracks
+            .GroupBy(t => NormaliseGenre(t.Genre))
+            .OrderBy(g => g.Key)
+            .Select(g => new { genre = g.Key, tracks = g.Select(MapTrack).ToList() })
+            .ToList();
+
+        return Ok(new { total, page, pageSize, items, grouped });
+    }
+
+    /// <summary>
+    /// GET /api/karaoke/db-catalog/genres
+    /// Distinct genre list for the genre filter chips in the UI.
+    /// </summary>
+    [HttpGet("db-catalog/genres")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetGenres(CancellationToken cancellationToken)
+    {
+        var genres = await _db.KaraokeTracks
+            .AsNoTracking()
+            .Where(t => t.IsPublic && !t.IsDeleted && t.Genre != null)
+            .Select(t => t.Genre!)
+            .Distinct()
+            .OrderBy(g => g)
+            .ToListAsync(cancellationToken);
+
+        // Normalise and de-dup (e.g. "Blues / R&B" and "Blues" → one entry)
+        var normalised = genres
+            .SelectMany(g => g.Split(["/", "&", ",", " | "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(NormaliseGenre)
+            .Where(g => g.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g)
+            .ToList();
+
+        return Ok(new { genres = normalised });
+    }
+
+    /// <summary>
+    /// POST /api/karaoke/db-catalog/{id}/play
+    /// Increments the play counter for a track and records the user interaction.
+    /// </summary>
+    [HttpPost("db-catalog/{id:guid}/play")]
+    [AllowAnonymous]
+    public async Task<IActionResult> RecordPlay(Guid id, CancellationToken cancellationToken)
+    {
+        var track = await _db.KaraokeTracks.FindAsync([id], cancellationToken);
+        if (track is null || !track.IsPublic)
+            return NotFound();
+
+        track.PlayCount++;
+
+        var userId = User.GetUserId();
+        if (userId != Guid.Empty)
+        {
+            _db.KaraokeTrackPlays.Add(new KaraokeTrackPlay
+            {
+                TrackId   = id,
+                UserId    = userId,
+                PlayedAt  = DateTime.UtcNow,
+            });
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return Ok(new { playCount = track.PlayCount });
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────
+
+    private object MapTrack(KaraokeTrack t)
+    {
+        // Resolve CDN URL from blob key when a cached URL isn't already stored.
+        string? ResolveUrl(string? cached, string? blobKey)
+        {
+            if (!string.IsNullOrWhiteSpace(cached)) return cached;
+            if (string.IsNullOrWhiteSpace(blobKey)) return null;
+            return _blob.IsConfigured ? _blob.ResolvePublicUrl(blobKey) : null;
+        }
+
+        return new
+        {
+            id               = t.Id,
+            title            = t.Title,
+            artist           = t.Artist,
+            album            = t.Album,
+            genre            = t.Genre,
+            language         = t.Language,
+            year             = t.Year,
+            license          = t.License,
+            licenseUrl       = t.LicenseUrl,
+            attributionText  = t.AttributionText,
+            sourceUrl        = t.SourceUrl,
+            status           = t.Status.ToString(),
+            hasInstrumental  = t.HasInstrumental,
+            hasLrc           = t.HasLrc,
+            durationSeconds  = t.DurationSeconds,
+            playCount        = t.PlayCount,
+            rating           = t.Rating,
+            // Resolved playback URLs
+            instrumentalUrl  = ResolveUrl(t.InstrumentalUrl, t.InstrumentalBlobKey),
+            lrcUrl           = ResolveUrl(t.LrcUrl,          t.LrcBlobKey),
+            coverImageUrl    = ResolveUrl(t.CoverImageUrl,   t.CoverImageBlobKey),
+            // Inline lyrics for immediate display
+            lrcContent       = t.LrcContent,
+            plainLyrics      = t.PlainLyrics,
+        };
+    }
+
+    private static string NormaliseGenre(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "Other";
+        var trimmed = raw.Trim();
+        // Map common compound genres to a canonical label
+        if (trimmed.Contains("R&B", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("Soul", StringComparison.OrdinalIgnoreCase))
+            return "R&B / Soul";
+        if (trimmed.Contains("Soft Rock", StringComparison.OrdinalIgnoreCase))
+            return "Soft Rock";
+        if (trimmed.Contains("Blues", StringComparison.OrdinalIgnoreCase))
+            return "Blues";
+        if (trimmed.Contains("Classical", StringComparison.OrdinalIgnoreCase))
+            return "Classical";
+        if (trimmed.Contains("Jazz", StringComparison.OrdinalIgnoreCase))
+            return "Jazz";
+        if (trimmed.Contains("Folk", StringComparison.OrdinalIgnoreCase))
+            return "Folk";
+        if (trimmed.Contains("Pop", StringComparison.OrdinalIgnoreCase))
+            return "Pop";
+        if (trimmed.Contains("Rock", StringComparison.OrdinalIgnoreCase))
+            return "Rock";
+        if (trimmed.Contains("Hip Hop", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("Funk", StringComparison.OrdinalIgnoreCase))
+            return "Hip Hop / Funk";
+        if (trimmed.Contains("Electronic", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("EDM", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("Lo-Fi", StringComparison.OrdinalIgnoreCase))
+            return "Electronic";
+        return trimmed;
     }
 
     private string ResolveUserId()
