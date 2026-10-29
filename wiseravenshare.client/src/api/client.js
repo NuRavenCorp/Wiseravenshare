@@ -746,6 +746,20 @@ export const apiClient = {
       return requestJson(`/api/ravensight/media/photos/${encodeURIComponent(photoId)}`, { method: "DELETE" });
     },
   },
+  karaoke: {
+    getCatalog({ genre, status, page = 1, pageSize = 60 } = {}) {
+      const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (genre)  q.set("genre",  genre);
+      if (status) q.set("status", status);
+      return requestJson(`/api/karaoke/db-catalog?${q.toString()}`, { method: "GET" });
+    },
+    getGenres() {
+      return requestJson("/api/karaoke/db-catalog/genres", { method: "GET" });
+    },
+    recordPlay(trackId) {
+      return requestJson(`/api/karaoke/db-catalog/${encodeURIComponent(trackId)}/play`, { method: "POST" });
+    },
+  },
   radio: {
     getChannels() { return requestJson('/api/radio/channels', { method: 'GET' }); },
     getChannel(id) { return requestJson(`/api/radio/channels/${encodeURIComponent(id)}`, { method: 'GET' }); },

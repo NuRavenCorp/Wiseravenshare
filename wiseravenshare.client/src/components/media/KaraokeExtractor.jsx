@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { apiClient } from "@/api/client";
 import { getPlayableUrl } from "@/lib/mediaUtils";
-import { Loader2, Mic, Wand2, Upload, FileAudio2 } from "lucide-react";
+import { Loader2, Mic, Wand2, Upload, FileAudio2, Music2, ChevronDown, ChevronRight, Play, BookOpen, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import KaraokePaywall from "@/components/media/KaraokePaywall";
@@ -143,6 +143,15 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
   const [localFile, setLocalFile] = useState(null);
   const [uploading, setUploading] = useState(false);
 
+  // ── Catalog state ─────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState("catalog"); // "catalog" | "library" | "local"
+  const [catalog, setCatalog] = useState([]);            // grouped array from API
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogGenres, setCatalogGenres] = useState([]);
+  const [activeGenre, setActiveGenre] = useState("All");
+  const [expandedGenres, setExpandedGenres] = useState({});
+  const [catalogTrack, setCatalogTrack] = useState(null); // selected catalog track
+
   const loadSources = useCallback(async () => {
     try {
       const [music, videos] = await Promise.all([
@@ -173,6 +182,31 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
   useEffect(() => {
     loadSources();
   }, [loadSources]);
+
+  // Load catalog from DB
+  const loadCatalog = useCallback(async () => {
+    setCatalogLoading(true);
+    try {
+      const [catRes, genreRes] = await Promise.all([
+        apiClient.karaoke.getCatalog({ pageSize: 200 }),
+        apiClient.karaoke.getGenres(),
+      ]);
+      setCatalog(catRes?.grouped || []);
+      setCatalogGenres(["All", ...(genreRes?.genres || [])]);
+    } catch {
+      // catalog unavailable — graceful degradation
+    } finally {
+      setCatalogLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadCatalog(); }, [loadCatalog]);
+
+  // Filter catalog by genre
+  const filteredCatalog = useMemo(() => {
+    if (activeGenre === "All") return catalog;
+    return catalog.filter((g) => g.genre.toLowerCase().includes(activeGenre.toLowerCase()));
+  }, [catalog, activeGenre]);
 
   const selectedSource = useMemo(
     () => sources.find((item) => item.id === selectedId) || null,
@@ -243,7 +277,53 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
     }
   };
 
-  if (loading) {
+  // Extract words from a catalog track via its source URL
+  const handleExtractCatalogTrack = async (track) => {
+    setCatalogTrack(track);
+    setExtracting(true);
+    setError("");
+    setLyrics("");
+    setLrc("");
+    setWordCount(null);
+    setVocalsIsolated(false);
+
+    // Record a play
+    apiClient.karaoke.recordPlay(track.id).catch(() => {});
+
+    // If the track already has LRC content or plain lyrics — show immediately
+    if (track.lrcContent) {
+      setLrc(track.lrcContent);
+      setLyrics(track.lrcContent);
+      setExtracting(false);
+      return;
+    }
+    if (track.plainLyrics) {
+      setLyrics(track.plainLyrics);
+      setExtracting(false);
+      return;
+    }
+
+    // If the track has a ready instrumental blob URL — run word extraction on it
+    const audioUrl = track.instrumentalUrl || track.sourceUrl;
+    if (!audioUrl) {
+      setError(`No audio URL available for "${track.title}". It may still be processing.`);
+      setExtracting(false);
+      return;
+    }
+    try {
+      const result = await transcribeUrl(audioUrl, `${track.artist} - ${track.title}`);
+      setLyrics(extractTranscriptText(result));
+      setLrc(result?.lrc || "");
+      setWordCount(result?.word_count ?? null);
+      setVocalsIsolated(result?.vocals_isolated ?? false);
+    } catch (err) {
+      setError(err?.message || "Word extraction failed.");
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  if (loading && catalogLoading) {
     return (
       <div className="flex justify-center py-8">
         <Loader2 className="w-5 h-5 animate-spin text-primary" />
@@ -254,6 +334,178 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
   return (
     <div className="space-y-4">
       <KaraokePaywall currentUser={currentUser} onAuthRequired={onAuthRequired}>
+
+        {/* ── Tab switcher ───────────────────────────────────────────── */}
+        <div className="flex gap-1 border-b border-border mb-2">
+          {[
+            { id: "catalog", label: "Song Catalog", icon: Music2 },
+            { id: "library", label: "My Library",   icon: Mic },
+            { id: "local",   label: "Local File",   icon: FileAudio2 },
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={`flex items-center gap-2 px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
+                activeTab === id
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Icon className="w-4 h-4" /> {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Tab: Song Catalog ──────────────────────────────────────── */}
+        {activeTab === "catalog" && (
+          <div className="space-y-4">
+            {/* Genre chips — clicking scrolls to that genre section */}
+            <div className="flex flex-wrap gap-2">
+              {catalogGenres.map((g) => (
+                <button
+                  key={g}
+                  onClick={() => {
+                    setActiveGenre(g);
+                    if (g === "All") {
+                      document.getElementById("karaoke-catalog-top")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    } else {
+                      document.getElementById(`genre-section-${g.replace(/[^a-z0-9]/gi, "-")}`)
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    activeGenre === g
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-secondary text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
+
+            {catalogLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              </div>
+            ) : filteredCatalog.length === 0 ? (
+              <div className="text-center py-10 text-sm text-muted-foreground">
+                No songs found for "{activeGenre}".
+              </div>
+            ) : (
+              <div id="karaoke-catalog-top" className="space-y-3">
+                {/* Always render all groups sorted by genre; selected genre stays highlighted */}
+                {(activeGenre === "All" ? catalog : filteredCatalog)
+                  .slice()
+                  .sort((a, b) => a.genre.localeCompare(b.genre))
+                  .map((group) => {
+                  const sectionId = `genre-section-${group.genre.replace(/[^a-z0-9]/gi, "-")}`;
+                  const isActive  = activeGenre === "All" || activeGenre === group.genre || group.genre.toLowerCase().includes(activeGenre.toLowerCase());
+                  const isOpen    = expandedGenres[group.genre] !== false; // default open
+                  return (
+                    <div
+                      key={group.genre}
+                      id={sectionId}
+                      className={`rounded-xl border overflow-hidden transition-colors ${
+                        isActive && activeGenre !== "All"
+                          ? "border-primary/40"
+                          : "border-border"
+                      }`}
+                    >
+                      {/* Genre header */}
+                      <button
+                        onClick={() => setExpandedGenres((e) => ({ ...e, [group.genre]: !isOpen }))}
+                        className={`w-full flex items-center justify-between px-4 py-2.5 transition-colors text-left ${
+                          isActive && activeGenre !== "All"
+                            ? "bg-primary/10 hover:bg-primary/15"
+                            : "bg-secondary/30 hover:bg-secondary/50"
+                        }`}
+                      >
+                        <span className="text-sm font-semibold text-foreground">{group.genre}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">{group.tracks.length} track{group.tracks.length !== 1 ? "s" : ""}</span>
+                          {isOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                        </div>
+                      </button>
+
+                      {/* Track list */}
+                      {isOpen && (
+                        <div className="divide-y divide-border">
+                          {group.tracks.map((track) => {
+                            const isSelected = catalogTrack?.id === track.id;
+                            const isReady    = track.status === "Ready";
+                            const hasMaterial = track.lrcContent || track.plainLyrics || track.instrumentalUrl || track.sourceUrl;
+                            return (
+                              <div
+                                key={track.id}
+                                className={`flex items-center gap-3 px-4 py-2.5 transition-colors ${
+                                  isSelected ? "bg-primary/10" : "hover:bg-secondary/20"
+                                }`}
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-foreground truncate">{track.title}</p>
+                                  <p className="text-xs text-muted-foreground truncate">
+                                    {track.artist}
+                                    {track.year ? ` · ${track.year}` : ""}
+                                    {" · "}
+                                    <span className={`capitalize ${isReady ? "text-green-500" : "text-muted-foreground"}`}>
+                                      {track.status?.toLowerCase()}
+                                    </span>
+                                    {track.license ? ` · ${track.license.replace("Lyrics via LRCLIB (fair-use display only)", "Lyrics only")}` : ""}
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {/* LRC / lyrics already available */}
+                                  {(track.lrcContent || track.plainLyrics) && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/20 text-accent">
+                                      <BookOpen className="inline w-2.5 h-2.5 mr-0.5" />Lyrics
+                                    </span>
+                                  )}
+                                  {/* Source link */}
+                                  {track.sourceUrl && (
+                                    <a
+                                      href={track.sourceUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-muted-foreground hover:text-foreground"
+                                      title="View source"
+                                    >
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </a>
+                                  )}
+                                  {/* Extract / Play button */}
+                                  <Button
+                                    size="sm"
+                                    variant={isSelected ? "default" : "outline"}
+                                    disabled={extracting || !hasMaterial}
+                                    onClick={() => handleExtractCatalogTrack(track)}
+                                    title={!hasMaterial ? "No audio available yet — pending processing" : "Extract words"}
+                                  >
+                                    {extracting && isSelected
+                                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      : <Play className="w-3.5 h-3.5" />
+                                    }
+                                    {extracting && isSelected ? "Extracting…" : "Extract"}
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Tab: My Library ────────────────────────────────────────── */}
+        {activeTab === "library" && (
+          <>
         <div className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div className="flex items-center gap-2">
             <Upload className="w-4 h-4 text-accent" />
@@ -300,7 +552,11 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
             {extracting ? "Extracting words..." : "Extract Words"}
           </Button>
         </div>
+          </>
+        )}
 
+        {/* ── Tab: Local File ────────────────────────────────────────── */}
+        {activeTab === "local" && (
         <div className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div className="flex items-center gap-2">
             <FileAudio2 className="w-4 h-4 text-accent" />
@@ -308,6 +564,7 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
           </div>
           <p className="text-xs text-muted-foreground">
             Transcribe a file immediately without waiting for the upload to finish.
+            Vocals are isolated automatically before transcription for best accuracy.
           </p>
           <div className="flex flex-col gap-2">
             <Input
@@ -321,10 +578,23 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
             </Button>
           </div>
         </div>
+        )}
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 
-        {selectedSource && (
+        {/* Selected catalog track info */}
+        {catalogTrack && (
+          <div className="rounded-lg border border-border bg-secondary/20 p-4">
+            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Selected track</p>
+            <p className="text-sm font-medium text-foreground mt-1">{catalogTrack.artist} — {catalogTrack.title}</p>
+            <p className="text-xs text-muted-foreground">
+              {catalogTrack.genre}{catalogTrack.year ? ` · ${catalogTrack.year}` : ""}
+              {" · "}{catalogTrack.license}
+            </p>
+          </div>
+        )}
+
+        {selectedSource && !catalogTrack && (
           <div className="rounded-lg border border-border bg-secondary/20 p-4">
             <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Selected source</p>
             <p className="text-sm font-medium text-foreground mt-1">{selectedSource.title}</p>
