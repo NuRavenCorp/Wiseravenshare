@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 using Wiseravenshare.Server.Entities.Karaoke;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Services;
@@ -30,6 +31,9 @@ public sealed class KaraokeController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IBlobStorageService _blob;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly SemaphoreSlim ExternalCatalogLock = new(1, 1);
+    private static DateTime ExternalCatalogCachedAtUtc = DateTime.MinValue;
+    private static List<KaraokeCatalogTrackDto> ExternalCatalogCache = [];
 
     public KaraokeController(
         IHttpClientFactory httpClientFactory,
@@ -298,41 +302,57 @@ public sealed class KaraokeController : ControllerBase
     public async Task<IActionResult> GetDbCatalog(
         [FromQuery] string? genre = null,
         [FromQuery] string? status = null,
+        [FromQuery] bool includeExternal = true,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 60,
         CancellationToken cancellationToken = default)
     {
-        pageSize = Math.Clamp(pageSize, 1, 200);
+        pageSize = Math.Clamp(pageSize, 1, 400);
         page     = Math.Max(1, page);
+        var normalisedGenre = string.Equals(genre?.Trim(), "all", StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : (genre ?? string.Empty).Trim();
 
         var query = _db.KaraokeTracks
             .AsNoTracking()
             .Where(t => t.IsPublic && !t.IsDeleted);
 
-        if (!string.IsNullOrWhiteSpace(genre))
-            query = query.Where(t => EF.Functions.ILike(t.Genre ?? "", $"%{genre}%"));
+        if (!string.IsNullOrWhiteSpace(normalisedGenre))
+            query = query.Where(t => EF.Functions.ILike(t.Genre ?? "", $"%{normalisedGenre}%"));
 
         if (!string.IsNullOrWhiteSpace(status) &&
             Enum.TryParse<KaraokeTrackStatus>(status, ignoreCase: true, out var parsedStatus))
             query = query.Where(t => t.Status == parsedStatus);
 
-        var total = await query.CountAsync(cancellationToken);
-        var tracks = await query
+        var dbTracks = await query
+            .OrderBy(t => t.Genre)
+            .ThenBy(t => t.Artist)
+            .ThenBy(t => t.Title)
+            .ToListAsync(cancellationToken);
+
+        var allTracks = dbTracks.Select(MapTrack).ToList();
+
+        if (includeExternal)
+        {
+            var externalTracks = await GetExternalCatalogTracksAsync(normalisedGenre, cancellationToken);
+            allTracks.AddRange(externalTracks);
+        }
+
+        var total = allTracks.Count;
+        var items = allTracks
             .OrderBy(t => t.Genre)
             .ThenBy(t => t.Artist)
             .ThenBy(t => t.Title)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ToListAsync(cancellationToken);
-
-        var items = tracks.Select(t => MapTrack(t)).ToList();
+            .ToList();
 
         // Group by genre for the UI — grouping on the raw entity avoids
         // the anonymous-type reflection issue with LINQ GroupBy.
-        var grouped = tracks
+        var grouped = items
             .GroupBy(t => NormaliseGenre(t.Genre))
-            .OrderBy(g => g.Key)
-            .Select(g => new { genre = g.Key, tracks = g.Select(MapTrack).ToList() })
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new { genre = g.Key, tracks = g.ToList() })
             .ToList();
 
         return Ok(new { total, page, pageSize, items, grouped });
@@ -397,7 +417,7 @@ public sealed class KaraokeController : ControllerBase
 
     // ── helpers ───────────────────────────────────────────────────────────
 
-    private object MapTrack(KaraokeTrack t)
+    private KaraokeCatalogTrackDto MapTrack(KaraokeTrack t)
     {
         // Resolve CDN URL from blob key when a cached URL isn't already stored.
         string? ResolveUrl(string? cached, string? blobKey)
@@ -407,32 +427,188 @@ public sealed class KaraokeController : ControllerBase
             return _blob.IsConfigured ? _blob.ResolvePublicUrl(blobKey) : null;
         }
 
-        return new
+        var sourceLabel = t.SourceType switch
         {
-            id               = t.Id,
-            title            = t.Title,
-            artist           = t.Artist,
-            album            = t.Album,
-            genre            = t.Genre,
-            language         = t.Language,
-            year             = t.Year,
-            license          = t.License,
-            licenseUrl       = t.LicenseUrl,
-            attributionText  = t.AttributionText,
-            sourceUrl        = t.SourceUrl,
-            status           = t.Status.ToString(),
-            hasInstrumental  = t.HasInstrumental,
-            hasLrc           = t.HasLrc,
-            durationSeconds  = t.DurationSeconds,
-            playCount        = t.PlayCount,
-            rating           = t.Rating,
+            KaraokeTrackSource.LrcLib => "LRCLIB",
+            KaraokeTrackSource.UltraStarWorld => "UltraStar",
+            KaraokeTrackSource.FreeMusicArchive => "Free Music Archive",
+            KaraokeTrackSource.InternetArchive => "Internet Archive",
+            KaraokeTrackSource.Jamendo => "Jamendo",
+            KaraokeTrackSource.CcMixter => "ccMixter",
+            KaraokeTrackSource.OpenKaraoke => "OpenKaraoke",
+            KaraokeTrackSource.UserUploaded => "User Upload",
+            _ => "Wiseraven"
+        };
+
+        return new KaraokeCatalogTrackDto
+        {
+            Id               = t.Id.ToString("D"),
+            Title            = t.Title,
+            Artist           = t.Artist,
+            Album            = t.Album,
+            Genre            = t.Genre,
+            Language         = t.Language,
+            Year             = t.Year,
+            License          = t.License,
+            LicenseUrl       = t.LicenseUrl,
+            AttributionText  = t.AttributionText,
+            SourceUrl        = t.SourceUrl,
+            Status           = t.Status.ToString(),
+            HasInstrumental  = t.HasInstrumental,
+            HasLrc           = t.HasLrc,
+            DurationSeconds  = t.DurationSeconds,
+            PlayCount        = t.PlayCount,
+            Rating           = t.Rating,
             // Resolved playback URLs
-            instrumentalUrl  = ResolveUrl(t.InstrumentalUrl, t.InstrumentalBlobKey),
-            lrcUrl           = ResolveUrl(t.LrcUrl,          t.LrcBlobKey),
-            coverImageUrl    = ResolveUrl(t.CoverImageUrl,   t.CoverImageBlobKey),
+            InstrumentalUrl  = ResolveUrl(t.InstrumentalUrl, t.InstrumentalBlobKey),
+            LrcUrl           = ResolveUrl(t.LrcUrl,          t.LrcBlobKey),
+            CoverImageUrl    = ResolveUrl(t.CoverImageUrl,   t.CoverImageBlobKey),
             // Inline lyrics for immediate display
-            lrcContent       = t.LrcContent,
-            plainLyrics      = t.PlainLyrics,
+            LrcContent       = t.LrcContent,
+            PlainLyrics      = t.PlainLyrics,
+            Source           = sourceLabel,
+            SourceType       = "database",
+        };
+    }
+
+    private async Task<List<KaraokeCatalogTrackDto>> GetExternalCatalogTracksAsync(string genre, CancellationToken cancellationToken)
+    {
+        await ExternalCatalogLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (ExternalCatalogCache.Count > 0 && DateTime.UtcNow - ExternalCatalogCachedAtUtc < TimeSpan.FromMinutes(30))
+            {
+                return FilterExternalCatalogByGenre(ExternalCatalogCache, genre);
+            }
+
+            var client = _httpClientFactory.CreateClient();
+            var terms = new[]
+            {
+                "karaoke",
+                "instrumental",
+                "sing along",
+                "backing track",
+                "acoustic",
+                "pop",
+                "rock",
+                "r&b",
+                "country",
+                "jazz"
+            };
+
+            var byId = new Dictionary<string, KaraokeCatalogTrackDto>(StringComparer.OrdinalIgnoreCase);
+            foreach (var term in terms)
+            {
+                var url = $"https://itunes.apple.com/search?media=music&entity=song&limit=50&term={Uri.EscapeDataString(term)}";
+                using var response = await client.GetAsync(url, cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    continue;
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+                if (!json.RootElement.TryGetProperty("results", out var resultsNode) || resultsNode.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var row in resultsNode.EnumerateArray())
+                {
+                    var trackName = ReadString(row, "trackName");
+                    var artistName = ReadString(row, "artistName");
+                    var previewUrl = ReadString(row, "previewUrl");
+                    var trackViewUrl = ReadString(row, "trackViewUrl");
+                    var trackId = ReadString(row, "trackId");
+
+                    if (string.IsNullOrWhiteSpace(trackId) ||
+                        string.IsNullOrWhiteSpace(trackName) ||
+                        string.IsNullOrWhiteSpace(artistName) ||
+                        string.IsNullOrWhiteSpace(previewUrl))
+                    {
+                        continue;
+                    }
+
+                    var externalId = $"itunes:{trackId}";
+                    if (byId.ContainsKey(externalId))
+                    {
+                        continue;
+                    }
+
+                    int? year = null;
+                    var releaseDate = ReadString(row, "releaseDate");
+                    if (!string.IsNullOrWhiteSpace(releaseDate) &&
+                        DateTimeOffset.TryParse(releaseDate, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+                    {
+                        year = parsed.Year;
+                    }
+
+                    byId[externalId] = new KaraokeCatalogTrackDto
+                    {
+                        Id = externalId,
+                        Title = trackName,
+                        Artist = artistName,
+                        Album = ReadString(row, "collectionName"),
+                        Genre = ReadString(row, "primaryGenreName") ?? "Other",
+                        Year = year,
+                        SourceUrl = trackViewUrl ?? previewUrl,
+                        License = "Preview via Apple iTunes Search API",
+                        Status = "Ready",
+                        HasInstrumental = true,
+                        HasLrc = false,
+                        DurationSeconds = 30,
+                        InstrumentalUrl = previewUrl,
+                        Source = "iTunes",
+                        SourceType = "external"
+                    };
+                }
+            }
+
+            ExternalCatalogCache = byId.Values
+                .OrderBy(t => t.Genre)
+                .ThenBy(t => t.Artist)
+                .ThenBy(t => t.Title)
+                .ToList();
+            ExternalCatalogCachedAtUtc = DateTime.UtcNow;
+
+            return FilterExternalCatalogByGenre(ExternalCatalogCache, genre);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "External karaoke source fetch failed.");
+            return [];
+        }
+        finally
+        {
+            ExternalCatalogLock.Release();
+        }
+    }
+
+    private static List<KaraokeCatalogTrackDto> FilterExternalCatalogByGenre(List<KaraokeCatalogTrackDto> tracks, string genre)
+    {
+        if (string.IsNullOrWhiteSpace(genre))
+        {
+            return [.. tracks];
+        }
+
+        return tracks
+            .Where(t => !string.IsNullOrWhiteSpace(t.Genre) &&
+                        t.Genre.Contains(genre, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private static string? ReadString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.ToString(),
+            _ => null
         };
     }
 
@@ -499,6 +675,34 @@ public sealed class KaraokeController : ControllerBase
         }
 
         return new JsonResult(new { detail = raw }) { StatusCode = (int)response.StatusCode };
+    }
+
+    private sealed class KaraokeCatalogTrackDto
+    {
+        public string Id { get; init; } = string.Empty;
+        public string Title { get; init; } = string.Empty;
+        public string Artist { get; init; } = string.Empty;
+        public string? Album { get; init; }
+        public string? Genre { get; init; }
+        public string? Language { get; init; }
+        public int? Year { get; init; }
+        public string? License { get; init; }
+        public string? LicenseUrl { get; init; }
+        public string? AttributionText { get; init; }
+        public string? SourceUrl { get; init; }
+        public string Status { get; init; } = "Ready";
+        public bool HasInstrumental { get; init; }
+        public bool HasLrc { get; init; }
+        public int? DurationSeconds { get; init; }
+        public int PlayCount { get; init; }
+        public float? Rating { get; init; }
+        public string? InstrumentalUrl { get; init; }
+        public string? LrcUrl { get; init; }
+        public string? CoverImageUrl { get; init; }
+        public string? LrcContent { get; init; }
+        public string? PlainLyrics { get; init; }
+        public string Source { get; init; } = "Wiseraven";
+        public string SourceType { get; init; } = "database";
     }
 }
 

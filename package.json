@@ -11,5 +11,8 @@
     "server:build": "dotnet build .\\wiseravenshare.Server\\Wiseravenshare.Server.csproj",
     "docker:dev": "docker compose -f .\\wiseravenshare.Server\\docker-compose.dev.yml up --build",
     "docker:prod": "docker compose -f .\\wiseravenshare.Server\\docker-compose.yml up --build"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.19"
   }
 }

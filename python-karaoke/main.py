@@ -316,6 +316,84 @@ async def transcribe_words(
 
 
 # ---------------------------------------------------------------------------
+# Finalized-turn lyric alignment
+# ---------------------------------------------------------------------------
+
+@app.post("/align/finalized-turn")
+async def align_finalized_turn(payload: dict[str, Any]):
+    """
+    Align finalized STT words against licensed reference lyrics.
+
+    Pitch scoring is intentionally separate and not performed here.
+    """
+    reference = str(payload.get("reference_lyrics", "") or "").strip()
+    words = payload.get("words", []) or []
+    if not reference:
+        raise HTTPException(400, "reference_lyrics is required.")
+    if not isinstance(words, list) or len(words) == 0:
+        raise HTTPException(400, "words must include timestamped finalized words.")
+
+    reference_tokens = [w for w in _simple_word_tokens(reference) if w]
+    if not reference_tokens:
+        raise HTTPException(400, "reference_lyrics must contain words.")
+
+    recognized: list[dict[str, Any]] = []
+    for entry in words:
+        if not isinstance(entry, dict):
+            continue
+        word = str(entry.get("word", "") or "").strip()
+        if not word:
+            continue
+        recognized.append({
+            "word": word,
+            "start": float(entry.get("start", 0.0) or 0.0),
+            "end": float(entry.get("end", 0.0) or 0.0),
+            "normalized": _normalize_word(word),
+        })
+
+    if not recognized:
+        raise HTTPException(400, "No valid words were provided.")
+
+    aligned: list[dict[str, Any]] = []
+    recognized_index = 0
+    for expected in reference_tokens:
+        normalized_expected = _normalize_word(expected)
+        matched = None
+        search_limit = min(len(recognized), recognized_index + 8)
+        for idx in range(recognized_index, search_limit):
+            candidate = recognized[idx]
+            if candidate["normalized"] == normalized_expected:
+                matched = candidate
+                recognized_index = idx + 1
+                break
+        if matched:
+            aligned.append({
+                "reference_word": expected,
+                "recognized_word": matched["word"],
+                "start": matched["start"],
+                "end": matched["end"],
+                "matched": True,
+            })
+        else:
+            aligned.append({
+                "reference_word": expected,
+                "recognized_word": None,
+                "start": None,
+                "end": None,
+                "matched": False,
+            })
+
+    matched_count = sum(1 for row in aligned if row["matched"])
+    coverage = matched_count / max(1, len(reference_tokens))
+    return {
+        "aligned": aligned,
+        "coverage": round(coverage, 4),
+        "recognized_word_count": len(recognized),
+        "reference_word_count": len(reference_tokens),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Core processing pipeline
 # ---------------------------------------------------------------------------
 
@@ -585,6 +663,20 @@ def _words_to_lrc(whisper_result: dict, job_dir: Path) -> str | None:
         f.write("[ar:Unknown]\n\n")
         f.write("\n".join(lines) + "\n")
     return lrc_path
+
+
+def _simple_word_tokens(text: str) -> list[str]:
+    separators = " \t\r\n,.;:!?\"'()[]{}<>"
+    working = text
+    for sep in separators:
+        working = working.replace(sep, " ")
+    return [token for token in working.split(" ") if token.strip()]
+
+
+def _normalize_word(word: str) -> str:
+    lowered = word.lower()
+    chars = [ch for ch in lowered if ch.isalnum() or ch in {"-", "_"}]
+    return "".join(chars)
 
 
 def _fmt_lrc_ts(seconds: float) -> str:

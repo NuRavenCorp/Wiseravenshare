@@ -1,10 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Collections.Concurrent;
 using WiseRavenShare.Server.Application.Services.Assistant;
+using Wiseravenshare.Server.Infrastructure.Data;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -20,21 +23,192 @@ namespace Wiseravenshare.Server.Controllers;
 [Authorize]
 public sealed class KaraokeSpeechController : ControllerBase
 {
+    private const int MaxLanguageCodes = 10;
+    private static readonly ConcurrentDictionary<string, List<DateTimeOffset>> TokenIssueWindows = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, List<FinalizedTurnRecord>> FinalizedTurnsBySession = new(StringComparer.Ordinal);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<KaraokeSpeechController> _logger;
     private readonly IConfiguration _configuration;
     private readonly ISpeechToTextService _speechToTextService;
+    private readonly AppDbContext _db;
 
     public KaraokeSpeechController(
         IHttpClientFactory httpClientFactory,
         ILogger<KaraokeSpeechController> logger,
         IConfiguration configuration,
-        ISpeechToTextService speechToTextService)
+        ISpeechToTextService speechToTextService,
+        AppDbContext db)
     {
         _httpClientFactory  = httpClientFactory;
         _logger             = logger;
         _configuration      = configuration;
         _speechToTextService = speechToTextService;
+        _db = db;
+    }
+
+    // ----------------------------------------------------------------
+    // STREAM TOKEN (AssemblyAI)
+    // ----------------------------------------------------------------
+
+    [HttpPost("stream-token")]
+    public async Task<IActionResult> IssueStreamingToken(
+        [FromBody] KaraokeStreamTokenRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized(new { message = "Authentication required." });
+        }
+
+        var maxPerHour = Math.Clamp(_configuration.GetValue("KaraokeSpeech:TokenRateLimitPerHour", 30), 1, 300);
+        if (!TryConsumeTokenIssueSlot(userId.ToString("N"), maxPerHour))
+        {
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                message = "Too many stream token requests. Please try again later."
+            });
+        }
+
+        var apiKey = (_configuration["AssemblyAI:ApiKey"]
+            ?? _configuration["ASSEMBLYAI_API_KEY"]
+            ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Streaming transcription is not configured."
+            });
+        }
+
+        var languageCodes = await ResolveLanguageCodesAsync(request, cancellationToken);
+        var tokenLifetimeSeconds = Math.Clamp(
+            request?.TokenTtlSeconds ?? _configuration.GetValue("KaraokeSpeech:TokenTtlSeconds", 3600),
+            300,
+            3600);
+
+        using var client = _httpClientFactory.CreateClient();
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.assemblyai.com/v2/realtime/token")
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(new { expires_in = tokenLifetimeSeconds }),
+                Encoding.UTF8,
+                "application/json")
+        };
+        tokenRequest.Headers.TryAddWithoutValidation("Authorization", apiKey);
+
+        using var response = await client.SendAsync(tokenRequest, cancellationToken);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("AssemblyAI token request failed ({Status}): {Payload}", (int)response.StatusCode, payload);
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                message = "Unable to issue streaming token."
+            });
+        }
+
+        using var json = JsonDocument.Parse(payload);
+        var token = json.RootElement.TryGetProperty("token", out var tokenNode)
+            ? tokenNode.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { message = "Streaming token response was invalid." });
+        }
+
+        var resolvedVoiceFocus = ResolveVoiceFocusMode(request);
+        return Ok(new
+        {
+            token,
+            languageCodes,
+            voiceFocus = resolvedVoiceFocus
+        });
+    }
+
+    // ----------------------------------------------------------------
+    // FINALIZED TURN INGEST (word timestamps for lyric alignment)
+    // ----------------------------------------------------------------
+
+    [HttpPost("turns/finalized")]
+    public async Task<IActionResult> PersistFinalizedTurn(
+        [FromBody] FinalizedTurnRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            return BadRequest(new { message = "sessionId is required." });
+        }
+
+        if (!request.EndOfTurn || string.IsNullOrWhiteSpace(request.Transcript))
+        {
+            return BadRequest(new { message = "Only finalized turns with transcript can be persisted." });
+        }
+
+        var words = (request.Words ?? [])
+            .Where(w => !string.IsNullOrWhiteSpace(w.Word))
+            .OrderBy(w => w.Start)
+            .ToArray();
+
+        var turn = new FinalizedTurnRecord
+        {
+            TurnOrder = request.TurnOrder,
+            Transcript = request.Transcript.Trim(),
+            Words = words,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        var sessionId = request.SessionId.Trim();
+        FinalizedTurnsBySession.AddOrUpdate(
+            sessionId,
+            _ => [turn],
+            (_, existing) =>
+            {
+                existing.Add(turn);
+                if (existing.Count > 500)
+                {
+                    existing.RemoveRange(0, existing.Count - 500);
+                }
+                return existing;
+            });
+
+        if (string.IsNullOrWhiteSpace(request.ReferenceLyrics) || words.Length == 0)
+        {
+            return Ok(new
+            {
+                persisted = true,
+                aligned = false,
+                reason = "Missing reference lyrics or timestamped words."
+            });
+        }
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("KaraokeService");
+            var proxyPayload = JsonSerializer.Serialize(new
+            {
+                session_id = sessionId,
+                transcript = turn.Transcript,
+                reference_lyrics = request.ReferenceLyrics,
+                words = words.Select(w => new { word = w.Word, start = w.Start, end = w.End })
+            });
+            using var content = new StringContent(proxyPayload, Encoding.UTF8, "application/json");
+            using var response = await client.PostAsync("/align/finalized-turn", content, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Python lyric alignment failed ({Status}): {Body}", (int)response.StatusCode, responseBody);
+                return Ok(new { persisted = true, aligned = false });
+            }
+
+            return Content(responseBody, "application/json");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Lyric alignment proxy failed for session {SessionId}.", sessionId);
+            return Ok(new { persisted = true, aligned = false });
+        }
     }
 
     // ----------------------------------------------------------------
@@ -103,10 +277,24 @@ public sealed class KaraokeSpeechController : ControllerBase
             return;
         }
 
+        using var relayCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var relayToken = relayCts.Token;
+
         // Relay in both directions concurrently
-        var browserToPython = RelayAsync(browserSocket, pythonSocket, cancellationToken);
-        var pythonToBrowser = RelayAsync(pythonSocket, browserSocket, cancellationToken);
+        var browserToPython = RelayAsync(browserSocket, pythonSocket, relayToken);
+        var pythonToBrowser = RelayAsync(pythonSocket, browserSocket, relayToken);
         await Task.WhenAny(browserToPython, pythonToBrowser);
+        relayCts.Cancel();
+
+        if (browserSocket.State == WebSocketState.Open || browserSocket.State == WebSocketState.CloseReceived)
+        {
+            await browserSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Stream ended", CancellationToken.None);
+        }
+
+        if (pythonSocket.State == WebSocketState.Open || pythonSocket.State == WebSocketState.CloseReceived)
+        {
+            await pythonSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Stream ended", CancellationToken.None);
+        }
 
         _logger.LogInformation("Karaoke STT WebSocket closed.");
     }
@@ -458,6 +646,95 @@ public sealed class KaraokeSpeechController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    private async Task<string[]> ResolveLanguageCodesAsync(KaraokeStreamTokenRequest? request, CancellationToken cancellationToken)
+    {
+        var values = new List<string>(MaxLanguageCodes);
+
+        if (request?.TrackId is not null)
+        {
+            var track = await _db.KaraokeTracks
+                .AsNoTracking()
+                .Where(t => t.Id == request.TrackId.Value)
+                .Select(t => new { t.Language })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(track?.Language))
+            {
+                values.AddRange(track.Language
+                    .Split([",", ";", "|", "/", " "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(request?.SongLanguage))
+        {
+            values.AddRange(request.SongLanguage
+                .Split([",", ";", "|", "/", " "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        }
+
+        if (request?.LanguageCodes is not null)
+        {
+            values.AddRange(request.LanguageCodes);
+        }
+
+        var deduped = values
+            .Select(NormalizeLanguageCode)
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxLanguageCodes)
+            .ToArray();
+
+        return deduped.Length > 0 ? deduped : ["en"];
+    }
+
+    private static string NormalizeLanguageCode(string? value)
+    {
+        var candidate = (value ?? string.Empty).Trim().Replace('_', '-');
+        if (candidate.Length < 2 || candidate.Length > 12)
+        {
+            return string.Empty;
+        }
+
+        foreach (var ch in candidate)
+        {
+            if (!(char.IsLetterOrDigit(ch) || ch == '-'))
+            {
+                return string.Empty;
+            }
+        }
+
+        return candidate.ToLowerInvariant();
+    }
+
+    private static string? ResolveVoiceFocusMode(KaraokeStreamTokenRequest? request)
+    {
+        if (request?.ABTest is true)
+        {
+            return null;
+        }
+
+        return string.Equals(request?.MicrophoneProfile, "close-vocal", StringComparison.OrdinalIgnoreCase)
+            ? "near-field"
+            : null;
+    }
+
+    private static bool TryConsumeTokenIssueSlot(string userKey, int maxPerHour)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var cutoff = now.AddHours(-1);
+        var list = TokenIssueWindows.GetOrAdd(userKey, _ => []);
+        lock (list)
+        {
+            list.RemoveAll(ts => ts < cutoff);
+            if (list.Count >= maxPerHour)
+            {
+                return false;
+            }
+
+            list.Add(now);
+            return true;
+        }
+    }
 }
 
 public sealed class ScorePerformanceRequest
@@ -465,4 +742,39 @@ public sealed class ScorePerformanceRequest
     public string Reference  { get; set; } = string.Empty;
     public string? Hypothesis { get; set; }
     public string? SongTitle  { get; set; }
+}
+
+public sealed class KaraokeStreamTokenRequest
+{
+    public Guid? TrackId { get; set; }
+    public string? SongLanguage { get; set; }
+    public string[]? LanguageCodes { get; set; }
+    public string? MicrophoneProfile { get; set; }
+    public bool ABTest { get; set; }
+    public int? TokenTtlSeconds { get; set; }
+}
+
+public sealed class FinalizedTurnRequest
+{
+    public string SessionId { get; set; } = string.Empty;
+    public int TurnOrder { get; set; }
+    public string Transcript { get; set; } = string.Empty;
+    public bool EndOfTurn { get; set; }
+    public string? ReferenceLyrics { get; set; }
+    public FinalizedWordTimestamp[]? Words { get; set; }
+}
+
+public sealed class FinalizedWordTimestamp
+{
+    public string Word { get; set; } = string.Empty;
+    public double Start { get; set; }
+    public double End { get; set; }
+}
+
+internal sealed class FinalizedTurnRecord
+{
+    public int TurnOrder { get; init; }
+    public string Transcript { get; init; } = string.Empty;
+    public FinalizedWordTimestamp[] Words { get; init; } = [];
+    public DateTimeOffset CreatedAtUtc { get; init; }
 }
