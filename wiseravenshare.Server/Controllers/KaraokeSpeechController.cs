@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Collections.Concurrent;
 using WiseRavenShare.Server.Application.Services.Assistant;
 using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -32,19 +33,22 @@ public sealed class KaraokeSpeechController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly ISpeechToTextService _speechToTextService;
     private readonly AppDbContext _db;
+    private readonly PerformanceCompletionService _performanceCompletionService;
 
     public KaraokeSpeechController(
         IHttpClientFactory httpClientFactory,
         ILogger<KaraokeSpeechController> logger,
         IConfiguration configuration,
         ISpeechToTextService speechToTextService,
-        AppDbContext db)
+        AppDbContext db,
+        PerformanceCompletionService performanceCompletionService)
     {
         _httpClientFactory  = httpClientFactory;
         _logger             = logger;
         _configuration      = configuration;
         _speechToTextService = speechToTextService;
         _db = db;
+        _performanceCompletionService = performanceCompletionService;
     }
 
     // ----------------------------------------------------------------
@@ -52,6 +56,7 @@ public sealed class KaraokeSpeechController : ControllerBase
     // ----------------------------------------------------------------
 
     [HttpPost("stream-token")]
+    [HttpPost("~/api/karaoke/stream-token")]
     public async Task<IActionResult> IssueStreamingToken(
         [FromBody] KaraokeStreamTokenRequest? request,
         CancellationToken cancellationToken)
@@ -71,34 +76,15 @@ public sealed class KaraokeSpeechController : ControllerBase
             });
         }
 
-        var apiKey = (_configuration["AssemblyAI:ApiKey"]
-            ?? _configuration["ASSEMBLYAI_API_KEY"]
-            ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
-            {
-                message = "Streaming transcription is not configured."
-            });
-        }
-
         var languageCodes = await ResolveLanguageCodesAsync(request, cancellationToken);
-        var tokenLifetimeSeconds = Math.Clamp(
+        var maxSessionDurationSeconds = Math.Clamp(
             request?.TokenTtlSeconds ?? _configuration.GetValue("KaraokeSpeech:TokenTtlSeconds", 3600),
             300,
             3600);
-
-        using var client = _httpClientFactory.CreateClient();
-        using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.assemblyai.com/v2/realtime/token")
-        {
-            Content = new StringContent(
-                JsonSerializer.Serialize(new { expires_in = tokenLifetimeSeconds }),
-                Encoding.UTF8,
-                "application/json")
-        };
-        tokenRequest.Headers.TryAddWithoutValidation("Authorization", apiKey);
-
-        using var response = await client.SendAsync(tokenRequest, cancellationToken);
+        using var client = _httpClientFactory.CreateClient("assemblyai");
+        using var response = await client.GetAsync(
+            $"/v3/token?expires_in_seconds=60&max_session_duration_seconds={maxSessionDurationSeconds}",
+            cancellationToken);
         var payload = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -132,9 +118,7 @@ public sealed class KaraokeSpeechController : ControllerBase
     // ----------------------------------------------------------------
 
     [HttpPost("turns/finalized")]
-    public async Task<IActionResult> PersistFinalizedTurn(
-        [FromBody] FinalizedTurnRequest request,
-        CancellationToken cancellationToken)
+    public IActionResult PersistFinalizedTurn([FromBody] FinalizedTurnRequest request)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.SessionId))
         {
@@ -155,7 +139,8 @@ public sealed class KaraokeSpeechController : ControllerBase
         {
             TurnOrder = request.TurnOrder,
             Transcript = request.Transcript.Trim(),
-            Words = words,
+            StartMilliseconds = words.Length > 0 ? (long?)Math.Round(words.Min(w => w.Start * 1000d)) : null,
+            EndMilliseconds = words.Length > 0 ? (long?)Math.Round(words.Max(w => w.End * 1000d)) : null,
             CreatedAtUtc = DateTimeOffset.UtcNow
         };
 
@@ -173,42 +158,75 @@ public sealed class KaraokeSpeechController : ControllerBase
                 return existing;
             });
 
-        if (string.IsNullOrWhiteSpace(request.ReferenceLyrics) || words.Length == 0)
+        return Ok(new { persisted = true, aligned = false });
+    }
+
+    [HttpPost("performances/{performanceId:guid}")]
+    public async Task<IActionResult> StartPerformance(
+        [FromRoute] Guid performanceId,
+        [FromBody] StartKaraokePerformanceRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || request.SongId == Guid.Empty)
         {
-            return Ok(new
-            {
-                persisted = true,
-                aligned = false,
-                reason = "Missing reference lyrics or timestamped words."
-            });
+            return BadRequest(new { message = "songId is required." });
         }
 
-        try
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty)
         {
-            using var client = _httpClientFactory.CreateClient("KaraokeService");
-            var proxyPayload = JsonSerializer.Serialize(new
-            {
-                session_id = sessionId,
-                transcript = turn.Transcript,
-                reference_lyrics = request.ReferenceLyrics,
-                words = words.Select(w => new { word = w.Word, start = w.Start, end = w.End })
-            });
-            using var content = new StringContent(proxyPayload, Encoding.UTF8, "application/json");
-            using var response = await client.PostAsync("/align/finalized-turn", content, cancellationToken);
-            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("Python lyric alignment failed ({Status}): {Body}", (int)response.StatusCode, responseBody);
-                return Ok(new { persisted = true, aligned = false });
-            }
+            return Unauthorized(new { message = "Authentication required." });
+        }
 
-            return Content(responseBody, "application/json");
-        }
-        catch (Exception ex)
+        await _performanceCompletionService.CreatePerformanceAsync(
+            performanceId,
+            userId,
+            request.SongId,
+            request.StartedAtUtc ?? DateTimeOffset.UtcNow,
+            cancellationToken);
+
+        return Ok(new { created = true, performanceId });
+    }
+
+    [HttpPost("performances/{performanceId:guid}/complete")]
+    public async Task<IActionResult> CompletePerformance(
+        [FromRoute] Guid performanceId,
+        [FromBody] CompleteKaraokePerformanceRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.SessionId))
         {
-            _logger.LogWarning(ex, "Lyric alignment proxy failed for session {SessionId}.", sessionId);
-            return Ok(new { persisted = true, aligned = false });
+            return BadRequest(new { message = "sessionId is required." });
         }
+
+        if (request.SongId == Guid.Empty)
+        {
+            return BadRequest(new { message = "songId is required." });
+        }
+
+        var sessionId = request.SessionId.Trim();
+        if (!FinalizedTurnsBySession.TryGetValue(sessionId, out var turns) || turns.Count == 0)
+        {
+            return BadRequest(new { message = "No finalized turns were captured for the session." });
+        }
+
+        var normalizedTurns = turns
+            .OrderBy(x => x.TurnOrder)
+            .Select(x => new FinalTurn(
+                x.TurnOrder,
+                x.Transcript,
+                x.StartMilliseconds,
+                x.EndMilliseconds))
+            .ToArray();
+
+        var result = await _performanceCompletionService.CompleteAsync(
+            performanceId,
+            request.SongId,
+            normalizedTurns,
+            cancellationToken);
+
+        FinalizedTurnsBySession.TryRemove(sessionId, out _);
+        return Ok(result);
     }
 
     // ----------------------------------------------------------------
@@ -760,8 +778,19 @@ public sealed class FinalizedTurnRequest
     public int TurnOrder { get; set; }
     public string Transcript { get; set; } = string.Empty;
     public bool EndOfTurn { get; set; }
-    public string? ReferenceLyrics { get; set; }
     public FinalizedWordTimestamp[]? Words { get; set; }
+}
+
+public sealed class CompleteKaraokePerformanceRequest
+{
+    public string SessionId { get; set; } = string.Empty;
+    public Guid SongId { get; set; }
+}
+
+public sealed class StartKaraokePerformanceRequest
+{
+    public Guid SongId { get; set; }
+    public DateTimeOffset? StartedAtUtc { get; set; }
 }
 
 public sealed class FinalizedWordTimestamp
@@ -775,6 +804,7 @@ internal sealed class FinalizedTurnRecord
 {
     public int TurnOrder { get; init; }
     public string Transcript { get; init; } = string.Empty;
-    public FinalizedWordTimestamp[] Words { get; init; } = [];
+    public long? StartMilliseconds { get; init; }
+    public long? EndMilliseconds { get; init; }
     public DateTimeOffset CreatedAtUtc { get; init; }
 }
