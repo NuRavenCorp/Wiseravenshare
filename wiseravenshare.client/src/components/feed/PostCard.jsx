@@ -69,8 +69,10 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
     setBusy(true);
     try {
       const state = liked ? await apiClient.posts.unlike(post.id) : await apiClient.posts.like(post.id);
-      setLiked(Boolean(state.isLiked));
-      setLikeCount(Number(state.likesCount ?? likeCount + (liked ? -1 : 1)));
+      const nextLiked = Boolean(state?.isLiked ?? state?.is_liked ?? !liked);
+      const nextLikesCount = Number(state?.likesCount ?? state?.likes_count ?? (likeCount + (liked ? -1 : 1)));
+      setLiked(nextLiked);
+      setLikeCount(Number.isFinite(nextLikesCount) ? Math.max(0, nextLikesCount) : 0);
     } catch (e) { toast({ title: "Could not update like", description: e.message, variant: "destructive" }); } finally { setBusy(false); }
   };
 
@@ -344,21 +346,21 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
       )}
 
       <div className="flex items-center gap-4 px-4 py-3 border-t border-border">
-        <button onClick={handleLike} disabled={busy} aria-label={liked ? "Unlike post" : "Like post"} className="flex items-center gap-1.5 text-sm transition-colors disabled:opacity-50">
+        <button type="button" onClick={handleLike} disabled={busy} aria-label={liked ? "Unlike post" : "Like post"} className="flex items-center gap-1.5 text-sm transition-colors disabled:opacity-50">
           <Heart className={`w-4 h-4 transition-all ${liked ? "fill-red-500 text-red-500 scale-110" : "text-muted-foreground hover:text-red-500"}`} />
           <span className={liked ? "text-red-500" : "text-muted-foreground"}>{liked ? "Liked" : "Like"}</span>
           <span className={liked ? "text-red-500" : "text-muted-foreground"}>{likeCount}</span>
         </button>
-        <button onClick={handleRepost} disabled={busy} className="flex items-center gap-1.5 text-sm transition-colors disabled:opacity-50">
+        <button type="button" onClick={handleRepost} disabled={busy} className="flex items-center gap-1.5 text-sm transition-colors disabled:opacity-50">
           <Repeat2 className={`w-4 h-4 transition-all ${reposted ? "text-emerald-400 scale-110" : "text-muted-foreground hover:text-emerald-400"}`} />
           <span className={reposted ? "text-emerald-400" : "text-muted-foreground"}>{repostCount}</span>
         </button>
-        <button onClick={() => setShowComments((s) => !s)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+        <button type="button" onClick={() => setShowComments((s) => !s)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
           <MessageCircle className="w-4 h-4" />
           <span>{commentCount}</span>
         </button>
         <div className="relative ml-auto">
-          <button onClick={() => setShareOpen((o) => !o)} disabled={busy} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors disabled:opacity-50">
+          <button type="button" onClick={() => setShareOpen((o) => !o)} disabled={busy} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors disabled:opacity-50">
             <Share2 className={`w-4 h-4 transition-all ${shared ? "text-primary scale-110" : ""}`} />
             <span>{shareCount > 0 ? shareCount : shared ? "Shared!" : "Share"}</span>
           </button>
