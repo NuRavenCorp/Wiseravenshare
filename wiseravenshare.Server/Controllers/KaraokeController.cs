@@ -415,6 +415,56 @@ public sealed class KaraokeController : ControllerBase
     }
 
     /// <summary>
+    /// GET /api/karaoke/lyrics?artist=X&amp;title=Y&amp;duration=N
+    /// Proxies to LRCLib to fetch synced (LRC) and plain lyrics on demand.
+    /// Used client-side when a catalog track has no stored lyrics.
+    /// </summary>
+    [HttpGet("lyrics")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetLyrics(
+        [FromQuery] string? artist = null,
+        [FromQuery] string? title  = null,
+        [FromQuery] string? album  = null,
+        [FromQuery] int?    duration = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(artist) || string.IsNullOrWhiteSpace(title))
+            return BadRequest(new { message = "artist and title are required." });
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            var q = new System.Text.StringBuilder("https://lrclib.net/api/get?");
+            q.Append($"artist_name={Uri.EscapeDataString(artist.Trim())}");
+            q.Append($"&track_name={Uri.EscapeDataString(title.Trim())}");
+            if (!string.IsNullOrWhiteSpace(album))
+                q.Append($"&album_name={Uri.EscapeDataString(album.Trim())}");
+            if (duration.HasValue && duration.Value > 0)
+                q.Append($"&duration={duration.Value}");
+
+            using var response = await client.GetAsync(q.ToString(), cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("LRCLib lookup returned {Status} for '{Artist}' / '{Title}'",
+                    (int)response.StatusCode, artist, title);
+                return Ok(new { lrc = (string?)null, plainLyrics = (string?)null, found = false });
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            var root = doc.RootElement;
+            var lrc         = root.TryGetProperty("syncedLyrics", out var s)  ? s.GetString() : null;
+            var plainLyrics = root.TryGetProperty("plainLyrics",  out var p)  ? p.GetString() : null;
+            return Ok(new { lrc, plainLyrics, found = !string.IsNullOrWhiteSpace(lrc) || !string.IsNullOrWhiteSpace(plainLyrics) });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LRCLib fetch failed for '{Artist}' / '{Title}'", artist, title);
+            return Ok(new { lrc = (string?)null, plainLyrics = (string?)null, found = false });
+        }
+    }
+
+    /// <summary>
     /// POST /api/karaoke/db-catalog/{id}/play
     /// Increments the play counter for a track and records the user interaction.
     /// </summary>

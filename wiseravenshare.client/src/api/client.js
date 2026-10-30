@@ -835,6 +835,14 @@ export const apiClient = {
     getGenres() {
       return requestJson("/api/karaoke/db-catalog/genres", { method: "GET" });
     },
+    getLyrics({ artist, title, album, duration } = {}) {
+      const q = new URLSearchParams();
+      if (artist) q.set("artist", artist);
+      if (title)  q.set("title",  title);
+      if (album)  q.set("album",  album);
+      if (duration) q.set("duration", String(duration));
+      return requestJson(`/api/karaoke/lyrics?${q.toString()}`, { method: "GET" });
+    },
     recordPlay(trackId) {
       return requestJson(`/api/karaoke/db-catalog/${encodeURIComponent(trackId)}/play`, { method: "POST" });
     },
