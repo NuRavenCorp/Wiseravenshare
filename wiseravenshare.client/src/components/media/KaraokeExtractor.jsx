@@ -15,7 +15,6 @@ function readAccessToken() {
 }
 
 async function transcribeFile(file) {
-  const token = readAccessToken();
   const endpoints = [
     // Preferred karaoke words route.
     "/api/karaoke/speech/transcribe/words",
@@ -26,11 +25,10 @@ async function transcribeFile(file) {
     "/api/functions/TranscribeLocalFile",
     // Dedicated karaoke plain transcription fallback.
     "/api/karaoke/speech/transcribe",
-    // Assistant endpoint requires auth and feature gate; keep as last resort.
-    ...(token ? ["/api/assistant/audio/transcribe"] : []),
   ];
 
   let lastError = null;
+  let preferredError = null;
   const attempts = [];
   for (const endpoint of endpoints) {
     const body = new FormData();
@@ -39,7 +37,7 @@ async function transcribeFile(file) {
       const result = await apiClient.requestJson(endpoint, {
         method: "POST",
         body,
-        omitAuth: endpoint !== "/api/assistant/audio/transcribe",
+        omitAuth: true,
       });
       const transcript =
         (result?.lyrics || result?.text || result?.transcript || result?.lrc || "").toString().trim();
@@ -51,18 +49,23 @@ async function transcribeFile(file) {
       attempts.push(`${endpoint} -> empty`);
     } catch (error) {
       lastError = error;
-      attempts.push(`${endpoint} -> ${error?.status ?? "ERR"}`);
+      const message = String(error?.data?.message || error?.message || "").trim();
+      attempts.push(`${endpoint} -> ${error?.status ?? "ERR"}${message ? ` (${message})` : ""}`);
+      if (!preferredError && ![404, 405].includes(error?.status)) {
+        preferredError = error;
+      }
       if (![400, 401, 403, 404, 405, 415, 422, 500, 502, 503, 504].includes(error?.status)) {
         throw error;
       }
     }
   }
 
-  if (lastError) {
+  const errorToThrow = preferredError || lastError;
+  if (errorToThrow) {
     const details = attempts.length ? ` Tried: ${attempts.join(", ")}` : "";
-    lastError.message = `${lastError.message}${details}`;
+    errorToThrow.message = `${errorToThrow.message}${details}`;
   }
-  throw lastError || new Error("Unable to transcribe file.");
+  throw errorToThrow || new Error("Unable to transcribe file.");
 }
 
 async function transcribeUrl(url, fileName) {

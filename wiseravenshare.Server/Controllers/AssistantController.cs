@@ -99,6 +99,13 @@ public class AssistantController : ControllerBase
         }
     }
 
+    [HttpOptions("audio/transcribe")]
+    [AllowAnonymous]
+    public IActionResult TranscribeOptions()
+    {
+        return NoContent();
+    }
+
     [HttpPost("audio/speak")]
     public async Task<IActionResult> Speak([FromBody] SpeakDto dto, CancellationToken ct)
     {
