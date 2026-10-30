@@ -633,6 +633,16 @@ public sealed class KaraokeSpeechController : ControllerBase
             var result = await _speechToTextService.TranscribeAsync(stream, contentType, audio.FileName, cancellationToken);
             return Ok(result);
         }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            _logger.LogWarning(ex, "Karaoke speech transcribe was rate limited for {FileName}.", audio.FileName);
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                message = "Transcription is temporarily rate limited. Please retry shortly.",
+                detail = ex.Message,
+                retryAfterSeconds = 60
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Karaoke speech transcribe failed for {FileName}.", audio.FileName);
@@ -702,6 +712,15 @@ public sealed class KaraokeSpeechController : ControllerBase
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    return StatusCode(StatusCodes.Status429TooManyRequests, new
+                    {
+                        message = "Word-level transcription is temporarily rate limited. Please retry shortly.",
+                        detail = err,
+                        retryAfterSeconds = 60
+                    });
+                }
                 _logger.LogWarning("python-karaoke /transcribe/words returned {Status}: {Err}",
                     (int)response.StatusCode, err);
                 return await BuildFallbackTranscriptionAsync(audio, cancellationToken);
@@ -709,6 +728,16 @@ public sealed class KaraokeSpeechController : ControllerBase
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
             return Content(json, "application/json");
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            _logger.LogWarning(ex, "Word-level transcription fallback was rate limited for {FileName}.", audio.FileName);
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                message = "Transcription fallback is temporarily rate limited. Please retry shortly.",
+                detail = ex.Message,
+                retryAfterSeconds = 60
+            });
         }
         catch (Exception ex)
         {
