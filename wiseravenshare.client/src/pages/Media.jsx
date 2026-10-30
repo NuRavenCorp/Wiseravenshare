@@ -15,6 +15,7 @@ import CloudMediaPanel from "@/components/media/CloudMediaPanel";
 import { useMediaExperience } from "@/components/media/MediaExperience";
 import { apiClient } from "@/api/client";
 import { Play, Music, Loader2 } from "lucide-react";
+import { useAuth } from "@/lib/AuthContext";
 
 const tabs = [
   { id: "video", label: "Video" },
@@ -29,6 +30,8 @@ const tabs = [
 ];
 
 export default function Media() {
+  const { isAuthenticated } = useAuth();
+  const [currentUser, setCurrentUser] = useState(null);
   const [searchParams] = useSearchParams();
   const streamIdFromQuery = String(searchParams.get("streamId") || "").trim();
   const [tab, setTab] = useState("video");
@@ -63,6 +66,28 @@ export default function Media() {
       setTab(queryTab);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isAuthenticated) {
+      setCurrentUser(null);
+      return () => { cancelled = true; };
+    }
+
+    apiClient.auth.me()
+      .then((user) => {
+        if (!cancelled) {
+          setCurrentUser(user || null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCurrentUser(null);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
 
   const playTrack = (track, allTracks) => {
     openMedia({
@@ -202,7 +227,12 @@ export default function Media() {
         <div className={tab === "radio" ? "" : "hidden"} aria-hidden={tab !== "radio"}>
           <FMRadioPage />
         </div>
-        {tab === "karaoke" && <KaraokeExtractor />}
+        {tab === "karaoke" && (
+          <KaraokeExtractor
+            currentUser={currentUser}
+            onAuthRequired={() => apiClient.auth.redirectToLogin("/media?tab=karaoke")}
+          />
+        )}
         {tab === "live" && <LiveStreamPanel initialStreamId={streamIdFromQuery} />}
         {tab === "rights" && <RightsManager />}
         {tab === "drm" && <DRMManager />}

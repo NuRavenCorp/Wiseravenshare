@@ -437,7 +437,13 @@ export const apiClient = {
       return requestJson(`/api/posts/${encodeURIComponent(postId)}/like`, { method: "POST" });
     },
     unlike(postId) {
-      return requestJson(`/api/posts/${encodeURIComponent(postId)}/like`, { method: "DELETE" });
+      const encodedId = encodeURIComponent(postId);
+      return requestJson(`/api/posts/${encodedId}/like`, { method: "DELETE" }).catch((error) => {
+        if (![400, 404, 405].includes(error?.status)) {
+          throw error;
+        }
+        return requestJson(`/api/posts/${encodedId}/unlike`, { method: "POST" });
+      });
     },
     repost(postId) {
       return requestJson(`/api/posts/${encodeURIComponent(postId)}/repost`, { method: "POST" });
@@ -464,7 +470,13 @@ export const apiClient = {
       return requestJson(`/api/posts/comments/${encodeURIComponent(commentId)}/like`, { method: "POST" });
     },
     unlikeComment(commentId) {
-      return requestJson(`/api/posts/comments/${encodeURIComponent(commentId)}/like`, { method: "DELETE" });
+      const encodedId = encodeURIComponent(commentId);
+      return requestJson(`/api/posts/comments/${encodedId}/like`, { method: "DELETE" }).catch((error) => {
+        if (![400, 404, 405].includes(error?.status)) {
+          throw error;
+        }
+        return requestJson(`/api/posts/comments/${encodedId}/unlike`, { method: "POST" });
+      });
     },
     notInterested(postId) {
       return requestJson(`/api/posts/${encodeURIComponent(postId)}/not-interested`, { method: "POST" });

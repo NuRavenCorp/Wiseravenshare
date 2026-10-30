@@ -251,6 +251,7 @@ namespace Wiseravenshare.Server.Controllers
         /// Unlike a post
         /// </summary>
         [HttpDelete("{id}/like")]
+        [HttpPost("{id}/unlike")]
         [ProducesResponseType(typeof(PostInteractionDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UnlikePost(Guid id)
@@ -381,6 +382,7 @@ namespace Wiseravenshare.Server.Controllers
         /// Unlike a comment
         /// </summary>
         [HttpDelete("comments/{commentId}/like")]
+        [HttpPost("comments/{commentId}/unlike")]
         [ProducesResponseType(typeof(CommentInteractionDto), StatusCodes.Status200OK)]
         public async Task<IActionResult> UnlikeComment(Guid commentId)
         {

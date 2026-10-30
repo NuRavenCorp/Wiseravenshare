@@ -83,15 +83,15 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
     try {
       if (isLiked) {
         const state = await apiClient.posts.unlikeComment(comment.id);
-        setLikedComments((p) => ({ ...p, [comment.id]: Boolean(state?.isLiked) }));
+        setLikedComments((p) => ({ ...p, [comment.id]: Boolean(state?.isLiked ?? state?.is_liked) }));
         setComments((prev) => prev.map((c) => c.id === comment.id
-          ? { ...c, like_count: Number(state?.likesCount ?? 0) }
+          ? { ...c, like_count: Number(state?.likesCount ?? state?.likes_count ?? 0) }
           : c));
       } else {
         const state = await apiClient.posts.likeComment(comment.id);
-        setLikedComments((p) => ({ ...p, [comment.id]: Boolean(state?.isLiked ?? true) }));
+        setLikedComments((p) => ({ ...p, [comment.id]: Boolean(state?.isLiked ?? state?.is_liked ?? true) }));
         setComments((prev) => prev.map((c) => c.id === comment.id
-          ? { ...c, like_count: Number(state?.likesCount ?? c.like_count + 1) }
+          ? { ...c, like_count: Number(state?.likesCount ?? state?.likes_count ?? c.like_count + 1) }
           : c));
       }
     } catch (e) {
@@ -137,6 +137,7 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
           <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{node.content}</p>
           <div className="flex items-center gap-3 mt-2">
             <button
+              type="button"
               onClick={() => toggleLike(node)}
               className="flex items-center gap-1 text-[11px] transition-colors"
             >
@@ -145,6 +146,7 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
             </button>
             {currentUser && (
               <button
+                type="button"
                 onClick={() => setReplyTo(replyTo?.id === node.id ? null : { id: node.id })}
                 className="text-[11px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
               >
@@ -153,6 +155,7 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
             )}
             {replyCount > 0 && (
               <button
+                type="button"
                 onClick={() => setCollapsed((p) => ({ ...p, [node.id]: !p[node.id] }))}
                 className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
               >
@@ -174,6 +177,7 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
               className="flex-1 rounded-full border border-input bg-card px-4 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <button
+              type="button"
               onClick={() => submit(node.id)}
               disabled={!replyText.trim() || submitting}
               className="p-2 rounded-full bg-primary text-primary-foreground disabled:opacity-50"
@@ -204,6 +208,7 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
             className="flex-1 rounded-full border border-input bg-card px-4 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <button
+            type="button"
             onClick={() => submit(null)}
             disabled={!text.trim() || submitting}
             className="p-2 rounded-full bg-primary text-primary-foreground disabled:opacity-50"
