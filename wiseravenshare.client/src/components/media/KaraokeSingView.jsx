@@ -42,7 +42,7 @@ export default function KaraokeSingView({
   const relayUrl = useMemo(() => {
     const configured = (import.meta.env?.VITE_KARAOKE_RELAY_WS_URL || "").trim();
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const base = configured || `${protocol}://${window.location.host}/api/python-matrix/karaoke/stream`;
+    const base = configured || `${protocol}://${window.location.host}/api/python-matrix/karaoke/relay`;
     const separator = base.includes("?") ? "&" : "?";
     return `${base}${separator}channel=${encodeURIComponent(channel)}`;
   }, [channel]);

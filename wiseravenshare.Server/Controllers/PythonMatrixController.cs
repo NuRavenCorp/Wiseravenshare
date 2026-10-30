@@ -371,6 +371,12 @@ public sealed class PythonMatrixController : ControllerBase
     public async Task<IActionResult> ChatUnmute(string convId, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
         => await ProxyChatDeleteAsync($"chat/conversations/{Uri.EscapeDataString(convId)}/mute?user_id={Uri.EscapeDataString(userId ?? "")}", ct);
 
+    [HttpPost("karaoke/process")]
+    [AllowAnonymous]
+    public async Task<IActionResult> KaraokeProcess([FromBody] JsonElement payload, CancellationToken cancellationToken)
+        => await ProxyPostAsync("karaoke/process", payload, cancellationToken);
+
+    [HttpGet("karaoke/relay")]
     [HttpGet("karaoke/stream")]
     [AllowAnonymous]
     public async Task KaraokeRelayStream(CancellationToken cancellationToken)
@@ -395,7 +401,7 @@ public sealed class PythonMatrixController : ControllerBase
                 .Replace("http://", "ws://")
                 .Replace("https://", "wss://")
                 .TrimEnd('/')
-            + "/karaoke/stream"
+            + "/karaoke/relay"
             + query);
 
         using var relaySocket = new ClientWebSocket();

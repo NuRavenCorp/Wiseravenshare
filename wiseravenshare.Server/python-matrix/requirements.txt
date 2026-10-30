@@ -1,6 +1,8 @@
-fastapi==0.115.5
-uvicorn==0.32.0
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
 psycopg[binary]==3.2.9
 asyncpg==0.30.0
 redis[asyncio]==5.2.0
 sqlalchemy>=2.0.36
+assemblyai
+websockets
