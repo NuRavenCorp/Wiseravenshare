@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { apiClient } from "@/api/client";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 import { Loader2, Mic, Wand2, Upload, FileAudio2, Music2, ChevronDown, ChevronRight, Play, BookOpen, ExternalLink } from "lucide-react";
@@ -144,7 +144,24 @@ function extractTranscriptText(result) {
   return (result.lyrics || result.text || result.transcript || "").toString().trim();
 }
 
-export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
+function parseLrcLines(lrcText = "") {
+  const lines = String(lrcText || "").split(/\r?\n/);
+  const parsed = [];
+  for (const raw of lines) {
+    const match = raw.match(/^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$/);
+    if (!match) continue;
+    const minutes = Number(match[1] || 0);
+    const seconds = Number(match[2] || 0);
+    const fractional = String(match[3] || "0").padEnd(3, "0").slice(0, 3);
+    const text = String(match[4] || "").trim();
+    if (!text) continue;
+    const timeSeconds = minutes * 60 + seconds + Number(fractional) / 1000;
+    parsed.push({ timeSeconds, text });
+  }
+  return parsed.sort((a, b) => a.timeSeconds - b.timeSeconds);
+}
+
+export default function KaraokeExtractor({ currentUser, onAuthRequired, onTrackSelected = null }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("");
@@ -166,6 +183,11 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
   const [activeGenre, setActiveGenre] = useState("All");
   const [expandedGenres, setExpandedGenres] = useState({});
   const [catalogTrack, setCatalogTrack] = useState(null); // selected catalog track
+  const [catalogPlaybackUrl, setCatalogPlaybackUrl] = useState("");
+  const [catalogPlaybackLoading, setCatalogPlaybackLoading] = useState(false);
+  const [catalogPlaybackError, setCatalogPlaybackError] = useState("");
+  const [activeLyricIndex, setActiveLyricIndex] = useState(-1);
+  const audioRef = useRef(null);
 
   const loadSources = useCallback(async () => {
     try {
@@ -317,9 +339,15 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
 
   // Catalog tracks are selected for singing directly.
   // Word extraction is reserved for uploaded/local songs.
-  const handleSelectCatalogTrack = (track) => {
+  const timedLyrics = useMemo(() => parseLrcLines(lrc), [lrc]);
+
+  const handleSelectCatalogTrack = async (track) => {
     setCatalogTrack(track);
+    onTrackSelected?.(track);
     setError("");
+    setCatalogPlaybackError("");
+    setCatalogPlaybackUrl("");
+    setActiveLyricIndex(-1);
 
     // Record a play for DB-backed tracks only.
     if (track?.sourceType !== "external") {
@@ -342,9 +370,27 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
     setLrc("");
     setWordCount(null);
     setVocalsIsolated(false);
+
+    const audioUrl = track.instrumentalUrl || track.sourceUrl || "";
+    if (!audioUrl) return;
+
+    setCatalogPlaybackLoading(true);
+    try {
+      const playableUrl = await getPlayableUrl(audioUrl);
+      if (!playableUrl) {
+        setCatalogPlaybackError("Instrumental audio is not available yet for this track.");
+        return;
+      }
+      setCatalogPlaybackUrl(playableUrl);
+    } catch {
+      setCatalogPlaybackError("Could not load instrumental audio for this track.");
+    } finally {
+      setCatalogPlaybackLoading(false);
+    }
   };
 
   if (loading && catalogLoading) {
+    const hasAudio = Boolean(track.instrumentalUrl || track.sourceUrl);
     return (
       <div className="flex justify-center py-8">
         <Loader2 className="w-5 h-5 animate-spin text-primary" />
@@ -500,9 +546,9 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
                                   <Button
                                     size="sm"
                                     variant={isSelected ? "default" : "outline"}
-                                    disabled={false}
+                                    disabled={!hasAudio || catalogPlaybackLoading}
                                     onClick={() => handleSelectCatalogTrack(track)}
-                                    title={isSelected ? "Track selected for singing" : "Select this track and start singing"}
+                                    title={!hasAudio ? "No instrumental/source audio available yet" : (isSelected ? "Track selected for singing" : "Select this track and start singing")}
                                   >
                                     <Play className="w-3.5 h-3.5" />
                                     {isSelected ? "Selected" : "Start Singing"}
@@ -609,6 +655,59 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
               {catalogTrack.genre}{catalogTrack.year ? ` · ${catalogTrack.year}` : ""}
               {" · "}{catalogTrack.license}
             </p>
+          </div>
+        )}
+
+        {catalogTrack && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+            <p className="text-xs uppercase tracking-[0.2em] text-primary">Karaoke stage</p>
+            {catalogPlaybackLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading instrumental...
+              </div>
+            ) : catalogPlaybackUrl ? (
+              <audio
+                ref={audioRef}
+                className="w-full"
+                controls
+                autoPlay
+                src={catalogPlaybackUrl}
+                onTimeUpdate={(event) => {
+                  if (!timedLyrics.length) return;
+                  const currentTime = event.currentTarget.currentTime || 0;
+                  let nextIndex = -1;
+                  for (let i = 0; i < timedLyrics.length; i += 1) {
+                    if (currentTime >= timedLyrics[i].timeSeconds) nextIndex = i;
+                    else break;
+                  }
+                  setActiveLyricIndex(nextIndex);
+                }}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Choose a track with instrumental/source audio to start playback.
+              </p>
+            )}
+            {catalogPlaybackError && <p className="text-sm text-destructive">{catalogPlaybackError}</p>}
+
+            {(timedLyrics.length > 0 || lyrics) && (
+              <div className="rounded-md border border-border bg-card p-3 max-h-64 overflow-y-auto">
+                {timedLyrics.length > 0 ? (
+                  <div className="space-y-1">
+                    {timedLyrics.map((line, index) => (
+                      <p
+                        key={`${line.timeSeconds}-${index}`}
+                        className={index === activeLyricIndex ? "text-sm text-primary font-medium" : "text-sm text-foreground/80"}
+                      >
+                        {line.text}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{lyrics}</p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
