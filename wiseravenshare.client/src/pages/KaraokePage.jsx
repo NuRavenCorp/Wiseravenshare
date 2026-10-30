@@ -54,6 +54,7 @@ function PerformanceRow({ perf, onDelete }) {
 }
 
 export default function KaraokePage() {
+  const [currentUser, setCurrentUser] = useState(null);
   const [performances, setPerformances] = useState([]);
   const [perfLoading, setPerfLoading] = useState(false);
   const [perfError, setPerfError] = useState(null);
@@ -87,6 +88,22 @@ export default function KaraokePage() {
   useEffect(() => {
     fetchPerformances(1);
   }, [fetchPerformances]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.auth.me()
+      .then((user) => {
+        if (!cancelled) {
+          setCurrentUser(user || null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCurrentUser(null);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   async function handleDelete(id) {
     if (!window.confirm("Delete this performance?")) return;
@@ -125,7 +142,11 @@ export default function KaraokePage() {
           <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">
             1. Choose a song
           </h2>
-          <KaraokeExtractor onTrackSelected={setSelectedTrack} />
+          <KaraokeExtractor
+            currentUser={currentUser}
+            onAuthRequired={() => apiClient.auth.redirectToLogin("/karaoke")}
+            onTrackSelected={setSelectedTrack}
+          />
         </section>
 
         {/* Live transcriber */}
