@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import KaraokePaywall from "@/components/media/KaraokePaywall";
 import KaraokeTranscriber from "@/components/media/KaraokeTranscriber";
+import KaraokeSingView from "@/components/media/KaraokeSingView";
 
 function readAccessToken() {
   if (typeof window === "undefined" || !window.localStorage) return "";
@@ -188,6 +189,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
   const [catalogPlaybackError, setCatalogPlaybackError] = useState("");
   const [activeLyricIndex, setActiveLyricIndex] = useState(-1);
   const [audioDurationSeconds, setAudioDurationSeconds] = useState(0);
+  const [singMode, setSingMode] = useState(false);   // true = full-screen singing stage
   const audioRef = useRef(null);
 
   const loadSources = useCallback(async () => {
@@ -367,6 +369,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
     setCatalogPlaybackUrl("");
     setActiveLyricIndex(-1);
     setAudioDurationSeconds(0);
+    setSingMode(false);
 
     // Record a play for DB-backed tracks only.
     if (track?.sourceType !== "external") {
@@ -398,7 +401,11 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
     }
 
     const audioUrl = track.instrumentalUrl || track.sourceUrl || "";
-    if (!audioUrl) return;
+    if (!audioUrl) {
+      // No audio but we have lyrics — open sing view anyway so lyrics are shown
+      setSingMode(true);
+      return;
+    }
 
     setCatalogPlaybackLoading(true);
     try {
@@ -408,6 +415,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
         return;
       }
       setCatalogPlaybackUrl(playableUrl);
+      setSingMode(true);   // ← open the singing stage
     } catch {
       setCatalogPlaybackError("Could not load instrumental audio for this track.");
     } finally {
@@ -420,6 +428,24 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
       <div className="flex justify-center py-8">
         <Loader2 className="w-5 h-5 animate-spin text-primary" />
       </div>
+    );
+  }
+
+  // ── Singing stage: full-screen, replaces catalog ─────────────────────────
+  if (singMode && catalogTrack) {
+    return (
+      <KaraokeSingView
+        track={catalogTrack}
+        playbackUrl={catalogPlaybackUrl}
+        timedLyrics={timedLyrics}
+        lyrics={lyrics}
+        currentUser={currentUser}
+        onBack={() => {
+          setSingMode(false);
+          setCatalogPlaybackUrl("");
+          setActiveLyricIndex(-1);
+        }}
+      />
     );
   }
 
@@ -572,12 +598,14 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
                                   <Button
                                     size="sm"
                                     variant={isSelected ? "default" : "outline"}
-                                    disabled={!hasAudio || catalogPlaybackLoading}
+                                    disabled={!hasAudio || (catalogPlaybackLoading && isSelected)}
                                     onClick={() => handleSelectCatalogTrack(track)}
-                                    title={!hasAudio ? "No instrumental/source audio available yet" : (isSelected ? "Track selected for singing" : "Select this track and start singing")}
+                                    title={!hasAudio ? "No instrumental/source audio available yet" : "Start singing"}
                                   >
-                                    <Play className="w-3.5 h-3.5" />
-                                    {isSelected ? "Selected" : "Start Singing"}
+                                    {catalogPlaybackLoading && isSelected
+                                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      : <Play className="w-3.5 h-3.5" />}
+                                    {catalogPlaybackLoading && isSelected ? "Loading…" : "Start Singing"}
                                   </Button>
                                 </div>
                               </div>
