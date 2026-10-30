@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { ArrowLeft, Mic, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import KaraokeTranscriber from "@/components/media/KaraokeTranscriber";
@@ -25,13 +25,82 @@ export default function KaraokeSingView({
   const audioRef      = useRef(null);
   const lyricsRef     = useRef(null);
   const lineRefs      = useRef([]);
+  const relaySocketRef = useRef(null);
 
   const [activeIndex,      setActiveIndex]      = useState(-1);
+  const [activeTokenIndex, setActiveTokenIndex] = useState(-1);
   const [playing,          setPlaying]           = useState(false);
   const [progress,         setProgress]          = useState(0);     // 0-100
   const [currentTime,      setCurrentTime]       = useState(0);
   const [duration,         setDuration]          = useState(0);
   const [transcribeMode,   setTranscribeMode]    = useState(false);
+  const [relayPlaybackUrl, setRelayPlaybackUrl]  = useState("");
+  const [relayLines,       setRelayLines]        = useState([]);
+
+  const channel = useMemo(() => String(track?.id || "default"), [track?.id]);
+  const relayUrl = useMemo(() => {
+    const configured = (import.meta.env?.VITE_KARAOKE_RELAY_WS_URL || "").trim();
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const base = configured || `${protocol}://${window.location.host}/api/python-matrix/karaoke/stream`;
+    const separator = base.includes("?") ? "&" : "?";
+    return `${base}${separator}channel=${encodeURIComponent(channel)}`;
+  }, [channel]);
+
+  const groupWordsIntoLines = useCallback((words) => {
+    if (!Array.isArray(words) || words.length === 0) return [];
+
+    const normalized = words
+      .map((word) => ({
+        text: String(word?.text || word?.word || "").trim(),
+        start: Number(word?.start ?? word?.startSeconds ?? word?.start_time ?? 0),
+        end: Number(word?.end ?? word?.endSeconds ?? word?.end_time ?? 0),
+      }))
+      .filter((word) => word.text && Number.isFinite(word.start) && Number.isFinite(word.end))
+      .sort((a, b) => a.start - b.start);
+
+    if (normalized.length === 0) return [];
+
+    const lines = [];
+    let currentLine = { timeSeconds: normalized[0].start, text: "", tokens: [] };
+    for (let i = 0; i < normalized.length; i += 1) {
+      const word = normalized[i];
+      const previous = normalized[i - 1];
+      if (previous && word.start - previous.end > 0.8 && currentLine.tokens.length > 0) {
+        currentLine.text = currentLine.tokens.map((token) => token.text).join(" ");
+        lines.push(currentLine);
+        currentLine = { timeSeconds: word.start, text: "", tokens: [] };
+      }
+      currentLine.tokens.push(word);
+    }
+
+    if (currentLine.tokens.length > 0) {
+      currentLine.text = currentLine.tokens.map((token) => token.text).join(" ");
+      lines.push(currentLine);
+    }
+    return lines;
+  }, []);
+
+  const normalizeIncomingLines = useCallback((lines) => {
+    if (!Array.isArray(lines)) return [];
+    return lines
+      .map((line) => {
+        const timeSeconds = Number(line?.time ?? line?.timeSeconds ?? line?.start ?? 0);
+        const rawTokens = Array.isArray(line?.tokens) ? line.tokens : [];
+        const tokens = rawTokens
+          .map((token) => ({
+            text: String(token?.text || token?.word || "").trim(),
+            start: Number(token?.start ?? 0),
+            end: Number(token?.end ?? 0),
+          }))
+          .filter((token) => token.text && Number.isFinite(token.start) && Number.isFinite(token.end));
+        const text = String(line?.text || "").trim()
+          || (tokens.length > 0 ? tokens.map((token) => token.text).join(" ") : "");
+        if (!text) return null;
+        return { timeSeconds: Number.isFinite(timeSeconds) ? timeSeconds : 0, text, tokens };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.timeSeconds - b.timeSeconds);
+  }, []);
 
   // Auto-scroll the active lyric line into view centre
   useEffect(() => {
@@ -41,20 +110,44 @@ export default function KaraokeSingView({
     }
   }, [activeIndex]);
 
+  const activeLines = relayLines.length > 0 ? relayLines : timedLyrics;
+  const activePlaybackUrl = relayPlaybackUrl || playbackUrl;
+
   const handleTimeUpdate = useCallback((e) => {
     const ct = e.currentTarget.currentTime;
     const dur = e.currentTarget.duration;
     setCurrentTime(ct);
     if (dur && Number.isFinite(dur)) setProgress((ct / dur) * 100);
 
-    if (!timedLyrics.length) return;
+    if (!activeLines.length) return;
     let next = -1;
-    for (let i = 0; i < timedLyrics.length; i++) {
-      if (ct >= timedLyrics[i].timeSeconds) next = i;
+    for (let i = 0; i < activeLines.length; i++) {
+      if (ct >= activeLines[i].timeSeconds) next = i;
       else break;
     }
     setActiveIndex(next);
-  }, [timedLyrics]);
+
+    if (next < 0) {
+      setActiveTokenIndex(-1);
+      return;
+    }
+
+    const tokens = activeLines[next]?.tokens;
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      setActiveTokenIndex(-1);
+      return;
+    }
+
+    let tokenIndex = -1;
+    for (let i = 0; i < tokens.length; i += 1) {
+      if (ct >= tokens[i].start) tokenIndex = i;
+      if (ct >= tokens[i].start && ct <= tokens[i].end) {
+        tokenIndex = i;
+        break;
+      }
+    }
+    setActiveTokenIndex(tokenIndex);
+  }, [activeLines]);
 
   const handleLoaded = useCallback((e) => {
     const dur = e.currentTarget.duration;
@@ -62,6 +155,45 @@ export default function KaraokeSingView({
     e.currentTarget.play().catch(() => {});
     setPlaying(true);
   }, []);
+
+  useEffect(() => {
+    setRelayPlaybackUrl("");
+    setRelayLines([]);
+    setActiveIndex(-1);
+    setActiveTokenIndex(-1);
+  }, [track?.id, playbackUrl]);
+
+  useEffect(() => {
+    if (!relayUrl) return undefined;
+    const ws = new WebSocket(relayUrl);
+    relaySocketRef.current = ws;
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.type && payload.type !== "karaoke_ready") return;
+
+        const nextPlaybackUrl = typeof payload?.audio === "string" ? payload.audio.trim() : "";
+        const nextLines = Array.isArray(payload?.lines)
+          ? normalizeIncomingLines(payload.lines)
+          : groupWordsIntoLines(payload?.words);
+
+        if (nextPlaybackUrl) setRelayPlaybackUrl(nextPlaybackUrl);
+        if (nextLines.length > 0) setRelayLines(nextLines);
+      } catch (error) {
+        console.warn("Ignoring invalid karaoke relay payload", error);
+      }
+    };
+
+    return () => {
+      relaySocketRef.current = null;
+      try {
+        ws.close();
+      } catch {
+        // no-op
+      }
+    };
+  }, [groupWordsIntoLines, normalizeIncomingLines, relayUrl]);
 
   const togglePlay = () => {
     const a = audioRef.current;
@@ -86,7 +218,7 @@ export default function KaraokeSingView({
   };
 
   // Context window: show 2 before + current + 3 after
-  const windowLines = timedLyrics.length > 0 ? timedLyrics : (
+  const windowLines = activeLines.length > 0 ? activeLines : (
     lyrics ? lyrics.split(/\r?\n+/).filter(Boolean).map((text, i) => ({ text, timeSeconds: i * 3 })) : []
   );
 
@@ -159,7 +291,23 @@ export default function KaraokeSingView({
                     transform: isCurrent ? "scale(1.04)" : "scale(1)",
                   }}
                 >
-                  {line.text}
+                  {isCurrent && Array.isArray(line.tokens) && line.tokens.length > 0 ? (
+                    line.tokens.map((token, tokenIndex) => (
+                      <span
+                        key={`${absIdx}-${tokenIndex}-${token.text}`}
+                        className={tokenIndex === activeTokenIndex ? "text-primary" : ""}
+                        style={{
+                          color: tokenIndex === activeTokenIndex ? "hsl(var(--primary))" : undefined,
+                          textShadow: tokenIndex === activeTokenIndex ? "0 0 16px hsl(var(--primary)/60%)" : "none",
+                        }}
+                      >
+                        {token.text}
+                        {tokenIndex < line.tokens.length - 1 ? " " : ""}
+                      </span>
+                    ))
+                  ) : (
+                    line.text
+                  )}
                 </p>
               );
             })}
@@ -218,7 +366,7 @@ export default function KaraokeSingView({
       {/* Hidden audio element */}
       <audio
         ref={audioRef}
-        src={playbackUrl}
+        src={activePlaybackUrl}
         onLoadedMetadata={handleLoaded}
         onTimeUpdate={handleTimeUpdate}
         onPlay={() => setPlaying(true)}

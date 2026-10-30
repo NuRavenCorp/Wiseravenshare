@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Authorization;
@@ -245,6 +246,16 @@ public sealed class FunctionCompatController : ControllerBase
                 : audio.ContentType;
             var result = await _speechToTextService.TranscribeAsync(stream, contentType, audio.FileName, cancellationToken);
             return Ok(result);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            _logger.LogWarning(ex, "Direct local transcription was rate limited for {FileName}.", audio.FileName);
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                message = "Transcription is temporarily rate limited. Please retry shortly.",
+                detail = ex.Message,
+                retryAfterSeconds = 60
+            });
         }
         catch (Exception ex)
         {

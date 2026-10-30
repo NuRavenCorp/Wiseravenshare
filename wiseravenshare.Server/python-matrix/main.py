@@ -581,6 +581,7 @@ from chat.engine import ChatEngine
 from chat.bridge import PostChatBridge
 from chat.router import router as chat_router
 from chat.state import _chat_state
+from karaoke.router import router as karaoke_router
 
 CHAT_ENABLED = os.environ.get("CHAT_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -701,6 +702,8 @@ if CHAT_ENABLED:
 
 if RAVENSIGHT_ENABLED:
     app.include_router(ravensight_router)
+
+app.include_router(karaoke_router)
 
 
 def _get_predictor() -> Predictor | None:

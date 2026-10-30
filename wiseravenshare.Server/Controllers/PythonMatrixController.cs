@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Net.WebSockets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -370,6 +371,66 @@ public sealed class PythonMatrixController : ControllerBase
     public async Task<IActionResult> ChatUnmute(string convId, [FromQuery(Name = "user_id")] string userId, CancellationToken ct)
         => await ProxyChatDeleteAsync($"chat/conversations/{Uri.EscapeDataString(convId)}/mute?user_id={Uri.EscapeDataString(userId ?? "")}", ct);
 
+    [HttpGet("karaoke/stream")]
+    [AllowAnonymous]
+    public async Task KaraokeRelayStream(CancellationToken cancellationToken)
+    {
+        if (!HttpContext.WebSockets.IsWebSocketRequest)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await HttpContext.Response.WriteAsync("WebSocket upgrade required.", cancellationToken);
+            return;
+        }
+
+        using var browserSocket = await HttpContext.WebSockets.AcceptWebSocketAsync();
+
+        var baseUrl = _configuration["PythonMatrixService:BaseUrl"]
+            ?? _configuration["PythonMatrixService__BaseUrl"]
+            ?? "http://localhost:8004";
+        var query = HttpContext.Request.QueryString.HasValue
+            ? HttpContext.Request.QueryString.Value
+            : string.Empty;
+        var relayUri = new Uri(
+            baseUrl
+                .Replace("http://", "ws://")
+                .Replace("https://", "wss://")
+                .TrimEnd('/')
+            + "/karaoke/stream"
+            + query);
+
+        using var relaySocket = new ClientWebSocket();
+        try
+        {
+            await relaySocket.ConnectAsync(relayUri, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed connecting to python-matrix karaoke relay at {RelayUri}.", relayUri);
+            await browserSocket.CloseAsync(
+                WebSocketCloseStatus.InternalServerError,
+                "Karaoke relay unavailable",
+                CancellationToken.None);
+            return;
+        }
+
+        using var relayCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var relayToken = relayCts.Token;
+        var browserToRelay = RelayWebSocketAsync(browserSocket, relaySocket, relayToken);
+        var relayToBrowser = RelayWebSocketAsync(relaySocket, browserSocket, relayToken);
+
+        await Task.WhenAny(browserToRelay, relayToBrowser);
+        relayCts.Cancel();
+
+        if (browserSocket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+        {
+            await browserSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Relay closed", CancellationToken.None);
+        }
+        if (relaySocket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+        {
+            await relaySocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Relay closed", CancellationToken.None);
+        }
+    }
+
     private async Task<IActionResult> ProxyChatGetAsync(string relativeUrl, CancellationToken ct)
     {
         try
@@ -463,5 +524,40 @@ public sealed class PythonMatrixController : ControllerBase
         }
 
         return new JsonResult(new { detail = raw }) { StatusCode = (int)response.StatusCode };
+    }
+
+    private static async Task RelayWebSocketAsync(WebSocket source, WebSocket destination, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[8192];
+        while (source.State == WebSocketState.Open && destination.State == WebSocketState.Open)
+        {
+            WebSocketReceiveResult result;
+            try
+            {
+                result = await source.ReceiveAsync(buffer, cancellationToken);
+            }
+            catch
+            {
+                break;
+            }
+
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                if (destination.State == WebSocketState.Open)
+                {
+                    await destination.CloseAsync(WebSocketCloseStatus.NormalClosure, "Peer closed", cancellationToken);
+                }
+                break;
+            }
+
+            if (destination.State == WebSocketState.Open)
+            {
+                await destination.SendAsync(
+                    new ArraySegment<byte>(buffer, 0, result.Count),
+                    result.MessageType,
+                    result.EndOfMessage,
+                    cancellationToken);
+            }
+        }
     }
 }
