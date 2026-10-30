@@ -362,52 +362,66 @@ export const apiClient = {
     convertForBrowser(trackId) {
       return requestBlob(`/api/ravensight/media/music/${encodeURIComponent(trackId)}/browser-compatible`, { method: "GET" });
     },
-    warmAssemblyAiSync(options = {}) {
-      return requestJson("/api/podcast-audio/assemblyai/sync/warm", {
+    /** Verify AssemblyAI API key connectivity (no audio needed). */
+    warm(options = {}) {
+      return requestJson("/api/podcast-audio/assemblyai/warm", {
         method: "POST",
-        body: JSON.stringify({
-          model: options.model || "universal-3-5-pro",
-          keepaliveExpiry: options.keepaliveExpiry ?? 120,
-          speakerLabels: options.speakerLabels ?? null,
-          autoChapters: options.autoChapters ?? null,
-          iabCategories: options.iabCategories ?? null,
-          sentimentAnalysis: options.sentimentAnalysis ?? null,
-          summary: options.summary ?? null,
-        }),
+        body: JSON.stringify({ speechModel: options.speechModel || "universal-3-5-pro" }),
       });
     },
-    syncTranscribeFile(file, options = {}) {
+    /**
+     * Transcribe an uploaded file via AssemblyAI Sync API (sync.assemblyai.com).
+     * No 120-second cap -- handles songs up to 20 minutes.
+     * Returns { text, words[], word_count, transcript_id, audio_duration_seconds, ... }
+     * words[i] = { word, start (s), end (s), confidence }  -- unaligned words filtered out.
+     *
+     * Options:
+     *   speechModel       -- default "universal-3-5-pro"
+     *   timestamps        -- default true (word-level, opt-in per docs)
+     *   speakerLabels     -- default false
+     *   extractAudioFirst -- default false; set true for karaoke (ffmpeg 16kHz mono WAV pre-pass)
+     */
+    transcribeFile(file, options = {}) {
       const body = new FormData();
       body.append("audioFile", file);
-      body.append("model", options.model || "universal-3-5-pro");
-      body.append("warmConnection", String(options.warmConnection ?? true));
-      if (options.keepaliveExpiry != null) body.append("keepaliveExpiry", String(options.keepaliveExpiry));
-      if (options.speakerLabels != null) body.append("speakerLabels", String(options.speakerLabels));
-      if (options.autoChapters != null) body.append("autoChapters", String(options.autoChapters));
-      if (options.iabCategories != null) body.append("iabCategories", String(options.iabCategories));
-      if (options.sentimentAnalysis != null) body.append("sentimentAnalysis", String(options.sentimentAnalysis));
-      if (options.summary != null) body.append("summary", String(options.summary));
-      return requestJson("/api/podcast-audio/assemblyai/sync/transcribe", {
-        method: "POST",
-        body,
-      });
+      body.append("speechModel", options.speechModel || "universal-3-5-pro");
+      body.append("timestamps", String(options.timestamps ?? true));
+      body.append("speakerLabels", String(options.speakerLabels ?? false));
+      body.append("extractAudioFirst", String(options.extractAudioFirst ?? false));
+      return requestJson("/api/podcast-audio/assemblyai/transcribe", { method: "POST", body });
     },
-    syncTranscribeUrl(audioUrl, options = {}) {
-      return requestJson("/api/podcast-audio/assemblyai/sync/transcribe-url", {
+    /**
+     * Transcribe a public audio/video URL via AssemblyAI Sync API.
+     * The service downloads the URL locally then posts to sync.assemblyai.com.
+     */
+    transcribeUrl(audioUrl, options = {}) {
+      return requestJson("/api/podcast-audio/assemblyai/transcribe-url", {
         method: "POST",
         body: JSON.stringify({
           audioUrl,
-          model: options.model || "universal-3-5-pro",
-          warmConnection: options.warmConnection ?? true,
-          keepaliveExpiry: options.keepaliveExpiry ?? 120,
-          speakerLabels: options.speakerLabels ?? null,
-          autoChapters: options.autoChapters ?? null,
-          iabCategories: options.iabCategories ?? null,
-          sentimentAnalysis: options.sentimentAnalysis ?? null,
-          summary: options.summary ?? null,
+          speechModel: options.speechModel || "universal-3-5-pro",
+          timestamps: options.timestamps ?? true,
+          speakerLabels: options.speakerLabels ?? false,
+          extractAudioFirst: options.extractAudioFirst ?? false,
         }),
       });
     },
+    /**
+     * Translate a completed transcript (separate from transcription).
+     * Translation is NOT part of the Sync API. Returns translated_texts[lang].
+     * Note: translated text does NOT carry word-level timing.
+     */
+    translateTranscript(transcriptId, targetLanguages = ["en"], formal = false) {
+      return requestJson("/api/podcast-audio/assemblyai/translate", {
+        method: "POST",
+        body: JSON.stringify({ transcriptId, targetLanguages, formal }),
+      });
+    },
+    // Legacy aliases kept for backward compat
+    warmAssemblyAi: function(opts) { return this.warm(opts); },
+    warmAssemblyAiSync: function(opts) { return this.warm(opts); },
+    syncTranscribeFile: function(file, opts) { return this.transcribeFile(file, opts); },
+    syncTranscribeUrl: function(url, opts) { return this.transcribeUrl(url, opts); },
   },
   posts: {
     feed(page = 1, pageSize = 20) {
@@ -1253,5 +1267,6 @@ export const apiClient = {
     throw lastError;
   },
 };
+
 
 

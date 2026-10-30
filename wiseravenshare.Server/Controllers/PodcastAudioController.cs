@@ -55,6 +55,19 @@ public sealed class PodcastAudioController : ControllerBase
     {
         public string AudioUrl { get; set; } = string.Empty;
     }
+    // Type aliases used by proxy endpoints (match simplified Python API contract)
+    public class AssemblyAiRequest : AssemblyAiSyncRequest { }
+    public sealed class AssemblyAiUrlRequest : AssemblyAiSyncRequest
+    {
+        public string AudioUrl { get; set; } = string.Empty;
+    }
+    public sealed class AssemblyAiTranslateRequest
+    {
+        public string TranscriptId { get; set; } = string.Empty;
+        public List<string> TargetLanguages { get; set; } = new() { "en" };
+        public bool Formal { get; set; } = false;
+    }
+
 
     [HttpGet("health")]
     [AllowAnonymous]
@@ -77,9 +90,9 @@ public sealed class PodcastAudioController : ControllerBase
     }
 
     [HttpPost("assemblyai/warm")]
-    public async Task<IActionResult> WarmAssemblyAiSync([FromBody] AssemblyAiSyncRequest? request, CancellationToken cancellationToken)
+    public async Task<IActionResult> WarmAssemblyAi([FromBody] AssemblyAiRequest? request, CancellationToken cancellationToken)
     {
-        request ??= new AssemblyAiSyncRequest();
+        request ??= new AssemblyAiRequest();
         using var client = _httpClientFactory.CreateClient("AudioService");
         using var payload = new StringContent(JsonSerializer.Serialize(new
         {
@@ -167,7 +180,7 @@ public sealed class PodcastAudioController : ControllerBase
     [HttpPost("assemblyai/transcribe")]
     [RequestSizeLimit(524_288_000)] // 500 MB
     [RequestFormLimits(MultipartBodyLengthLimit = 524_288_000)]
-    public async Task<IActionResult> SyncTranscribeAudio(
+    public async Task<IActionResult> TranscribeFile(
         IFormFile audioFile,
         [FromForm] string speechModel = "universal-3-5-pro",
         [FromForm] bool wordTimestamps = true,
@@ -224,7 +237,7 @@ public sealed class PodcastAudioController : ControllerBase
     }
 
     [HttpPost("assemblyai/transcribe-url")]
-    public async Task<IActionResult> SyncTranscribeUrl([FromBody] AssemblyAiSyncUrlRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> TranscribeUrl([FromBody] AssemblyAiUrlRequest request, CancellationToken cancellationToken)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.AudioUrl))
             return BadRequest(new { message = "audioUrl is required." });
@@ -261,6 +274,45 @@ public sealed class PodcastAudioController : ControllerBase
         {
             _logger.LogWarning("AssemblyAI sync URL proxy failed with status {Status}: {Body}", (int)response.StatusCode, body);
             return StatusCode((int)response.StatusCode, new { message = "AssemblyAI URL transcription failed.", detail = body });
+        }
+
+        return Content(body, "application/json");
+    }
+
+    /// <summary>
+    /// Translate a completed AssemblyAI transcript via the Understanding endpoint.
+    /// Must be called AFTER transcription -- translation is NOT part of the Sync API call.
+    /// </summary>
+    [HttpPost("assemblyai/translate")]
+    public async Task<IActionResult> TranslateTranscript([FromBody] AssemblyAiTranslateRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.TranscriptId))
+            return BadRequest(new { message = "transcriptId is required." });
+
+        using var client = _httpClientFactory.CreateClient("AudioService");
+        using var payload = new StringContent(JsonSerializer.Serialize(new
+        {
+            transcript_id = request.TranscriptId,
+            target_languages = request.TargetLanguages,
+            formal = request.Formal,
+        }), Encoding.UTF8, "application/json");
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsync("/assemblyai/translate", payload, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "AssemblyAI translate endpoint is unreachable.");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "AssemblyAI translation service is unavailable." });
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("AssemblyAI translate failed with {Status}: {Body}", (int)response.StatusCode, body);
+            return StatusCode((int)response.StatusCode, new { message = "AssemblyAI translation failed.", detail = body });
         }
 
         return Content(body, "application/json");
@@ -310,4 +362,7 @@ public sealed class PodcastAudioController : ControllerBase
         }
     }
 }
+
+
+
 
