@@ -5,7 +5,7 @@ import assemblyai as aai
 
 DEFAULT_AUDIO_DIR = Path("audio")
 DEFAULT_OUTPUT_DIR = Path("transcripts")
-SUPPORTED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4"}
+SUPPORTED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".webm"}
 
 # Add names or unusual words the model should recognize accurately.
 KEYTERMS = []  # Example: ["Chappell Roan", "H-O-T-T-O-G-O"]

@@ -835,6 +835,15 @@ export const apiClient = {
     getGenres() {
       return requestJson("/api/karaoke/db-catalog/genres", { method: "GET" });
     },
+    adminDbDump({ page = 1, pageSize = 200, includePlays = true, playsLimit = 200 } = {}) {
+      const q = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+        includePlays: includePlays ? "true" : "false",
+        playsLimit: String(playsLimit),
+      });
+      return requestJson(`/api/karaoke/admin/db-dump?${q.toString()}`, { method: "GET" });
+    },
     getLyrics({ artist, title, album, duration } = {}) {
       const q = new URLSearchParams();
       if (artist) q.set("artist", artist);
@@ -1244,3 +1253,4 @@ export const apiClient = {
     throw lastError;
   },
 };
+

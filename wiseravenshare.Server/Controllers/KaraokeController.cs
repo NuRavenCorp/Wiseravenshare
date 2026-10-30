@@ -493,6 +493,103 @@ public sealed class KaraokeController : ControllerBase
         return Ok(new { playCount = track.PlayCount });
     }
 
+    [HttpGet("admin/db-dump")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> GetAdminDbDump(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 200,
+        [FromQuery] bool includePlays = true,
+        [FromQuery] int playsLimit = 200,
+        CancellationToken cancellationToken = default)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 500);
+        playsLimit = Math.Clamp(playsLimit, 1, 1000);
+
+        var tracksQuery = _db.KaraokeTracks
+            .AsNoTracking()
+            .OrderByDescending(t => t.UpdatedAt)
+            .ThenBy(t => t.Title);
+
+        var totalTracks = await tracksQuery.CountAsync(cancellationToken);
+        var tracks = await tracksQuery
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(t => new
+            {
+                t.Id,
+                t.Title,
+                t.Artist,
+                t.Album,
+                t.Genre,
+                t.Language,
+                t.Year,
+                Status = t.Status.ToString(),
+                t.IsPublic,
+                t.HasInstrumental,
+                t.HasLrc,
+                t.PlayCount,
+                t.Rating,
+                t.RatingCount,
+                t.SourceType,
+                t.SourceId,
+                t.SourceUrl,
+                t.License,
+                t.LicenseUrl,
+                t.InstrumentalBlobKey,
+                t.VocalsBlobKey,
+                t.LrcBlobKey,
+                t.CoverImageBlobKey,
+                t.InstrumentalUrl,
+                t.LrcUrl,
+                t.CoverImageUrl,
+                t.UploadedByUserId,
+                t.CreatedAt,
+                t.UpdatedAt,
+                t.IsDeleted
+            })
+            .ToListAsync(cancellationToken);
+
+        object plays = Array.Empty<object>();
+        if (includePlays)
+        {
+            var recentPlays = await _db.KaraokeTrackPlays
+                .AsNoTracking()
+                .OrderByDescending(p => p.PlayedAt)
+                .Take(playsLimit)
+                .Join(
+                    _db.KaraokeTracks.AsNoTracking(),
+                    play => play.TrackId,
+                    track => track.Id,
+                    (play, track) => new
+                    {
+                        play.Id,
+                        play.TrackId,
+                        TrackTitle = track.Title,
+                        TrackArtist = track.Artist,
+                        play.UserId,
+                        play.PlayedAt,
+                        play.DurationPlayedSeconds,
+                        play.Stars,
+                        play.CreatedAt,
+                        play.UpdatedAt
+                    })
+                .ToListAsync(cancellationToken);
+
+            plays = recentPlays;
+        }
+
+        return Ok(new
+        {
+            totalTracks,
+            page,
+            pageSize,
+            includePlays,
+            playsLimit,
+            tracks,
+            plays
+        });
+    }
     // ── helpers ───────────────────────────────────────────────────────────
 
     private KaraokeCatalogTrackDto MapTrack(KaraokeTrack t)
@@ -788,3 +885,4 @@ public sealed class KaraokePurchaseRequest
 {
     public string SongId { get; set; } = string.Empty;
 }
+
