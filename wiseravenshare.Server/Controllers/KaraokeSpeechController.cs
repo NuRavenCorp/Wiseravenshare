@@ -734,7 +734,7 @@ public sealed class KaraokeSpeechController : ControllerBase
             _logger.LogWarning(ex, "Word-level transcription fallback was rate limited for {FileName}.", audio.FileName);
             return StatusCode(StatusCodes.Status429TooManyRequests, new
             {
-                message = "Transcription fallback is temporarily rate limited. Please retry shortly.",
+                message = "Transcription fallback is temporarily rate limited.",
                 detail = ex.Message,
                 retryAfterSeconds = 60
             });
