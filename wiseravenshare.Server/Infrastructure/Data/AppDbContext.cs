@@ -105,6 +105,7 @@ public class AppDbContext : DbContext
     // Karaoke
     public DbSet<KaraokeTrack> KaraokeTracks => Set<KaraokeTrack>();
     public DbSet<KaraokeTrackPlay> KaraokeTrackPlays => Set<KaraokeTrackPlay>();
+    public DbSet<KaraokeSongFile> KaraokeSongFiles => Set<KaraokeSongFile>();
     public DbSet<Performance> Performances => Set<Performance>();
     public DbSet<PerformanceTurn> PerformanceTurns => Set<PerformanceTurn>();
 
