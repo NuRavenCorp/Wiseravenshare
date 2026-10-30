@@ -3,6 +3,7 @@ import Navbar from "@/components/landing/Navbar";
 import KaraokeTranscriber from "@/components/media/KaraokeTranscriber";
 import KaraokeExtractor from "@/components/media/KaraokeExtractor";
 import { apiClient } from "@/api/client";
+import { useAuth } from "@/lib/AuthContext";
 import { Loader2, Trash2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -54,7 +55,7 @@ function PerformanceRow({ perf, onDelete }) {
 }
 
 export default function KaraokePage() {
-  const [currentUser, setCurrentUser] = useState(null);
+  const { user: currentUser, isLoadingAuth } = useAuth();
   const [performances, setPerformances] = useState([]);
   const [perfLoading, setPerfLoading] = useState(false);
   const [perfError, setPerfError] = useState(null);
@@ -88,22 +89,6 @@ export default function KaraokePage() {
   useEffect(() => {
     fetchPerformances(1);
   }, [fetchPerformances]);
-
-  useEffect(() => {
-    let cancelled = false;
-    apiClient.auth.me()
-      .then((user) => {
-        if (!cancelled) {
-          setCurrentUser(user || null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCurrentUser(null);
-        }
-      });
-    return () => { cancelled = true; };
-  }, []);
 
   async function handleDelete(id) {
     if (!window.confirm("Delete this performance?")) return;
@@ -144,6 +129,7 @@ export default function KaraokePage() {
           </h2>
           <KaraokeExtractor
             currentUser={currentUser}
+            userLoading={isLoadingAuth}
             onAuthRequired={() => apiClient.auth.redirectToLogin("/karaoke")}
             onTrackSelected={setSelectedTrack}
           />

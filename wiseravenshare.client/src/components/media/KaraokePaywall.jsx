@@ -22,13 +22,15 @@ const DEMO_LINES = [
   { text: "Someone's always playing corporation games",  active: false },
 ];
 
-export default function KaraokePaywall({ children, currentUser, onAuthRequired }) {
+export default function KaraokePaywall({ children, currentUser, userLoading = false, onAuthRequired }) {
   const [hasAccess, setHasAccess] = useState(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState("");
   const [demoLine, setDemoLine] = useState(0);
 
   useEffect(() => {
+    // Still resolving auth — don't gate yet
+    if (userLoading) { setHasAccess(null); return; }
     if (!currentUser) { setHasAccess(false); return; }
 
     const teamRole = String(currentUser.teamRole || currentUser.role || "").toLowerCase();
@@ -59,7 +61,7 @@ export default function KaraokePaywall({ children, currentUser, onAuthRequired }
         setHasAccess(hasActiveSubscription || hasKaraokePayment);
       })
       .catch(() => setHasAccess(false));
-  }, [currentUser?.id, currentUser?.teamRole, currentUser?.role, currentUser?.accessScope, currentUser?.isAdmin, currentUser?.adminPassActive]);
+  }, [userLoading, currentUser?.id, currentUser?.teamRole, currentUser?.role, currentUser?.accessScope, currentUser?.isAdmin, currentUser?.adminPassActive]);
 
   // Animate demo lyrics line
   useEffect(() => {
