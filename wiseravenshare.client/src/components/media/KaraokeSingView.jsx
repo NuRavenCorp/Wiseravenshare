@@ -26,6 +26,7 @@ export default function KaraokeSingView({
   const lyricsRef     = useRef(null);
   const lineRefs      = useRef([]);
   const relaySocketRef = useRef(null);
+  const lrclibRequestRef = useRef("");
 
   const [activeIndex,      setActiveIndex]      = useState(-1);
   const [activeTokenIndex, setActiveTokenIndex] = useState(-1);
@@ -80,6 +81,58 @@ export default function KaraokeSingView({
     return lines;
   }, []);
 
+  const parseLrcToLines = useCallback((lrcText) => {
+    const rows = String(lrcText || "").split(/\r?\n+/).map((row) => row.trim()).filter(Boolean);
+    const lines = [];
+
+    const toSeconds = (timestamp) => {
+      const [minutesPart, secondsPart = "0"] = String(timestamp || "0:0").split(":");
+      const minutes = Number(minutesPart || 0);
+      const seconds = Number(secondsPart || 0);
+      if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) return 0;
+      return Math.max(0, (minutes * 60) + seconds);
+    };
+
+    for (const row of rows) {
+      const lineStamp = row.match(/^\[(\d{1,2}:\d{2}(?:\.\d{1,3})?)\]/);
+      if (!lineStamp) continue;
+
+      const timeSeconds = toSeconds(lineStamp[1]);
+      const body = row.replace(/^\[[^\]]+\]/, "").trim();
+      if (!body) continue;
+
+      const tokenMatches = [...body.matchAll(/<(\d{1,2}:\d{2}(?:\.\d{1,3})?)>([^<]+)/g)];
+      if (tokenMatches.length > 0) {
+        const tokens = tokenMatches
+          .map((match, index) => {
+            const start = toSeconds(match[1]);
+            const text = String(match[2] || "").trim();
+            const next = tokenMatches[index + 1];
+            const nextStart = next ? toSeconds(next[1]) : start + 0.4;
+            return {
+              text,
+              start,
+              end: Math.max(start, nextStart),
+            };
+          })
+          .filter((token) => token.text.length > 0);
+
+        if (tokens.length > 0) {
+          lines.push({
+            timeSeconds,
+            text: tokens.map((token) => token.text).join(" "),
+            tokens,
+          });
+          continue;
+        }
+      }
+
+      lines.push({ timeSeconds, text: body, tokens: [] });
+    }
+
+    return lines.sort((a, b) => a.timeSeconds - b.timeSeconds);
+  }, []);
+
   const normalizeIncomingLines = useCallback((lines) => {
     if (!Array.isArray(lines)) return [];
     return lines
@@ -101,6 +154,34 @@ export default function KaraokeSingView({
       .filter(Boolean)
       .sort((a, b) => a.timeSeconds - b.timeSeconds);
   }, []);
+
+  const loadLrclibFallback = useCallback(async (trackName, artistName) => {
+    const safeTrack = String(trackName || "").trim();
+    const safeArtist = String(artistName || "").trim();
+    if (!safeTrack || !safeArtist) return;
+
+    const requestKey = `${safeTrack}::${safeArtist}`.toLowerCase();
+    if (lrclibRequestRef.current === requestKey) return;
+    lrclibRequestRef.current = requestKey;
+
+    try {
+      const url = new URL("https://lrclib.net/api/get");
+      url.searchParams.set("track_name", safeTrack);
+      url.searchParams.set("artist_name", safeArtist);
+
+      const response = await fetch(url.toString(), { method: "GET" });
+      if (!response.ok) return;
+      const payload = await response.json();
+      const lrc = String(payload?.syncedLyrics || payload?.plainLyrics || "").trim();
+      if (!lrc) return;
+      const parsed = parseLrcToLines(lrc);
+      if (parsed.length > 0) {
+        setRelayLines(parsed);
+      }
+    } catch {
+      // Best-effort fallback only.
+    }
+  }, [parseLrcToLines]);
 
   // Auto-scroll the active lyric line into view centre
   useEffect(() => {
@@ -151,6 +232,7 @@ export default function KaraokeSingView({
 
   const handleLoaded = useCallback((e) => {
     const dur = e.currentTarget.duration;
+    e.currentTarget.loop = true;
     if (dur && Number.isFinite(dur)) setDuration(dur);
     e.currentTarget.play().catch(() => {});
     setPlaying(true);
@@ -161,6 +243,7 @@ export default function KaraokeSingView({
     setRelayLines([]);
     setActiveIndex(-1);
     setActiveTokenIndex(-1);
+    lrclibRequestRef.current = "";
   }, [track?.id, playbackUrl]);
 
   useEffect(() => {
@@ -174,12 +257,24 @@ export default function KaraokeSingView({
         if (payload?.type && payload.type !== "karaoke_ready") return;
 
         const nextPlaybackUrl = typeof payload?.audio === "string" ? payload.audio.trim() : "";
-        const nextLines = Array.isArray(payload?.lines)
-          ? normalizeIncomingLines(payload.lines)
-          : groupWordsIntoLines(payload?.words);
+        let nextLines = [];
+        if (typeof payload?.lrc === "string" && payload.lrc.trim().length > 0) {
+          nextLines = parseLrcToLines(payload.lrc);
+        } else if (Array.isArray(payload?.lines)) {
+          nextLines = normalizeIncomingLines(payload.lines);
+        } else if (Array.isArray(payload?.words)) {
+          nextLines = groupWordsIntoLines(payload.words);
+        }
 
         if (nextPlaybackUrl) setRelayPlaybackUrl(nextPlaybackUrl);
-        if (nextLines.length > 0) setRelayLines(nextLines);
+        if (nextLines.length > 0) {
+          setRelayLines(nextLines);
+        } else {
+          void loadLrclibFallback(
+            payload?.trackName || track?.title || "",
+            payload?.artistName || track?.artist || ""
+          );
+        }
       } catch (error) {
         console.warn("Ignoring invalid karaoke relay payload", error);
       }
@@ -193,7 +288,7 @@ export default function KaraokeSingView({
         // no-op
       }
     };
-  }, [groupWordsIntoLines, normalizeIncomingLines, relayUrl]);
+  }, [groupWordsIntoLines, loadLrclibFallback, normalizeIncomingLines, parseLrcToLines, relayUrl, track?.artist, track?.title]);
 
   const togglePlay = () => {
     const a = audioRef.current;
@@ -367,6 +462,7 @@ export default function KaraokeSingView({
       <audio
         ref={audioRef}
         src={activePlaybackUrl}
+        loop
         onLoadedMetadata={handleLoaded}
         onTimeUpdate={handleTimeUpdate}
         onPlay={() => setPlaying(true)}
