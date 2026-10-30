@@ -376,33 +376,48 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
       apiClient.karaoke.recordPlay(track.id).catch(() => {});
     }
 
-    const lrcContent = track.lrcContent || track.lrc_content || "";
+    const lrcContent  = track.lrcContent  || track.lrc_content  || "";
     const plainLyrics = track.plainLyrics || track.plain_lyrics || track.lyrics || "";
-    const lrcUrl = track.lrcUrl || track.lrc_url || "";
+    const lrcUrl      = track.lrcUrl      || track.lrc_url      || "";
 
-    setLrc(lrcContent || "");
-    setLyrics(lrcContent || plainLyrics || "");
-    setWordCount(null);
-    setVocalsIsolated(false);
+    let resolvedLrc   = lrcContent;
+    let resolvedPlain = plainLyrics;
 
-    if (!lrcContent && lrcUrl) {
+    // Priority 1: use inline data from catalog
+    // Priority 2: fetch from lrcUrl stored on track
+    if (!resolvedLrc && lrcUrl) {
       try {
         const response = await fetch(lrcUrl, { credentials: "include" });
         if (response.ok) {
-          const fetchedLrc = await response.text();
-          if (fetchedLrc?.trim()) {
-            setLrc(fetchedLrc);
-            setLyrics(fetchedLrc);
-          }
+          const fetched = await response.text();
+          if (fetched?.trim()) resolvedLrc = fetched;
         }
-      } catch {
-        // Keep inline lyrics fallback without interrupting playback.
-      }
+      } catch { /* non-fatal */ }
     }
+
+    // Priority 3: on-demand LRCLib lookup via server proxy
+    if (!resolvedLrc && !resolvedPlain && track.artist && track.title) {
+      try {
+        const lrcRes = await apiClient.karaoke.getLyrics({
+          artist: track.artist,
+          title:  track.title,
+          album:  track.album || undefined,
+          duration: track.durationSeconds || undefined,
+        });
+        if (lrcRes?.found) {
+          resolvedLrc   = lrcRes.lrc         || "";
+          resolvedPlain = lrcRes.plainLyrics  || "";
+        }
+      } catch { /* non-fatal — sing view will show "no lyrics" gracefully */ }
+    }
+
+    setLrc(resolvedLrc);
+    setLyrics(resolvedLrc || resolvedPlain);
+    setWordCount(null);
+    setVocalsIsolated(false);
 
     const audioUrl = track.instrumentalUrl || track.sourceUrl || "";
     if (!audioUrl) {
-      // No audio but we have lyrics — open sing view anyway so lyrics are shown
       setSingMode(true);
       return;
     }
@@ -415,7 +430,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
         return;
       }
       setCatalogPlaybackUrl(playableUrl);
-      setSingMode(true);   // ← open the singing stage
+      setSingMode(true);
     } catch {
       setCatalogPlaybackError("Could not load instrumental audio for this track.");
     } finally {
