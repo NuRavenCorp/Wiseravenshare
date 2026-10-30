@@ -31,6 +31,7 @@ async function transcribeFile(file) {
   ];
 
   let lastError = null;
+  const attempts = [];
   for (const endpoint of endpoints) {
     const body = new FormData();
     body.append("audio", file);
@@ -47,14 +48,20 @@ async function transcribeFile(file) {
         return result;
       }
       lastError = new Error("Transcription returned empty output.");
+      attempts.push(`${endpoint} -> empty`);
     } catch (error) {
       lastError = error;
+      attempts.push(`${endpoint} -> ${error?.status ?? "ERR"}`);
       if (![400, 401, 403, 404, 405, 415, 422, 500, 502, 503, 504].includes(error?.status)) {
         throw error;
       }
     }
   }
 
+  if (lastError) {
+    const details = attempts.length ? ` Tried: ${attempts.join(", ")}` : "";
+    lastError.message = `${lastError.message}${details}`;
+  }
   throw lastError || new Error("Unable to transcribe file.");
 }
 
