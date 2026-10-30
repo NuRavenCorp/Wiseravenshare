@@ -25,6 +25,9 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class KaraokeSpeechController : ControllerBase
 {
     private const int MaxLanguageCodes = 10;
+    private const int MaxFinalizedTurnsPerSession = 500;
+    private const int MaxTranscriptLength = 8_000;
+    private static readonly TimeSpan FinalizedTurnRetention = TimeSpan.FromHours(6);
     private static readonly ConcurrentDictionary<string, List<DateTimeOffset>> TokenIssueWindows = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, List<FinalizedTurnRecord>> FinalizedTurnsBySession = new(StringComparer.Ordinal);
 
@@ -61,6 +64,8 @@ public sealed class KaraokeSpeechController : ControllerBase
         [FromBody] KaraokeStreamTokenRequest? request,
         CancellationToken cancellationToken)
     {
+        PruneExpiredFinalizedTurns();
+
         var userId = User.GetUserId();
         if (userId == Guid.Empty)
         {
@@ -124,14 +129,29 @@ public sealed class KaraokeSpeechController : ControllerBase
         {
             return BadRequest(new { message = "sessionId is required." });
         }
+        if (request.TurnOrder < 0)
+        {
+            return BadRequest(new { message = "turnOrder must be non-negative." });
+        }
+        if (request.Transcript.Length > MaxTranscriptLength)
+        {
+            return BadRequest(new { message = $"transcript is too long (max {MaxTranscriptLength} characters)." });
+        }
 
         if (!request.EndOfTurn || string.IsNullOrWhiteSpace(request.Transcript))
         {
             return BadRequest(new { message = "Only finalized turns with transcript can be persisted." });
         }
 
+        PruneExpiredFinalizedTurns();
+
         var words = (request.Words ?? [])
-            .Where(w => !string.IsNullOrWhiteSpace(w.Word))
+            .Where(w =>
+                !string.IsNullOrWhiteSpace(w.Word) &&
+                double.IsFinite(w.Start) &&
+                double.IsFinite(w.End) &&
+                w.Start >= 0 &&
+                w.End >= w.Start)
             .OrderBy(w => w.Start)
             .ToArray();
 
@@ -150,10 +170,23 @@ public sealed class KaraokeSpeechController : ControllerBase
             _ => [turn],
             (_, existing) =>
             {
-                existing.Add(turn);
-                if (existing.Count > 500)
+                lock (existing)
                 {
-                    existing.RemoveRange(0, existing.Count - 500);
+                    var existingIndex = existing.FindIndex(x => x.TurnOrder == turn.TurnOrder);
+                    if (existingIndex >= 0)
+                    {
+                        existing[existingIndex] = turn;
+                    }
+                    else
+                    {
+                        existing.Add(turn);
+                    }
+
+                    if (existing.Count > MaxFinalizedTurnsPerSession)
+                    {
+                        existing.Sort((a, b) => a.CreatedAtUtc.CompareTo(b.CreatedAtUtc));
+                        existing.RemoveRange(0, existing.Count - MaxFinalizedTurnsPerSession);
+                    }
                 }
                 return existing;
             });
@@ -204,20 +237,33 @@ public sealed class KaraokeSpeechController : ControllerBase
             return BadRequest(new { message = "songId is required." });
         }
 
+        PruneExpiredFinalizedTurns();
+
         var sessionId = request.SessionId.Trim();
         if (!FinalizedTurnsBySession.TryGetValue(sessionId, out var turns) || turns.Count == 0)
         {
             return BadRequest(new { message = "No finalized turns were captured for the session." });
         }
 
-        var normalizedTurns = turns
-            .OrderBy(x => x.TurnOrder)
-            .Select(x => new FinalTurn(
-                x.TurnOrder,
-                x.Transcript,
-                x.StartMilliseconds,
-                x.EndMilliseconds))
-            .ToArray();
+        FinalTurn[] normalizedTurns;
+        lock (turns)
+        {
+            normalizedTurns = turns
+                .Where(x => !string.IsNullOrWhiteSpace(x.Transcript))
+                .GroupBy(x => x.TurnOrder)
+                .Select(g => g.OrderByDescending(x => x.CreatedAtUtc).First())
+                .OrderBy(x => x.TurnOrder)
+                .Select(x => new FinalTurn(
+                    x.TurnOrder,
+                    x.Transcript,
+                    x.StartMilliseconds,
+                    x.EndMilliseconds))
+                .ToArray();
+        }
+        if (normalizedTurns.Length == 0)
+        {
+            return BadRequest(new { message = "No valid finalized turns were captured for the session." });
+        }
 
         var result = await _performanceCompletionService.CompleteAsync(
             performanceId,
@@ -776,6 +822,23 @@ public sealed class KaraokeSpeechController : ControllerBase
 
             list.Add(now);
             return true;
+        }
+    }
+
+    private static void PruneExpiredFinalizedTurns()
+    {
+        var cutoff = DateTimeOffset.UtcNow - FinalizedTurnRetention;
+        foreach (var entry in FinalizedTurnsBySession)
+        {
+            var turns = entry.Value;
+            lock (turns)
+            {
+                turns.RemoveAll(x => x.CreatedAtUtc < cutoff);
+                if (turns.Count == 0)
+                {
+                    FinalizedTurnsBySession.TryRemove(entry.Key, out _);
+                }
+            }
         }
     }
 }
