@@ -857,7 +857,13 @@ export const apiClient = {
       return requestJson(`/api/performances/${encodeURIComponent(id)}`, { method: "GET" });
     },
     deletePerformance(id) {
-      return requestJson(`/api/performances/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const encodedId = encodeURIComponent(id);
+      return requestJson(`/api/performances/${encodedId}`, { method: "DELETE" }).catch((error) => {
+        if (![400, 404, 405].includes(error?.status)) {
+          throw error;
+        }
+        return requestJson(`/api/performances/${encodedId}/delete`, { method: "POST" });
+      });
     },
     requestRecordingUploadTicket(performanceId, contentType = "audio/ogg;codecs=opus") {
       return requestJson(`/api/performances/${encodeURIComponent(performanceId)}/recording-upload-ticket`, {
