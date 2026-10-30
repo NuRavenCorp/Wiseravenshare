@@ -17,12 +17,15 @@ function readAccessToken() {
 async function transcribeFile(file) {
   const token = readAccessToken();
   const endpoints = [
-    // Legacy compat endpoints are the most widely deployed.
-    "/api/functions/transcribe-local-file",
-    "/api/functions/words-karaoke",
-    // Dedicated karaoke endpoints (newer deployments).
-    "/api/karaoke/speech/transcribe",
+    // Preferred karaoke words route.
     "/api/karaoke/speech/transcribe/words",
+    // Legacy compat endpoints that are still deployed in some environments.
+    "/api/functions/words-karaoke",
+    "/api/functions/WordsKaraoke",
+    "/api/functions/transcribe-local-file",
+    "/api/functions/TranscribeLocalFile",
+    // Dedicated karaoke plain transcription fallback.
+    "/api/karaoke/speech/transcribe",
     // Assistant endpoint requires auth and feature gate; keep as last resort.
     ...(token ? ["/api/assistant/audio/transcribe"] : []),
   ];
@@ -35,10 +38,12 @@ async function transcribeFile(file) {
       const result = await apiClient.requestJson(endpoint, {
         method: "POST",
         body,
+        omitAuth: endpoint !== "/api/assistant/audio/transcribe",
       });
       const transcript =
-        (result?.lyrics || result?.text || result?.transcript || "").toString().trim();
-      if (transcript.length > 0) {
+        (result?.lyrics || result?.text || result?.transcript || result?.lrc || "").toString().trim();
+      const hasWordPayload = Array.isArray(result?.words) && result.words.length > 0;
+      if (transcript.length > 0 || hasWordPayload) {
         return result;
       }
       lastError = new Error("Transcription returned empty output.");
