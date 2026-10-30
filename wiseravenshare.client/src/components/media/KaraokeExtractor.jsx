@@ -161,7 +161,7 @@ function parseLrcLines(lrcText = "") {
   return parsed.sort((a, b) => a.timeSeconds - b.timeSeconds);
 }
 
-export default function KaraokeExtractor({ currentUser, onAuthRequired, onTrackSelected = null }) {
+export default function KaraokeExtractor({ currentUser, userLoading = false, onAuthRequired, onTrackSelected = null }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("");
@@ -390,7 +390,6 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired, onTrackS
   };
 
   if (loading && catalogLoading) {
-    const hasAudio = Boolean(track.instrumentalUrl || track.sourceUrl);
     return (
       <div className="flex justify-center py-8">
         <Loader2 className="w-5 h-5 animate-spin text-primary" />
@@ -501,6 +500,7 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired, onTrackS
                           {group.tracks.map((track) => {
                             const isSelected = catalogTrack?.id === track.id;
                             const isReady    = track.status === "Ready";
+                            const hasAudio   = Boolean(track.instrumentalUrl || track.sourceUrl);
                             return (
                               <div
                                 key={track.id}
