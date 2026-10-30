@@ -642,33 +642,23 @@ public sealed class KaraokeSpeechController : ControllerBase
             if (!string.IsNullOrWhiteSpace(language))
                 multipart.Add(new System.Net.Http.StringContent(language), "language");
 
-            var response = await client.PostAsync("/transcribe/words", multipart, cancellationToken);
+            HttpResponseMessage response;
+            try
+            {
+                response = await client.PostAsync("/transcribe/words", multipart, cancellationToken);
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning(ex, "python-karaoke /transcribe/words is unavailable; falling back to base transcription.");
+                return await BuildFallbackTranscriptionAsync(audio, cancellationToken);
+            }
 
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogWarning("python-karaoke /transcribe/words returned {Status}: {Err}",
                     (int)response.StatusCode, err);
-                // Fall back to basic Whisper transcription when the python service is unavailable
-                var fallbackStream = audio.OpenReadStream();
-                try
-                {
-                    var contentType = string.IsNullOrWhiteSpace(audio.ContentType)
-                        ? "application/octet-stream" : audio.ContentType;
-                    var sttResult = await _speechToTextService.TranscribeAsync(
-                        fallbackStream, contentType, audio.FileName, cancellationToken);
-                    return Ok(new
-                    {
-                        text       = sttResult.Text,
-                        language   = sttResult.Language,
-                        words      = Array.Empty<object>(),
-                        lrc        = "",
-                        word_count = 0,
-                        vocals_isolated = false,
-                        fallback   = true,
-                    });
-                }
-                finally { await fallbackStream.DisposeAsync(); }
+                return await BuildFallbackTranscriptionAsync(audio, cancellationToken);
             }
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -679,6 +669,25 @@ public sealed class KaraokeSpeechController : ControllerBase
             _logger.LogError(ex, "Word-level transcription failed for {FileName}.", audio.FileName);
             return BadRequest(new { message = ex.Message });
         }
+    }
+
+    private async Task<IActionResult> BuildFallbackTranscriptionAsync(IFormFile audio, CancellationToken cancellationToken)
+    {
+        await using var fallbackStream = audio.OpenReadStream();
+        var contentType = string.IsNullOrWhiteSpace(audio.ContentType)
+            ? "application/octet-stream" : audio.ContentType;
+        var sttResult = await _speechToTextService.TranscribeAsync(
+            fallbackStream, contentType, audio.FileName, cancellationToken);
+        return Ok(new
+        {
+            text = sttResult.Text,
+            language = sttResult.Language,
+            words = Array.Empty<object>(),
+            lrc = "",
+            word_count = 0,
+            vocals_isolated = false,
+            fallback = true,
+        });
     }
 
     private async Task<string[]> ResolveLanguageCodesAsync(KaraokeStreamTokenRequest? request, CancellationToken cancellationToken)

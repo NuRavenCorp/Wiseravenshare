@@ -38,26 +38,55 @@ public class SpeechToTextService : ISpeechToTextService
     {
         var normalizedMimeType = NormalizeMimeType(mimeType, fileName);
         var normalizedFileName = NormalizeFileName(fileName, normalizedMimeType);
+        using var buffer = new MemoryStream();
+        await audio.CopyToAsync(buffer, ct);
+        var audioBytes = buffer.ToArray();
 
+        var hasVersionedBasePath = _http.BaseAddress?.AbsolutePath
+            .Contains("/v1", StringComparison.OrdinalIgnoreCase) == true;
+        var endpoints = hasVersionedBasePath
+            ? new[] { "audio/transcriptions", "v1/audio/transcriptions" }
+            : new[] { "v1/audio/transcriptions", "audio/transcriptions" };
+
+        HttpRequestException? lastError = null;
+        foreach (var endpoint in endpoints)
+        {
+            try
+            {
+                using var response = await PostTranscriptionAsync(endpoint, audioBytes, normalizedMimeType, normalizedFileName, ct);
+                response.EnsureSuccessStatusCode();
+
+                using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                var root = doc.RootElement;
+                var text = root.GetProperty("text").GetString() ?? "";
+                var lang = root.TryGetProperty("language", out var l) ? l.GetString() : null;
+                var dur = root.TryGetProperty("duration", out var d) ? (int)(d.GetDouble() * 1000) : 0;
+                return new SttResult(text, lang, null, dur);
+            }
+            catch (HttpRequestException ex)
+            {
+                lastError = ex;
+                _logger.LogWarning(ex, "STT transcription attempt failed at endpoint '{Endpoint}'.", endpoint);
+            }
+        }
+
+        throw lastError ?? new HttpRequestException("Speech-to-text transcription failed.");
+    }
+
+    private async Task<HttpResponseMessage> PostTranscriptionAsync(
+        string endpoint,
+        byte[] audioBytes,
+        string normalizedMimeType,
+        string normalizedFileName,
+        CancellationToken ct)
+    {
         using var form = new MultipartFormDataContent();
-        var audioContent = new StreamContent(audio);
+        var audioContent = new ByteArrayContent(audioBytes);
         audioContent.Headers.ContentType = new MediaTypeHeaderValue(normalizedMimeType);
         form.Add(audioContent, "file", normalizedFileName);
         form.Add(new StringContent(_opts.Model), "model");
         form.Add(new StringContent("verbose_json"), "response_format");
-
-        var hasVersionedBasePath = _http.BaseAddress?.AbsolutePath
-            .Contains("/v1", StringComparison.OrdinalIgnoreCase) == true;
-        var endpoint = hasVersionedBasePath ? "audio/transcriptions" : "v1/audio/transcriptions";
-        using var response = await _http.PostAsync(endpoint, form, ct);
-        response.EnsureSuccessStatusCode();
-
-        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-        var root = doc.RootElement;
-        var text = root.GetProperty("text").GetString() ?? "";
-        var lang = root.TryGetProperty("language", out var l) ? l.GetString() : null;
-        var dur = root.TryGetProperty("duration", out var d) ? (int)(d.GetDouble() * 1000) : 0;
-        return new SttResult(text, lang, null, dur);
+        return await _http.PostAsync(endpoint, form, ct);
     }
 
     private static string NormalizeMimeType(string? mimeType, string? fileName)
