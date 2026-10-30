@@ -15,16 +15,83 @@ function readAccessToken() {
     || "";
 }
 
+
+/**
+ * Convert AssemblyAI words[] (start/end in seconds) to LRC format.
+ * Groups words into lines by silence gap or max word count.
+ */
+function wordsToLrc(words = [], { maxWordsPerLine = 7, silenceGapSeconds = 1.5 } = {}) {
+  if (!Array.isArray(words) || words.length === 0) return "";
+  const lines = [];
+  let lineWords = [];
+  let lineStart = words[0].start;
+
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const prev = words[i - 1];
+    const gap = prev ? (w.start - prev.end) : 0;
+    if (lineWords.length > 0 && (gap >= silenceGapSeconds || lineWords.length >= maxWordsPerLine)) {
+      const mm = String(Math.floor(lineStart / 60)).padStart(2, "0");
+      const ss = String(Math.floor(lineStart % 60)).padStart(2, "0");
+      const ms = String(Math.round((lineStart % 1) * 100)).padStart(2, "0");
+      lines.push(`[${mm}:${ss}.${ms}]${lineWords.join(" ")}`);
+      lineWords = [];
+      lineStart = w.start;
+    }
+    lineWords.push(w.word);
+  }
+  if (lineWords.length > 0) {
+    const mm = String(Math.floor(lineStart / 60)).padStart(2, "0");
+    const ss = String(Math.floor(lineStart % 60)).padStart(2, "0");
+    const ms = String(Math.round((lineStart % 1) * 100)).padStart(2, "0");
+    lines.push(`[${mm}:${ss}.${ms}]${lineWords.join(" ")}`);
+  }
+  return lines.join("\n");
+}
+
+/** Normalize any transcription response into { text, lrc, words, word_count, vocals_isolated }. */
+function normalizeTranscriptResult(result) {
+  if (!result) return { text: "", lrc: "", words: [], word_count: 0, vocals_isolated: false };
+  const words = Array.isArray(result.words) ? result.words : [];
+  // Generate LRC from words array if we have timing data
+  const lrcFromWords = words.length > 0 ? wordsToLrc(words) : "";
+  const lrc = result.lrc || lrcFromWords;
+  const text = result.text || result.lyrics || result.transcript || words.map((w) => w.word).join(" ").trim();
+  return {
+    text,
+    lrc,
+    words,
+    word_count: result.word_count ?? words.length,
+    vocals_isolated: result.vocals_isolated ?? false,
+    transcript_id: result.transcript_id,
+    language_code: result.language_code,
+  };
+}
+
 async function transcribeFile(file) {
+  // Primary: AssemblyAI Sync API via /api/podcast-audio/assemblyai/transcribe
+  // No 120s cap, handles songs up to 20 minutes. extractAudioFirst=true runs
+  // ffmpeg vocal extraction on the server before sending to AssemblyAI.
+  try {
+    const result = await apiClient.podcastAudio.transcribeFile(file, {
+      extractAudioFirst: true,
+      wordTimestamps: true,
+    });
+    const hasContent = (result?.text || "").trim().length > 0 || (result?.words?.length || 0) > 0;
+    if (hasContent) return result;
+  } catch (primaryError) {
+    const status = primaryError?.status;
+    // If audio service not running (503) or misconfigured (404/405), fall through
+    if (![404, 405, 502, 503].includes(status)) throw primaryError;
+  }
+
+  // Fallback: karaoke-speech microservice endpoints
   const endpoints = [
-    // Preferred karaoke words route.
     "/api/karaoke/speech/transcribe/words",
-    // Legacy compat endpoints that are still deployed in some environments.
     "/api/functions/words-karaoke",
     "/api/functions/WordsKaraoke",
     "/api/functions/transcribe-local-file",
     "/api/functions/TranscribeLocalFile",
-    // Dedicated karaoke plain transcription fallback.
     "/api/karaoke/speech/transcribe",
   ];
 
@@ -35,77 +102,71 @@ async function transcribeFile(file) {
     const body = new FormData();
     body.append("audio", file);
     try {
-      const result = await apiClient.requestJson(endpoint, {
-        method: "POST",
-        body,
-        omitAuth: true,
-      });
-      const transcript =
-        (result?.lyrics || result?.text || result?.transcript || result?.lrc || "").toString().trim();
+      const result = await apiClient.requestJson(endpoint, { method: "POST", body, omitAuth: true });
+      const transcript = (result?.lyrics || result?.text || result?.transcript || result?.lrc || "").toString().trim();
       const hasWordPayload = Array.isArray(result?.words) && result.words.length > 0;
-      if (transcript.length > 0 || hasWordPayload) {
-        return result;
-      }
+      if (transcript.length > 0 || hasWordPayload) return result;
       lastError = new Error("Transcription returned empty output.");
       attempts.push(`${endpoint} -> empty`);
     } catch (error) {
       lastError = error;
-      const message = String(error?.data?.message || error?.message || "").trim();
-      attempts.push(`${endpoint} -> ${error?.status ?? "ERR"}${message ? ` (${message})` : ""}`);
-      if (!preferredError && ![404, 405].includes(error?.status)) {
-        preferredError = error;
-      }
-      if (![400, 401, 403, 404, 405, 415, 422, 500, 502, 503, 504].includes(error?.status)) {
-        throw error;
-      }
+      const msg = String(error?.data?.message || error?.message || "").trim();
+      attempts.push(`${endpoint} -> ${error?.status ?? "ERR"}${msg ? ` (${msg})` : ""}`);
+      if (!preferredError && ![404, 405].includes(error?.status)) preferredError = error;
+      if (![400, 401, 403, 404, 405, 415, 422, 500, 502, 503, 504].includes(error?.status)) throw error;
     }
   }
 
-  const errorToThrow = preferredError || lastError;
-  if (errorToThrow) {
+  const err = preferredError || lastError;
+  if (err) {
     const details = attempts.length ? ` Tried: ${attempts.join(", ")}` : "";
-    errorToThrow.message = `${errorToThrow.message}${details}`;
+    err.message = `${err.message}${details}`;
   }
-  throw errorToThrow || new Error("Unable to transcribe file.");
+  throw err || new Error("Unable to transcribe file.");
 }
 
 async function transcribeUrl(url, fileName) {
+  // Primary: AssemblyAI Sync API via /api/podcast-audio/assemblyai/transcribe-url
+  try {
+    const result = await apiClient.podcastAudio.transcribeUrl(url, {
+      wordTimestamps: true,
+    });
+    const hasContent = (result?.text || "").trim().length > 0 || (result?.words?.length || 0) > 0;
+    if (hasContent) return result;
+  } catch (primaryError) {
+    const status = primaryError?.status;
+    if (![404, 405, 502, 503].includes(status)) throw primaryError;
+  }
+
+  // Fallback: download the file locally and send to old endpoints
   const extensionFromMime = (mime) => {
-    const normalized = (mime || "").toLowerCase();
-    if (normalized.includes("audio/mpeg")) return ".mp3";
-    if (normalized.includes("audio/mp4")) return ".m4a";
-    if (normalized.includes("video/mp4")) return ".mp4";
-    if (normalized.includes("audio/wav")) return ".wav";
-    if (normalized.includes("audio/ogg")) return ".ogg";
-    if (normalized.includes("audio/webm") || normalized.includes("video/webm")) return ".webm";
+    const n = (mime || "").toLowerCase();
+    if (n.includes("audio/mpeg")) return ".mp3";
+    if (n.includes("audio/mp4")) return ".m4a";
+    if (n.includes("video/mp4")) return ".mp4";
+    if (n.includes("audio/wav")) return ".wav";
+    if (n.includes("audio/ogg")) return ".ogg";
+    if (n.includes("audio/webm") || n.includes("video/webm")) return ".webm";
     return "";
   };
-
   const normalizeFileName = (baseName, sourceUrl, mime) => {
     const rawName = (baseName || "karaoke-media").trim();
-    const hasExt = /\.[a-z0-9]{2,8}$/i.test(rawName);
-    if (hasExt) return rawName;
-
+    if (/\.[a-z0-9]{2,8}$/i.test(rawName)) return rawName;
     let ext = "";
     try {
       const parsed = new URL(sourceUrl, window.location.origin);
-      const urlPath = parsed.pathname || "";
-      const match = urlPath.match(/\.[a-z0-9]{2,8}$/i);
+      const match = (parsed.pathname || "").match(/\.[a-z0-9]{2,8}$/i);
       ext = match?.[0] || "";
-    } catch {
-      ext = "";
-    }
-
-    if (!ext) {
-      ext = extensionFromMime(mime);
-    }
-
+    } catch { ext = ""; }
+    if (!ext) ext = extensionFromMime(mime);
     return `${rawName}${ext || ".webm"}`;
   };
 
   let credentials = "include";
   const headers = {};
-  const token = readAccessToken();
+  const token = (typeof window !== "undefined" && window.localStorage)
+    ? (window.localStorage.getItem("wiseravenshare_access_token") || window.localStorage.getItem("token") || "")
+    : "";
   try {
     const resolved = new URL(url, window.location.origin);
     if (resolved.origin !== window.location.origin && /^https?:$/i.test(resolved.protocol)) {
@@ -115,23 +176,17 @@ async function transcribeUrl(url, fileName) {
     }
   } catch {
     credentials = "include";
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
+    if (token) headers.Authorization = `Bearer ${token}`;
   }
 
   const response = await fetch(url, { credentials, headers });
-  if (!response.ok) {
-    throw new Error(`Failed to load media (${response.status})`);
-  }
-
+  if (!response.ok) throw new Error(`Failed to load media (${response.status})`);
   const blob = await response.blob();
   const normalizedName = normalizeFileName(fileName || "karaoke-media", url, blob.type);
-  const file = new File([blob], normalizedName, {
-    type: blob.type || "application/octet-stream",
-  });
+  const file = new File([blob], normalizedName, { type: blob.type || "application/octet-stream" });
   return transcribeFile(file);
 }
+
 
 /** Extract displayable text from any transcription result shape. */
 function extractTranscriptText(result) {
@@ -305,6 +360,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
     }
   };
 
+
   const handleExtractSelected = async () => {
     if (!selectedSource) return;
     setExtracting(true);
@@ -318,7 +374,6 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
       if (sourceCandidates.length === 0) {
         throw new Error("This item does not have a playable media URL.");
       }
-
       let result = null;
       let lastError = null;
       for (const sourceUrl of sourceCandidates) {
@@ -331,14 +386,12 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
           lastError = candidateError;
         }
       }
-      if (!result) {
-        throw lastError || new Error("This item does not have a playable media URL.");
-      }
-
-      setLyrics(extractTranscriptText(result));
-      setLrc(result?.lrc || "");
-      setWordCount(result?.word_count ?? null);
-      setVocalsIsolated(result?.vocals_isolated ?? false);
+      if (!result) throw lastError || new Error("This item does not have a playable media URL.");
+      const normalized = normalizeTranscriptResult(result);
+      setLyrics(normalized.text);
+      setLrc(normalized.lrc);
+      setWordCount(normalized.word_count);
+      setVocalsIsolated(normalized.vocals_isolated);
     } catch (extractError) {
       setError(extractError?.message || "Word extraction failed.");
     } finally {
@@ -353,16 +406,18 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
     setLyrics("");
     try {
       const result = await transcribeFile(localFile);
-      setLyrics(extractTranscriptText(result));
-      setLrc(result?.lrc || "");
-      setWordCount(result?.word_count ?? null);
-      setVocalsIsolated(result?.vocals_isolated ?? false);
+      const normalized = normalizeTranscriptResult(result);
+      setLyrics(normalized.text);
+      setLrc(normalized.lrc);
+      setWordCount(normalized.word_count);
+      setVocalsIsolated(normalized.vocals_isolated);
     } catch (extractError) {
       setError(extractError?.message || "Word extraction failed.");
     } finally {
       setExtracting(false);
     }
   };
+
 
   // Catalog tracks are selected for singing directly.
   // Word extraction is reserved for uploaded/local songs.
