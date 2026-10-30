@@ -359,6 +359,52 @@ export const apiClient = {
     convertForBrowser(trackId) {
       return requestBlob(`/api/ravensight/media/music/${encodeURIComponent(trackId)}/browser-compatible`, { method: "GET" });
     },
+    warmAssemblyAiSync(options = {}) {
+      return requestJson("/api/podcast-audio/assemblyai/sync/warm", {
+        method: "POST",
+        body: JSON.stringify({
+          model: options.model || "universal-3-5-pro",
+          keepaliveExpiry: options.keepaliveExpiry ?? 120,
+          speakerLabels: options.speakerLabels ?? null,
+          autoChapters: options.autoChapters ?? null,
+          iabCategories: options.iabCategories ?? null,
+          sentimentAnalysis: options.sentimentAnalysis ?? null,
+          summary: options.summary ?? null,
+        }),
+      });
+    },
+    syncTranscribeFile(file, options = {}) {
+      const body = new FormData();
+      body.append("audioFile", file);
+      body.append("model", options.model || "universal-3-5-pro");
+      body.append("warmConnection", String(options.warmConnection ?? true));
+      if (options.keepaliveExpiry != null) body.append("keepaliveExpiry", String(options.keepaliveExpiry));
+      if (options.speakerLabels != null) body.append("speakerLabels", String(options.speakerLabels));
+      if (options.autoChapters != null) body.append("autoChapters", String(options.autoChapters));
+      if (options.iabCategories != null) body.append("iabCategories", String(options.iabCategories));
+      if (options.sentimentAnalysis != null) body.append("sentimentAnalysis", String(options.sentimentAnalysis));
+      if (options.summary != null) body.append("summary", String(options.summary));
+      return requestJson("/api/podcast-audio/assemblyai/sync/transcribe", {
+        method: "POST",
+        body,
+      });
+    },
+    syncTranscribeUrl(audioUrl, options = {}) {
+      return requestJson("/api/podcast-audio/assemblyai/sync/transcribe-url", {
+        method: "POST",
+        body: JSON.stringify({
+          audioUrl,
+          model: options.model || "universal-3-5-pro",
+          warmConnection: options.warmConnection ?? true,
+          keepaliveExpiry: options.keepaliveExpiry ?? 120,
+          speakerLabels: options.speakerLabels ?? null,
+          autoChapters: options.autoChapters ?? null,
+          iabCategories: options.iabCategories ?? null,
+          sentimentAnalysis: options.sentimentAnalysis ?? null,
+          summary: options.summary ?? null,
+        }),
+      });
+    },
   },
   posts: {
     feed(page = 1, pageSize = 20) {

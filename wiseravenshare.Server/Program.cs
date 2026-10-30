@@ -4,6 +4,7 @@ using Wiseravenshare.Server.Services.Truth;
 using Wiseravenshare.Server.Services.SocialPublishing;
 using Npgsql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
@@ -2044,6 +2045,17 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddMemoryCache();
 builder.Services.AddDistributedMemoryCache();
+
+// Persist DataProtection keys to the local filesystem bucket root so they survive
+// container restarts within the same volume. On DigitalOcean App Platform the /app
+// directory is included in the image and persists across deploys; /tmp is ephemeral.
+var dpKeysPath = Path.Combine(
+    builder.Configuration["Persistence:BucketsRoot"] ?? "/app/Buckets",
+    "dataprotection-keys");
+Directory.CreateDirectory(dpKeysPath);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(dpKeysPath))
+    .SetApplicationName("wiseravenshare");
 builder.Services.Configure<CrawlerOptions>(builder.Configuration.GetSection("Crawler"));
 builder.Services.Configure<PerformanceAnalyzerOptions>(builder.Configuration.GetSection("Crawler:Performance"));
 
@@ -2813,25 +2825,26 @@ if (string.IsNullOrWhiteSpace(stripeWebhookSecret))
     app.Logger.LogWarning("Stripe webhook secret is missing. Set Stripe:WebhookSecret or STRIPE_WEBHOOK_SECRET.");
 }
 
+// Resolve with both canonical (STRIPE_PRICE_CREATOR_PRO_*) and legacy (STRIPE_PRICE_CREATORPRO_*) names.
 var stripePlanMappings = new[]
 {
     new
     {
         Plan = "creator_pro",
-        Monthly = ResolveStripeConfig("Stripe:PriceCreatorProMonthlyId", "STRIPE_PRICE_CREATORPRO_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
-        Annual = ResolveStripeConfig("Stripe:PriceCreatorProAnnualId", "STRIPE_PRICE_CREATORPRO_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+        Monthly = ResolveStripeConfig("Stripe:PriceCreatorProMonthlyId", "STRIPE_PRICE_CREATOR_PRO_MONTHLY_ID", "STRIPE_PRICE_CREATORPRO_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual  = ResolveStripeConfig("Stripe:PriceCreatorProAnnualId",  "STRIPE_PRICE_CREATOR_PRO_ANNUAL_ID",  "STRIPE_PRICE_CREATORPRO_ANNUAL_ID",  "STRIPE_PRICE_ANNUAL_ID")
     },
     new
     {
         Plan = "growth_suite",
-        Monthly = ResolveStripeConfig("Stripe:PriceGrowthSuiteMonthlyId", "STRIPE_PRICE_GROWTHSUITE_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
-        Annual = ResolveStripeConfig("Stripe:PriceGrowthSuiteAnnualId", "STRIPE_PRICE_GROWTHSUITE_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+        Monthly = ResolveStripeConfig("Stripe:PriceGrowthSuiteMonthlyId", "STRIPE_PRICE_GROWTH_SUITE_MONTHLY_ID", "STRIPE_PRICE_GROWTHSUITE_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual  = ResolveStripeConfig("Stripe:PriceGrowthSuiteAnnualId",  "STRIPE_PRICE_GROWTH_SUITE_ANNUAL_ID",  "STRIPE_PRICE_GROWTHSUITE_ANNUAL_ID",  "STRIPE_PRICE_ANNUAL_ID")
     },
     new
     {
         Plan = "studio_plus",
-        Monthly = ResolveStripeConfig("Stripe:PriceStudioPlusMonthlyId", "STRIPE_PRICE_STUDIOPLUS_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
-        Annual = ResolveStripeConfig("Stripe:PriceStudioPlusAnnualId", "STRIPE_PRICE_STUDIOPLUS_ANNUAL_ID", "STRIPE_PRICE_ANNUAL_ID")
+        Monthly = ResolveStripeConfig("Stripe:PriceStudioPlusMonthlyId", "STRIPE_PRICE_STUDIO_PLUS_MONTHLY_ID", "STRIPE_PRICE_STUDIOPLUS_MONTHLY_ID", "STRIPE_PRICE_MONTHLY_ID"),
+        Annual  = ResolveStripeConfig("Stripe:PriceStudioPlusAnnualId",  "STRIPE_PRICE_STUDIO_PLUS_ANNUAL_ID",  "STRIPE_PRICE_STUDIOPLUS_ANNUAL_ID",  "STRIPE_PRICE_ANNUAL_ID")
     }
 };
 
@@ -2998,7 +3011,13 @@ if (app.Environment.IsDevelopment())
 
 app.UseForwardedHeaders();
 app.UseWebSockets();
-app.UseHttpsRedirection();
+// TLS is terminated by the DO App Platform proxy — skip HTTPS redirect inside the container.
+if (!string.Equals(app.Configuration["ASPNETCORE_ENVIRONMENT"], "Production", StringComparison.OrdinalIgnoreCase) &&
+    string.IsNullOrWhiteSpace(app.Configuration["DO_APP_PLATFORM"]) &&
+    string.IsNullOrWhiteSpace(app.Configuration["DIGITAL_OCEAN_APP_ID"]))
+{
+    app.UseHttpsRedirection();
+}
 if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
