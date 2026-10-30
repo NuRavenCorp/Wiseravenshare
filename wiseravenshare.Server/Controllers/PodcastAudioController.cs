@@ -41,14 +41,14 @@ public sealed class PodcastAudioController : ControllerBase
 
     public class AssemblyAiSyncRequest
     {
-        public string Model { get; set; } = "universal-3-5-pro";
-        public bool WarmConnection { get; set; } = true;
-        public int? KeepaliveExpiry { get; set; }
+        public string SpeechModel { get; set; } = "universal-3-5-pro";
+        public bool WordTimestamps { get; set; } = true;
+        public bool ExtractAudioFirst { get; set; } = false;
         public bool? SpeakerLabels { get; set; }
         public bool? AutoChapters { get; set; }
         public bool? IabCategories { get; set; }
         public bool? SentimentAnalysis { get; set; }
-        public bool? Summary { get; set; }
+        public bool? Summarization { get; set; }
     }
 
     public sealed class AssemblyAiSyncUrlRequest : AssemblyAiSyncRequest
@@ -76,34 +76,32 @@ public sealed class PodcastAudioController : ControllerBase
         }
     }
 
-    [HttpPost("assemblyai/sync/warm")]
+    [HttpPost("assemblyai/warm")]
     public async Task<IActionResult> WarmAssemblyAiSync([FromBody] AssemblyAiSyncRequest? request, CancellationToken cancellationToken)
     {
         request ??= new AssemblyAiSyncRequest();
         using var client = _httpClientFactory.CreateClient("AudioService");
         using var payload = new StringContent(JsonSerializer.Serialize(new
         {
-            model = request.Model,
-            warm_connection = true,
-            keepalive_expiry = request.KeepaliveExpiry,
+            speech_model = request.SpeechModel,
+            word_timestamps = true,
             speaker_labels = request.SpeakerLabels,
             auto_chapters = request.AutoChapters,
             iab_categories = request.IabCategories,
             sentiment_analysis = request.SentimentAnalysis,
-            summary = request.Summary,
         }), Encoding.UTF8, "application/json");
 
         HttpResponseMessage response;
         try
         {
-            response = await client.PostAsync("/assemblyai/sync/warm", payload, cancellationToken);
+            response = await client.PostAsync("/assemblyai/warm", payload, cancellationToken);
         }
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "AssemblyAI warm endpoint is unreachable.");
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new
             {
-                message = "AssemblyAI sync warmup is unavailable."
+                message = "AssemblyAI warmup is unavailable."
             });
         }
 
@@ -166,19 +164,19 @@ public sealed class PodcastAudioController : ControllerBase
         return File(processed, "audio/wav", outputName);
     }
 
-    [HttpPost("assemblyai/sync/transcribe")]
+    [HttpPost("assemblyai/transcribe")]
     [RequestSizeLimit(524_288_000)] // 500 MB
     [RequestFormLimits(MultipartBodyLengthLimit = 524_288_000)]
     public async Task<IActionResult> SyncTranscribeAudio(
         IFormFile audioFile,
-        [FromForm] string model = "universal-3-5-pro",
-        [FromForm] bool warmConnection = true,
-        [FromForm] int? keepaliveExpiry = null,
+        [FromForm] string speechModel = "universal-3-5-pro",
+        [FromForm] bool wordTimestamps = true,
+        [FromForm] bool extractAudioFirst = false,
         [FromForm] bool? speakerLabels = null,
         [FromForm] bool? autoChapters = null,
         [FromForm] bool? iabCategories = null,
         [FromForm] bool? sentimentAnalysis = null,
-        [FromForm] bool? summary = null,
+        [FromForm] bool? summarization = null,
         CancellationToken cancellationToken = default)
     {
         if (audioFile is null || audioFile.Length == 0)
@@ -195,37 +193,37 @@ public sealed class PodcastAudioController : ControllerBase
         var fileContent = new StreamContent(stream);
         fileContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
         multipart.Add(fileContent, "file", audioFile.FileName ?? "upload.wav");
-        multipart.Add(new StringContent(model), "model");
-        multipart.Add(new StringContent(warmConnection ? "true" : "false"), "warm_connection");
-        if (keepaliveExpiry.HasValue) multipart.Add(new StringContent(keepaliveExpiry.Value.ToString()), "keepalive_expiry");
+        multipart.Add(new StringContent(speechModel), "speech_model");
+        multipart.Add(new StringContent(wordTimestamps ? "true" : "false"), "word_timestamps");
+        multipart.Add(new StringContent(extractAudioFirst ? "true" : "false"), "extract_audio_first");
         if (speakerLabels.HasValue) multipart.Add(new StringContent(speakerLabels.Value ? "true" : "false"), "speaker_labels");
         if (autoChapters.HasValue) multipart.Add(new StringContent(autoChapters.Value ? "true" : "false"), "auto_chapters");
         if (iabCategories.HasValue) multipart.Add(new StringContent(iabCategories.Value ? "true" : "false"), "iab_categories");
         if (sentimentAnalysis.HasValue) multipart.Add(new StringContent(sentimentAnalysis.Value ? "true" : "false"), "sentiment_analysis");
-        if (summary.HasValue) multipart.Add(new StringContent(summary.Value ? "true" : "false"), "summary");
+        if (summarization.HasValue) multipart.Add(new StringContent(summarization.Value ? "true" : "false"), "summarization");
 
         HttpResponseMessage upstreamResponse;
         try
         {
-            upstreamResponse = await client.PostAsync("/assemblyai/sync/transcribe-file", multipart, cancellationToken);
+            upstreamResponse = await client.PostAsync("/assemblyai/transcribe-file", multipart, cancellationToken);
         }
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "AssemblyAI sync transcription service is unreachable.");
-            return StatusCode(503, new { message = "AssemblyAI sync transcription service is unavailable. Please try again later." });
+            return StatusCode(503, new { message = "AssemblyAI transcription service is unavailable. Please try again later." });
         }
 
         var body = await upstreamResponse.Content.ReadAsStringAsync(cancellationToken);
         if (!upstreamResponse.IsSuccessStatusCode)
         {
             _logger.LogError("AssemblyAI sync transcription returned {Status}: {Error}", (int)upstreamResponse.StatusCode, body);
-            return StatusCode((int)upstreamResponse.StatusCode, new { message = "AssemblyAI sync transcription failed.", detail = body });
+            return StatusCode((int)upstreamResponse.StatusCode, new { message = "AssemblyAI transcription failed.", detail = body });
         }
 
         return Content(body, "application/json");
     }
 
-    [HttpPost("assemblyai/sync/transcribe-url")]
+    [HttpPost("assemblyai/transcribe-url")]
     public async Task<IActionResult> SyncTranscribeUrl([FromBody] AssemblyAiSyncUrlRequest request, CancellationToken cancellationToken)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.AudioUrl))
@@ -235,27 +233,26 @@ public sealed class PodcastAudioController : ControllerBase
         using var payload = new StringContent(JsonSerializer.Serialize(new
         {
             audio_url = request.AudioUrl,
-            model = request.Model,
-            warm_connection = request.WarmConnection,
-            keepalive_expiry = request.KeepaliveExpiry,
+            speech_model = request.SpeechModel,
+            word_timestamps = true,
             speaker_labels = request.SpeakerLabels,
             auto_chapters = request.AutoChapters,
             iab_categories = request.IabCategories,
             sentiment_analysis = request.SentimentAnalysis,
-            summary = request.Summary,
+            summarization = request.Summarization,
         }), Encoding.UTF8, "application/json");
 
         HttpResponseMessage response;
         try
         {
-            response = await client.PostAsync("/assemblyai/sync/transcribe-url", payload, cancellationToken);
+            response = await client.PostAsync("/assemblyai/transcribe-url", payload, cancellationToken);
         }
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "AssemblyAI URL sync transcription service is unreachable.");
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new
             {
-                message = "AssemblyAI sync transcription service is unavailable."
+                message = "AssemblyAI transcription service is unavailable."
             });
         }
 
@@ -313,3 +310,4 @@ public sealed class PodcastAudioController : ControllerBase
         }
     }
 }
+
