@@ -315,52 +315,33 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
     }
   };
 
-  // Extract words from a catalog track via its source URL
-  const handleExtractCatalogTrack = async (track) => {
+  // Catalog tracks are selected for singing directly.
+  // Word extraction is reserved for uploaded/local songs.
+  const handleSelectCatalogTrack = (track) => {
     setCatalogTrack(track);
-    setExtracting(true);
     setError("");
-    setLyrics("");
-    setLrc("");
-    setWordCount(null);
-    setVocalsIsolated(false);
 
     // Record a play for DB-backed tracks only.
     if (track?.sourceType !== "external") {
       apiClient.karaoke.recordPlay(track.id).catch(() => {});
     }
 
-    // If the track already has LRC content or plain lyrics — show immediately
+    // If the track already has LRC content or plain lyrics, show it.
     if (track.lrcContent) {
       setLrc(track.lrcContent);
       setLyrics(track.lrcContent);
-      setExtracting(false);
       return;
     }
     if (track.plainLyrics) {
+      setLrc("");
       setLyrics(track.plainLyrics);
-      setExtracting(false);
       return;
     }
 
-    // If the track has a ready instrumental blob URL — run word extraction on it
-    const audioUrl = track.instrumentalUrl || track.sourceUrl;
-    if (!audioUrl) {
-      setError(`No audio URL available for "${track.title}". It may still be processing.`);
-      setExtracting(false);
-      return;
-    }
-    try {
-      const result = await transcribeUrl(audioUrl, `${track.artist} - ${track.title}`);
-      setLyrics(extractTranscriptText(result));
-      setLrc(result?.lrc || "");
-      setWordCount(result?.word_count ?? null);
-      setVocalsIsolated(result?.vocals_isolated ?? false);
-    } catch (err) {
-      setError(err?.message || "Word extraction failed.");
-    } finally {
-      setExtracting(false);
-    }
+    setLyrics("");
+    setLrc("");
+    setWordCount(null);
+    setVocalsIsolated(false);
   };
 
   if (loading && catalogLoading) {
@@ -474,7 +455,6 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
                           {group.tracks.map((track) => {
                             const isSelected = catalogTrack?.id === track.id;
                             const isReady    = track.status === "Ready";
-                            const hasMaterial = track.lrcContent || track.plainLyrics || track.instrumentalUrl || track.sourceUrl;
                             return (
                               <div
                                 key={track.id}
@@ -516,19 +496,16 @@ export default function KaraokeExtractor({ currentUser, onAuthRequired }) {
                                       <ExternalLink className="w-3.5 h-3.5" />
                                     </a>
                                   )}
-                                  {/* Extract / Play button */}
+                                  {/* Select/Start singing button */}
                                   <Button
                                     size="sm"
                                     variant={isSelected ? "default" : "outline"}
-                                    disabled={extracting || !hasMaterial}
-                                    onClick={() => handleExtractCatalogTrack(track)}
-                                    title={!hasMaterial ? "No audio available yet — pending processing" : "Extract words"}
+                                    disabled={false}
+                                    onClick={() => handleSelectCatalogTrack(track)}
+                                    title={isSelected ? "Track selected for singing" : "Select this track and start singing"}
                                   >
-                                    {extracting && isSelected
-                                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      : <Play className="w-3.5 h-3.5" />
-                                    }
-                                    {extracting && isSelected ? "Extracting…" : "Extract"}
+                                    <Play className="w-3.5 h-3.5" />
+                                    {isSelected ? "Selected" : "Start Singing"}
                                   </Button>
                                 </div>
                               </div>
