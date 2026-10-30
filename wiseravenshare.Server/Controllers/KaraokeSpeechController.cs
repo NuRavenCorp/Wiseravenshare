@@ -557,6 +557,8 @@ public sealed class KaraokeSpeechController : ControllerBase
     // ----------------------------------------------------------------
 
     [HttpPost("transcribe")]
+    [HttpPost("~/api/karaoke/transcribe")]
+    [HttpPost("~/api/transcribe")]
     [AllowAnonymous]
     [RequestSizeLimit(25_000_000)]
     public async Task<IActionResult> Transcribe(CancellationToken cancellationToken)
@@ -605,6 +607,8 @@ public sealed class KaraokeSpeechController : ControllerBase
     ///   3. Returns {text, language, words:[{word,start,end,prob}], lrc, word_count, vocals_isolated}
     /// </summary>
     [HttpPost("transcribe/words")]
+    [HttpPost("~/api/karaoke/transcribe/words")]
+    [HttpPost("~/api/transcribe/words")]
     [AllowAnonymous]
     [RequestSizeLimit(100_000_000)] // 100 MB — music files are larger than voice memos
     public async Task<IActionResult> TranscribeWords(CancellationToken cancellationToken)
