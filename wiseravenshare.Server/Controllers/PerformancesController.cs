@@ -128,16 +128,46 @@ public sealed class PerformancesController(
     // DELETE /api/performances/{id}
     // ----------------------------------------------------------------
 
-    [HttpDelete("{id:guid}")]
+    [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(
-        [FromRoute] Guid id,
+        [FromRoute] string id,
         CancellationToken cancellationToken = default)
     {
         var userId = User.GetUserId();
         if (userId == Guid.Empty) return Unauthorized();
 
+        if (!Guid.TryParse(id, out var performanceId))
+        {
+            return BadRequest(new { message = "Invalid performance id." });
+        }
+
+        return await DeletePerformanceAsync(userId, performanceId, cancellationToken);
+    }
+
+    // Compatibility route for hosts/proxies that block DELETE.
+    [HttpPost("{id}/delete")]
+    public async Task<IActionResult> DeleteViaPost(
+        [FromRoute] string id,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        if (!Guid.TryParse(id, out var performanceId))
+        {
+            return BadRequest(new { message = "Invalid performance id." });
+        }
+
+        return await DeletePerformanceAsync(userId, performanceId, cancellationToken);
+    }
+
+    private async Task<IActionResult> DeletePerformanceAsync(
+        Guid userId,
+        Guid performanceId,
+        CancellationToken cancellationToken)
+    {
         var perf = await db.Performances
-            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == performanceId && x.UserId == userId, cancellationToken);
 
         if (perf is null) return NotFound();
 
