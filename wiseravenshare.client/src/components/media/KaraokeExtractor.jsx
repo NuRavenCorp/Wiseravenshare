@@ -201,16 +201,21 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
 
       const normalizedMusic = (music || []).map((item) => ({
         id: `music:${item.id}`,
+        sourceId: String(item.id || ""),
         kind: "music",
         title: item.title || item.name || "Untitled track",
-        url: item.mediaUrl || item.file_uri || "",
+        // Prefer the stable stream endpoint by track id for extraction/playback.
+        url: item?.id ? `/api/ravensight/media/music/${encodeURIComponent(String(item.id))}/stream` : (item.mediaUrl || item.file_uri || ""),
+        fallbackUrl: item.mediaUrl || item.file_uri || "",
       }));
 
       const normalizedVideos = (videos || []).map((item) => ({
         id: `video:${item.id}`,
+        sourceId: String(item.id || ""),
         kind: "video",
         title: item.title || item.caption || item.fileName || "Untitled clip",
         url: item.mediaUrl || item.videoUrl || item.file_uri || "",
+        fallbackUrl: item.file_uri || "",
       }));
 
       setSources([...normalizedVideos, ...normalizedMusic]);
@@ -306,11 +311,30 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
     setError("");
     setLyrics("");
     try {
-      const playableUrl = await getPlayableUrl(selectedSource.url);
-      if (!playableUrl) {
+      const sourceCandidates = Array.from(new Set([
+        selectedSource.url,
+        selectedSource.fallbackUrl,
+      ].filter(Boolean)));
+      if (sourceCandidates.length === 0) {
         throw new Error("This item does not have a playable media URL.");
       }
-      const result = await transcribeUrl(playableUrl, selectedSource.title);
+
+      let result = null;
+      let lastError = null;
+      for (const sourceUrl of sourceCandidates) {
+        try {
+          const playableUrl = await getPlayableUrl(sourceUrl);
+          if (!playableUrl) continue;
+          result = await transcribeUrl(playableUrl, selectedSource.title);
+          if (result) break;
+        } catch (candidateError) {
+          lastError = candidateError;
+        }
+      }
+      if (!result) {
+        throw lastError || new Error("This item does not have a playable media URL.");
+      }
+
       setLyrics(extractTranscriptText(result));
       setLrc(result?.lrc || "");
       setWordCount(result?.word_count ?? null);
