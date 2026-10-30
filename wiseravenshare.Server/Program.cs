@@ -2116,6 +2116,31 @@ builder.Services.Configure<WiseRavenShare.Server.Infrastructure.External.OpenAiO
     builder.Configuration.GetSection("OpenAI"));
 builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.WhisperOptions>(
     builder.Configuration.GetSection("Whisper"));
+builder.Services.PostConfigure<WiseRavenShare.Server.Application.Services.Assistant.WhisperOptions>(opts =>
+{
+    if (string.IsNullOrWhiteSpace(opts.ApiKey))
+    {
+        opts.ApiKey =
+            builder.Configuration["Whisper:ApiKey"] ??
+            builder.Configuration["OpenAI:ApiKey"] ??
+            builder.Configuration["OpenAI__ApiKey"] ??
+            builder.Configuration["OPENAI_API_KEY"] ??
+            string.Empty;
+    }
+
+    if (string.IsNullOrWhiteSpace(opts.BaseUrl))
+    {
+        opts.BaseUrl =
+            builder.Configuration["Whisper:BaseUrl"] ??
+            builder.Configuration["OpenAI:BaseUrl"] ??
+            "https://api.openai.com/v1";
+    }
+
+    if (string.IsNullOrWhiteSpace(opts.Model))
+    {
+        opts.Model = "whisper-1";
+    }
+});
 builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.TtsOptions>(
     builder.Configuration.GetSection("Tts"));
 builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.WebGroundingOptions>(

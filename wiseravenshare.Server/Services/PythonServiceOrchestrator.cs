@@ -397,6 +397,12 @@ public sealed class PythonServiceOrchestrator : IHostedService, IDisposable
             Path.DirectorySeparatorChar,
             Path.AltDirectorySeparatorChar);
 
+        // Published container layout: app binaries live directly under /app.
+        if (File.Exists(Path.Combine(contentRoot, "Wiseravenshare.Server.dll")))
+        {
+            return contentRoot;
+        }
+
         if (File.Exists(Path.Combine(contentRoot, "Wiseravenshare.Server.csproj")))
         {
             return Path.GetFullPath(Path.Combine(contentRoot, ".."));

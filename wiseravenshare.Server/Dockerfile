@@ -64,6 +64,13 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Copy compiled backend
 COPY --from=server-build /app/publish ./
 
+# Copy Python microservice source trees expected by PythonServiceOrchestrator.
+# These are runtime code dependencies and must be present in the final image.
+COPY services/audio-processor ./services/audio-processor
+COPY python-karaoke ./services/karaoke-engine
+COPY python-karaoke ./services/karaoke-speech
+COPY wiseravenshare.Server/python-matrix ./wiseravenshare.Server/python-matrix
+
 
 # Prebuild Python service virtual environments so karaoke/audio services are
 # ready immediately at container start instead of installing on first boot.
