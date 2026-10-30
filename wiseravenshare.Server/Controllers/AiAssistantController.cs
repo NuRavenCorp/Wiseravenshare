@@ -2,12 +2,14 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Wiseravenshare.Server.Filters;
+using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.AiAssistant;
@@ -26,6 +28,7 @@ public class AiAssistantController : ControllerBase
     private readonly IAiJobQueue _jobQueue;
     private readonly ISiteCrawlerService _siteCrawlerService;
     private readonly IContentCrawlerService _contentCrawlerService;
+    private readonly AppDbContext _db;
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<AiAssistantController> _logger;
@@ -36,6 +39,7 @@ public class AiAssistantController : ControllerBase
         IAiJobQueue jobQueue,
         ISiteCrawlerService siteCrawlerService,
         IContentCrawlerService contentCrawlerService,
+        AppDbContext db,
         IConfiguration configuration,
         UserStore userStore,
         IHttpClientFactory httpClientFactory,
@@ -47,6 +51,7 @@ public class AiAssistantController : ControllerBase
         _jobQueue = jobQueue;
         _siteCrawlerService = siteCrawlerService;
         _contentCrawlerService = contentCrawlerService;
+        _db = db;
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
@@ -376,15 +381,29 @@ public class AiAssistantController : ControllerBase
             return request;
         }
 
+        var contextParts = new List<string>(capacity: 2);
+
         var contextBlock = await BuildCrawlerContextBlockAsync(ct);
-        if (string.IsNullOrWhiteSpace(contextBlock))
+        if (!string.IsNullOrWhiteSpace(contextBlock))
+        {
+            contextParts.Add(contextBlock);
+        }
+
+        var recentChangesContext = await BuildRecentChangesContextBlockAsync(ct);
+        if (!string.IsNullOrWhiteSpace(recentChangesContext))
+        {
+            contextParts.Add(recentChangesContext);
+        }
+
+        if (contextParts.Count == 0)
         {
             return request;
         }
 
+        var mergedContext = string.Join("\n\n", contextParts);
         return new AiChatRequest
         {
-            Message = $"{contextBlock}\n\nUser question:\n{request.Message}",
+            Message = $"{mergedContext}\n\nUser question:\n{request.Message}",
             History = request.History,
             Model = request.Model,
             UseCrawlerContext = request.UseCrawlerContext
@@ -426,6 +445,120 @@ public class AiAssistantController : ControllerBase
             _logger.LogDebug(ex, "Unable to enrich AI request with crawler context.");
             return string.Empty;
         }
+    }
+
+    private async Task<string> BuildRecentChangesContextBlockAsync(CancellationToken ct)
+    {
+        try
+        {
+            var sinceUtc = DateTime.UtcNow.AddHours(-24);
+            var sb = new StringBuilder();
+            sb.AppendLine("Use this last-24h activity digest when relevant:");
+
+            var userId = CurrentUserId();
+            var hasGuid = Guid.TryParse(userId, out var userGuid);
+
+            if (hasGuid)
+            {
+                var conversationIds = await _db.ConversationParticipants
+                    .AsNoTracking()
+                    .Where(p => p.UserId == userGuid)
+                    .Select(p => p.ConversationId)
+                    .Distinct()
+                    .ToListAsync(ct);
+
+                var postCount = await _db.Posts
+                    .AsNoTracking()
+                    .Where(p => p.UserId == userGuid && !p.IsDeleted && p.CreatedAt >= sinceUtc)
+                    .CountAsync(ct);
+
+                var messageCount = await _db.Messages
+                    .AsNoTracking()
+                    .Where(m => !m.IsDeleted && m.CreatedAt >= sinceUtc && conversationIds.Contains(m.ConversationId))
+                    .CountAsync(ct);
+
+                var notificationCount = await _db.Set<Entities.Notification>()
+                    .AsNoTracking()
+                    .Where(n => n.UserId == userGuid && !n.IsDeleted && n.CreatedAt >= sinceUtc)
+                    .CountAsync(ct);
+
+                var unreadCount = await _db.Set<Entities.Notification>()
+                    .AsNoTracking()
+                    .Where(n => n.UserId == userGuid && !n.IsDeleted && !n.IsRead)
+                    .CountAsync(ct);
+
+                sb.AppendLine($"- User activity totals (24h): posts={postCount}, thread_messages={messageCount}, notifications={notificationCount}, unread_notifications={unreadCount}");
+
+                var recentPosts = await _db.Posts
+                    .AsNoTracking()
+                    .Where(p => p.UserId == userGuid && !p.IsDeleted && p.CreatedAt >= sinceUtc)
+                    .OrderByDescending(p => p.CreatedAt)
+                    .Select(p => new { p.Type, p.Content, p.CreatedAt, p.LikesCount, p.CommentsCount, p.RepostsCount })
+                    .Take(3)
+                    .ToListAsync(ct);
+
+                if (recentPosts.Count > 0)
+                {
+                    sb.AppendLine("- Latest posts:");
+                    foreach (var post in recentPosts)
+                    {
+                        var preview = TruncateForContext(post.Content, 120);
+                        sb.AppendLine($"  - {post.CreatedAt:O} [{post.Type}] {preview} (likes={post.LikesCount}, comments={post.CommentsCount}, reposts={post.RepostsCount})");
+                    }
+                }
+
+                var recentNotifications = await _db.Set<Entities.Notification>()
+                    .AsNoTracking()
+                    .Where(n => n.UserId == userGuid && !n.IsDeleted && n.CreatedAt >= sinceUtc)
+                    .OrderByDescending(n => n.CreatedAt)
+                    .Select(n => new { n.Type, n.Content, n.CreatedAt, n.IsRead })
+                    .Take(4)
+                    .ToListAsync(ct);
+
+                if (recentNotifications.Count > 0)
+                {
+                    sb.AppendLine("- Latest notifications:");
+                    foreach (var note in recentNotifications)
+                    {
+                        sb.AppendLine($"  - {note.CreatedAt:O} [{note.Type}] {(note.IsRead ? "read" : "unread")} - {TruncateForContext(note.Content, 120)}");
+                    }
+                }
+
+                return sb.ToString().Trim();
+            }
+
+            var globalPostCount = await _db.Posts
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.CreatedAt >= sinceUtc)
+                .CountAsync(ct);
+            var globalMessageCount = await _db.Messages
+                .AsNoTracking()
+                .Where(m => !m.IsDeleted && m.CreatedAt >= sinceUtc)
+                .CountAsync(ct);
+            var globalNotificationCount = await _db.Set<Entities.Notification>()
+                .AsNoTracking()
+                .Where(n => !n.IsDeleted && n.CreatedAt >= sinceUtc)
+                .CountAsync(ct);
+
+            sb.AppendLine($"- Platform totals (24h): posts={globalPostCount}, thread_messages={globalMessageCount}, notifications={globalNotificationCount}");
+            return sb.ToString().Trim();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unable to enrich AI request with last-24h activity digest.");
+            return string.Empty;
+        }
+    }
+
+    private static string TruncateForContext(string? value, int max)
+    {
+        var text = (value ?? string.Empty).Trim().ReplaceLineEndings(" ");
+        if (text.Length <= max)
+        {
+            return text;
+        }
+
+        return text[..max] + "...";
     }
 
     private static void AppendSiteSummary(StringBuilder sb, SiteCrawlerSummaryDto? summary)
