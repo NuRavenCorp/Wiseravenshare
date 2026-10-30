@@ -55,20 +55,21 @@ const parseResponseBody = async (response) => {
 };
 
 const requestJson = async (path, options = {}) => {
+  const { omitAuth = false, ...fetchOptions } = options;
   const token = readStoredToken();
-  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   const headers = {
     ...(isFormData ? {} : { "Content-Type": "application/json" }),
-    ...(options.headers || {}),
+    ...(fetchOptions.headers || {}),
   };
 
-  if (token) {
+  if (token && !omitAuth) {
     headers.Authorization = `Bearer ${token}`;
   }
 
   const response = await fetch(buildUrl(path), {
     credentials: "include",
-    ...options,
+    ...fetchOptions,
     headers,
   });
 
@@ -84,20 +85,21 @@ const requestJson = async (path, options = {}) => {
 };
 
 const request = async (path, options = {}) => {
+  const { omitAuth = false, ...fetchOptions } = options;
   const token = readStoredToken();
-  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   const headers = {
     ...(isFormData ? {} : {}),
-    ...(options.headers || {}),
+    ...(fetchOptions.headers || {}),
   };
 
-  if (token) {
+  if (token && !omitAuth) {
     headers.Authorization = `Bearer ${token}`;
   }
 
   const response = await fetch(buildUrl(path), {
     credentials: "include",
-    ...options,
+    ...fetchOptions,
     headers,
   });
 
@@ -113,10 +115,11 @@ const request = async (path, options = {}) => {
 };
 
 const requestBlob = async (path, options = {}) => {
+  const { omitAuth = false, ...fetchOptions } = options;
   const token = readStoredToken();
-  const headers = { Accept: "audio/mpeg, application/json;q=0.9, */*;q=0.8", ...(options.headers || {}) };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(buildUrl(path), { credentials: "include", ...options, headers });
+  const headers = { Accept: "audio/mpeg, application/json;q=0.9, */*;q=0.8", ...(fetchOptions.headers || {}) };
+  if (token && !omitAuth) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(buildUrl(path), { credentials: "include", ...fetchOptions, headers });
   if (!response.ok) {
     const data = await parseResponseBody(response);
     const error = new Error(data?.message || `Request failed with status ${response.status}`);
