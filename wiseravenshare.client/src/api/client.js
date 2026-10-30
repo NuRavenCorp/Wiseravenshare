@@ -843,6 +843,46 @@ export const apiClient = {
       if (duration) q.set("duration", String(duration));
       return requestJson(`/api/karaoke/lyrics?${q.toString()}`, { method: "GET" });
     },
+    // ── Song file library (local bucket → future cloud) ──────────────────
+    songs: {
+      upload(file, { title, artist, album, genre, language, year, isPublic = false } = {}) {
+        const body = new FormData();
+        body.append("file", file);
+        if (title)    body.append("title",    title);
+        if (artist)   body.append("artist",   artist);
+        if (album)    body.append("album",    album);
+        if (genre)    body.append("genre",    genre);
+        if (language) body.append("language", language);
+        if (year)     body.append("year",     String(year));
+        body.append("isPublic", isPublic ? "true" : "false");
+        return requestJson("/api/karaoke/songs", { method: "POST", body });
+      },
+      list({ page = 1, pageSize = 40, includePublic = false } = {}) {
+        const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+        if (includePublic) q.set("includePublic", "true");
+        return requestJson(`/api/karaoke/songs?${q.toString()}`, { method: "GET" });
+      },
+      getById(id) {
+        return requestJson(`/api/karaoke/songs/${encodeURIComponent(id)}`, { method: "GET" });
+      },
+      streamUrl(id) {
+        return `/api/karaoke/songs/${encodeURIComponent(id)}/stream`;
+      },
+      update(id, payload) {
+        return requestJson(`/api/karaoke/songs/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      },
+      delete(id) {
+        const encodedId = encodeURIComponent(id);
+        return requestJson(`/api/karaoke/songs/${encodedId}`, { method: "DELETE" })
+          .catch((error) => {
+            if (![400, 404, 405].includes(error?.status)) throw error;
+            return requestJson(`/api/karaoke/songs/${encodedId}/delete`, { method: "POST" });
+          });
+      },
+    },
     recordPlay(trackId) {
       return requestJson(`/api/karaoke/db-catalog/${encodeURIComponent(trackId)}/play`, { method: "POST" });
     },
