@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir autolrc-tools wispr-lrc
 
 COPY main.py .
+COPY transcribe_karaoke.py .
 
 # Models and job output live in named volumes on the host
 RUN mkdir -p /app/models_cache /tmp/karaoke_jobs
