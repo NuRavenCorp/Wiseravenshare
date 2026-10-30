@@ -187,6 +187,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
   const [catalogPlaybackLoading, setCatalogPlaybackLoading] = useState(false);
   const [catalogPlaybackError, setCatalogPlaybackError] = useState("");
   const [activeLyricIndex, setActiveLyricIndex] = useState(-1);
+  const [audioDurationSeconds, setAudioDurationSeconds] = useState(0);
   const audioRef = useRef(null);
 
   const loadSources = useCallback(async () => {
@@ -339,7 +340,24 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
 
   // Catalog tracks are selected for singing directly.
   // Word extraction is reserved for uploaded/local songs.
-  const timedLyrics = useMemo(() => parseLrcLines(lrc), [lrc]);
+  const timedLyrics = useMemo(() => {
+    const fromLrc = parseLrcLines(lrc);
+    if (fromLrc.length > 0) return fromLrc;
+
+    const lines = String(lyrics || "")
+      .split(/\r?\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return [];
+
+    const duration = Number(audioDurationSeconds || catalogTrack?.durationSeconds || 0);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return lines.map((text, index) => ({ timeSeconds: index * 3, text }));
+    }
+
+    const step = duration / Math.max(lines.length, 1);
+    return lines.map((text, index) => ({ timeSeconds: index * step, text }));
+  }, [lrc, lyrics, audioDurationSeconds, catalogTrack?.durationSeconds]);
 
   const handleSelectCatalogTrack = async (track) => {
     setCatalogTrack(track);
@@ -348,28 +366,36 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
     setCatalogPlaybackError("");
     setCatalogPlaybackUrl("");
     setActiveLyricIndex(-1);
+    setAudioDurationSeconds(0);
 
     // Record a play for DB-backed tracks only.
     if (track?.sourceType !== "external") {
       apiClient.karaoke.recordPlay(track.id).catch(() => {});
     }
 
-    // If the track already has LRC content or plain lyrics, show it.
-    if (track.lrcContent) {
-      setLrc(track.lrcContent);
-      setLyrics(track.lrcContent);
-      return;
-    }
-    if (track.plainLyrics) {
-      setLrc("");
-      setLyrics(track.plainLyrics);
-      return;
-    }
+    const lrcContent = track.lrcContent || track.lrc_content || "";
+    const plainLyrics = track.plainLyrics || track.plain_lyrics || track.lyrics || "";
+    const lrcUrl = track.lrcUrl || track.lrc_url || "";
 
-    setLyrics("");
-    setLrc("");
+    setLrc(lrcContent || "");
+    setLyrics(lrcContent || plainLyrics || "");
     setWordCount(null);
     setVocalsIsolated(false);
+
+    if (!lrcContent && lrcUrl) {
+      try {
+        const response = await fetch(lrcUrl, { credentials: "include" });
+        if (response.ok) {
+          const fetchedLrc = await response.text();
+          if (fetchedLrc?.trim()) {
+            setLrc(fetchedLrc);
+            setLyrics(fetchedLrc);
+          }
+        }
+      } catch {
+        // Keep inline lyrics fallback without interrupting playback.
+      }
+    }
 
     const audioUrl = track.instrumentalUrl || track.sourceUrl || "";
     if (!audioUrl) return;
@@ -399,7 +425,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
 
   return (
     <div className="space-y-4">
-      <KaraokePaywall currentUser={currentUser} onAuthRequired={onAuthRequired}>
+      <KaraokePaywall currentUser={currentUser} userLoading={userLoading} onAuthRequired={onAuthRequired}>
 
         {/* ── Tab switcher ───────────────────────────────────────────── */}
         <div className="flex gap-1 border-b border-border mb-2">
@@ -672,6 +698,10 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
                 controls
                 autoPlay
                 src={catalogPlaybackUrl}
+                onLoadedMetadata={(event) => {
+                  const duration = Number(event.currentTarget.duration || 0);
+                  setAudioDurationSeconds(Number.isFinite(duration) ? duration : 0);
+                }}
                 onTimeUpdate={(event) => {
                   if (!timedLyrics.length) return;
                   const currentTime = event.currentTarget.currentTime || 0;
