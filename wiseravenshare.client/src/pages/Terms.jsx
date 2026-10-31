@@ -6,7 +6,7 @@ const CONTACT_EMAIL = "legal@wiseravenshare.com";
 
 export default function Terms() {
   return (
-    <LegalLayout title="Terms of Service" subtitle="The rules and expectations for using WiseRavenShare." lastUpdated={EFFECTIVE_DATE}>
+    <LegalLayout title="WiseRavenShare Terms of Service" subtitle="The rules and expectations for using WiseRavenShare." lastUpdated={EFFECTIVE_DATE}>
       <LegalSection title="1. Acceptance of Terms">
         <p>
           These Terms of Service ("Terms") govern your access to and use of WiseRavenShare (the "Platform"). By creating an
