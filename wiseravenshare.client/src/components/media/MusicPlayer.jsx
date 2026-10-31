@@ -48,9 +48,11 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
   const [repeat, setRepeat] = useState("off");
   const [confirmingId, setConfirmingId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [playbackQueueIds, setPlaybackQueueIds] = useState([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const playerRef = useRef(null);
   const conversionAttemptRef = useRef(null);
+  const pendingAutoPlayRef = useRef(false);
   const mountedRef = useRef(false);
   const { toast } = useToast();
   const isIOS = typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
@@ -130,6 +132,18 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
   }, [initialTrack, initialQueue, tracks.length]);
 
   const current = currentIdx >= 0 ? tracks[currentIdx] : null;
+  const queueIndices = React.useMemo(() => {
+    if (tracks.length === 0) return [];
+    if (!Array.isArray(playbackQueueIds) || playbackQueueIds.length === 0) {
+      return tracks.map((_, idx) => idx);
+    }
+    const queueIdSet = new Set(playbackQueueIds);
+    const indices = tracks
+      .map((track, idx) => ({ id: getTrackId(track), idx }))
+      .filter(({ id }) => Boolean(id && queueIdSet.has(id)))
+      .map(({ idx }) => idx);
+    return indices.length > 0 ? indices : tracks.map((_, idx) => idx);
+  }, [tracks, playbackQueueIds]);
 
   const prepareBrowserCompatibleTrack = async () => {
     const trackId = getTrackId(current);
@@ -200,6 +214,20 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
             return objectUrl;
           });
           setUrlLoading(false);
+          const audio = playerRef.current;
+          if (pendingAutoPlayRef.current && audio) {
+            pendingAutoPlayRef.current = false;
+            try {
+              await audio.play();
+            } catch (error) {
+              if (error?.name === "NotAllowedError") {
+                setNativeControlsFallback(true);
+                setPlaybackError("Your browser blocked autoplay. Tap play to continue.");
+              } else if (error?.name !== "AbortError") {
+                setPlaybackError(error?.message || "This track could not be played. Check the file format or try uploading it again.");
+              }
+            }
+          }
           return;
         }
 
@@ -208,6 +236,20 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
         if (!url) throw new Error("The media URL is unavailable.");
         setPlayUrl(url);
         setUrlLoading(false);
+        const audio = playerRef.current;
+        if (pendingAutoPlayRef.current && audio) {
+          pendingAutoPlayRef.current = false;
+          try {
+            await audio.play();
+          } catch (error) {
+            if (error?.name === "NotAllowedError") {
+              setNativeControlsFallback(true);
+              setPlaybackError("Your browser blocked autoplay. Tap play to continue.");
+            } else if (error?.name !== "AbortError") {
+              setPlaybackError(error?.message || "This track could not be played. Check the file format or try uploading it again.");
+            }
+          }
+        }
       } catch (primaryError) {
         if (cancelled) return;
 
@@ -229,6 +271,7 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
 
   const handlePlayPause = () => {
     if (!current && tracks.length > 0) {
+      pendingAutoPlayRef.current = true;
       setCurrentIdx(0);
       return;
     }
@@ -247,26 +290,37 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
     });
   };
 
-  const handleNext = () => {
+  const handleNext = (autoPlay = false) => {
     if (tracks.length === 0) return;
+    const activeQueue = queueIndices;
+    if (activeQueue.length === 0) return;
+    const queuePosition = activeQueue.indexOf(currentIdx);
+    const currentQueuePosition = queuePosition >= 0 ? queuePosition : 0;
+    if (autoPlay) pendingAutoPlayRef.current = true;
     if (shuffle) {
       let next;
       do {
-        next = Math.floor(Math.random() * tracks.length);
-      } while (next === currentIdx && tracks.length > 1);
+        next = activeQueue[Math.floor(Math.random() * activeQueue.length)];
+      } while (next === currentIdx && activeQueue.length > 1);
       setCurrentIdx(next);
     } else {
-      setCurrentIdx((currentIdx + 1) % tracks.length);
+      const nextQueuePosition = (currentQueuePosition + 1) % activeQueue.length;
+      setCurrentIdx(activeQueue[nextQueuePosition]);
     }
   };
 
   const handlePrev = () => {
     if (tracks.length === 0) return;
+    const activeQueue = queueIndices;
+    if (activeQueue.length === 0) return;
+    const queuePosition = activeQueue.indexOf(currentIdx);
+    const currentQueuePosition = queuePosition >= 0 ? queuePosition : 0;
     if (progress > 3) {
       if (playerRef.current) playerRef.current.currentTime = 0;
       return;
     }
-    setCurrentIdx((currentIdx - 1 + tracks.length) % tracks.length);
+    const previousQueuePosition = (currentQueuePosition - 1 + activeQueue.length) % activeQueue.length;
+    setCurrentIdx(activeQueue[previousQueuePosition]);
   };
 
   const handleSeek = (e) => {
@@ -276,6 +330,9 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
   };
 
   const handleEnded = () => {
+    const activeQueue = queueIndices;
+    const queuePosition = activeQueue.indexOf(currentIdx);
+    const isLastInQueue = queuePosition < 0 || queuePosition === activeQueue.length - 1;
     if (repeat === "one") {
       if (playerRef.current) {
         playerRef.current.currentTime = 0;
@@ -288,8 +345,8 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
           }
         });
       }
-    } else if (repeat === "all" || currentIdx < tracks.length - 1 || shuffle) {
-      handleNext();
+    } else if (repeat === "all" || !isLastInQueue || shuffle) {
+      handleNext(true);
     } else {
       setPlaying(false);
     }
@@ -311,6 +368,7 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
     setConfirmingId(null);
     try {
       await apiClient.ravensightMedia.deleteMusic(t.id);
+      setPlaybackQueueIds((prev) => prev.filter((id) => id !== t.id));
       if (tracks[currentIdx]?.id === t.id) {
         setCurrentIdx(-1);
         setPlaying(false);
@@ -344,6 +402,7 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
     setBulkDeleting(true);
     try {
       await Promise.all([...selectedIds].map((id) => apiClient.ravensightMedia.deleteMusic(id)));
+      setPlaybackQueueIds((prev) => prev.filter((id) => !selectedIds.has(id)));
       if (currentIdx >= 0 && selectedIds.has(tracks[currentIdx]?.id)) {
         setCurrentIdx(-1);
         setPlaying(false);
@@ -364,8 +423,26 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
 
   const handlePlayAll = () => {
     if (tracks.length === 0) return;
+    setPlaybackQueueIds(tracks.map((track) => getTrackId(track)).filter(Boolean));
+    pendingAutoPlayRef.current = true;
     setCurrentIdx(0);
-    setPlaying(false);
+    const audio = playerRef.current;
+    if (audio) {
+      audio.currentTime = 0;
+    }
+  };
+
+  const handlePlaySelected = () => {
+    if (selectedIds.size === 0 || tracks.length === 0) return;
+    const queueIds = tracks
+      .map((track) => getTrackId(track))
+      .filter((id) => Boolean(id && selectedIds.has(id)));
+    if (queueIds.length === 0) return;
+    const firstIndex = tracks.findIndex((track) => queueIds.includes(getTrackId(track)));
+    if (firstIndex < 0) return;
+    setPlaybackQueueIds(queueIds);
+    pendingAutoPlayRef.current = true;
+    setCurrentIdx(firstIndex);
     const audio = playerRef.current;
     if (audio) {
       audio.currentTime = 0;
@@ -547,6 +624,9 @@ export default function MusicPlayer({ initialTrack = null, initialQueue = EMPTY_
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={handlePlayAll} disabled={tracks.length === 0}>
                   Play all
+                </Button>
+                <Button variant="outline" size="sm" onClick={handlePlaySelected} disabled={selectedIds.size === 0}>
+                  Play selected
                 </Button>
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
                   <input
