@@ -720,10 +720,23 @@ public sealed class FunctionCompatController : ControllerBase
 
         try
         {
-            var query = _db.Posts.AsNoTracking().Where(x => x.TruthScore != null);
+            var query = _db.Posts.AsNoTracking().Where(x => x.TruthScore != null || x.TruthStatus != null);
             if (request.TargetId.HasValue)
             {
                 query = query.Where(x => x.Id == request.TargetId.Value);
+            }
+            if (request.MinScore.HasValue)
+            {
+                query = query.Where(x => x.TruthScore >= request.MinScore.Value);
+            }
+            if (request.MaxScore.HasValue)
+            {
+                query = query.Where(x => x.TruthScore <= request.MaxScore.Value);
+            }
+            if (!string.IsNullOrWhiteSpace(request.Status))
+            {
+                var normalizedStatus = request.Status.Trim().ToLowerInvariant();
+                query = query.Where(x => x.TruthStatus == normalizedStatus);
             }
 
             var items = await query
@@ -735,7 +748,10 @@ public sealed class FunctionCompatController : ControllerBase
                     target_id = x.Id,
                     target_type = "post",
                     score = x.TruthScore,
+                    truth_status = x.TruthStatus ?? "pending",
                     correction = x.TruthCorrection,
+                    is_verified = x.TruthStatus == "verified" || x.TruthStatus == "expert_verified" || x.TruthStatus == "source_verified",
+                    is_opinion = x.TruthStatus == "opinion",
                     created_date = x.CreatedAt
                 })
                 .ToListAsync();
@@ -773,25 +789,79 @@ public sealed class FunctionCompatController : ControllerBase
         switch (request.Action.Trim().ToLowerInvariant())
         {
             case "clear":
+            case "reset":
                 post.TruthScore = null;
                 post.TruthCorrection = null;
                 post.TruthSources = null;
+                post.TruthStatus = TruthStatuses.Pending;
                 break;
+
             case "set":
             case "update":
                 if (!request.Score.HasValue)
-                {
                     return BadRequest(new { error = "score is required for set/update actions." });
-                }
                 post.TruthScore = request.Score.Value;
                 post.TruthCorrection = request.Correction;
+                // Auto-apply status from score — preserves expert/source overrides only if caller
+                // explicitly sets one via the status field.
+                post.TruthStatus = string.IsNullOrWhiteSpace(request.Status)
+                    ? TruthStatusHelper.FromScore(request.Score.Value)
+                    : request.Status.Trim().ToLowerInvariant();
                 break;
+
+            // ── explicit verification paths ────────────────────────────────
+            case "verify":
+                // Admin or TruthGuardian manually marks as verified.
+                post.TruthStatus = TruthStatuses.Verified;
+                if (request.Score.HasValue) post.TruthScore = request.Score.Value;
+                if (!string.IsNullOrWhiteSpace(request.Correction)) post.TruthCorrection = request.Correction;
+                break;
+
+            case "expert_verify":
+            case "expert-verify":
+                post.TruthStatus = TruthStatuses.ExpertVerified;
+                if (request.Score.HasValue) post.TruthScore = request.Score.Value;
+                if (!string.IsNullOrWhiteSpace(request.Correction)) post.TruthCorrection = request.Correction;
+                break;
+
+            case "source_verify":
+            case "source-verify":
+                // Caller has independently confirmed a primary source backs the claim.
+                post.TruthStatus = TruthStatuses.SourceVerified;
+                if (request.Score.HasValue) post.TruthScore = request.Score.Value;
+                if (!string.IsNullOrWhiteSpace(request.Correction)) post.TruthCorrection = request.Correction;
+                break;
+
+            case "mark_opinion":
+            case "mark-opinion":
+            case "opinion":
+                // Opinions are exempt from factual scoring.
+                post.TruthStatus = TruthStatuses.Opinion;
+                post.TruthScore = null;
+                break;
+
+            case "dispute":
+                post.TruthStatus = TruthStatuses.Disputed;
+                if (!string.IsNullOrWhiteSpace(request.Correction)) post.TruthCorrection = request.Correction;
+                break;
+
+            case "mark_false":
+            case "mark-false":
+            case "false":
+                post.TruthStatus = TruthStatuses.False;
+                if (request.Score.HasValue) post.TruthScore = request.Score.Value;
+                if (!string.IsNullOrWhiteSpace(request.Correction)) post.TruthCorrection = request.Correction;
+                break;
+
             default:
-                return BadRequest(new { error = "Unsupported action." });
+                return BadRequest(new
+                {
+                    error = "Unsupported action. Valid actions: clear, reset, set, update, verify, expert_verify, source_verify, opinion, dispute, false."
+                });
         }
 
         await _db.SaveChangesAsync();
-        return Ok(new { success = true, score_id = post.Id, action = request.Action });
+        return Ok(new { success = true, score_id = post.Id, action = request.Action, truth_status = post.TruthStatus, truth_score = post.TruthScore });
     }
 
     [HttpPost("suggest-podcast-pricing")]
@@ -2719,6 +2789,8 @@ public sealed class TruthScoreQueryRequest
     public string? TargetType { get; set; }
     public decimal? MinScore { get; set; }
     public decimal? MaxScore { get; set; }
+    /// <summary>Filter by TruthStatus (pending | verified | false | opinion | disputed | expert_verified | source_verified).</summary>
+    public string? Status { get; set; }
     public int Limit { get; set; } = 50;
     public string? Sort { get; set; }
 }
@@ -2729,6 +2801,8 @@ public sealed class ManageTruthScoreRequest
     public Guid ScoreId { get; set; }
     public decimal? Score { get; set; }
     public string? Correction { get; set; }
+    /// <summary>Explicit status override — used with expert_verify / source_verify paths.</summary>
+    public string? Status { get; set; }
 }
 
 public sealed class NotifyActivityRequest

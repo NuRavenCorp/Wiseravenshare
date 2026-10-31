@@ -68,6 +68,7 @@ public sealed partial class EntityCompatController : ControllerBase
                 "message" => Ok(await FilterMessagesAsync(userId, body, limit, cancellationToken)),
                 "livestream" => Ok(FilterLiveStreams(body, limit)),
                 "jamsession" => Ok(await FilterJamSessionsAsync(userId, body, limit, cancellationToken)),
+                "journalismreport" => Ok(await FilterJournalismReportsAsync(userId, body, limit, cancellationToken)),
                 _ => Ok(EmptyResult())
             };
         }
@@ -160,6 +161,11 @@ public sealed partial class EntityCompatController : ControllerBase
         if (string.Equals(entityName, "JamSession", StringComparison.OrdinalIgnoreCase))
         {
             return await CreateJamSessionCompat(payload);
+        }
+
+        if (string.Equals(entityName, "JournalismReport", StringComparison.OrdinalIgnoreCase))
+        {
+            return await CreateJournalismReportCompat(payload);
         }
 
         if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
@@ -1065,6 +1071,110 @@ private static string SerializeStringArray(IEnumerable<string> values)
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToArray();
     return JsonSerializer.Serialize(normalized);
+}
+
+private async Task EnsureJournalismReportStorageAsync(CancellationToken cancellationToken = default)
+{
+    await _db.Database.ExecuteSqlRawAsync(
+        """
+        CREATE TABLE IF NOT EXISTS app_data.compat_journalism_reports (
+            id TEXT PRIMARY KEY,
+            created_by_id TEXT NOT NULL,
+            post_id TEXT NULL,
+            headline TEXT NOT NULL,
+            description TEXT NULL,
+            region TEXT NULL,
+            image_url TEXT NULL,
+            source_url TEXT NULL,
+            verification_status TEXT NOT NULL DEFAULT 'under_review',
+            created_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_date TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS ix_compat_journalism_reports_verification_status
+            ON app_data.compat_journalism_reports(verification_status);
+        CREATE INDEX IF NOT EXISTS ix_compat_journalism_reports_created_date
+            ON app_data.compat_journalism_reports(created_date DESC);
+        """,
+        cancellationToken);
+}
+
+private async Task<EntityFilterResponse> FilterJournalismReportsAsync(
+    Guid userId, JsonElement body, int limit, CancellationToken cancellationToken)
+{
+    await EnsureJournalismReportStorageAsync(cancellationToken);
+    var status = ReadString(body, "query.verification_status");
+    var sort = ReadString(body, "options.sort");
+
+    var query = _db.CompatJournalismReports.AsNoTracking();
+    if (!string.IsNullOrWhiteSpace(status))
+    {
+        query = query.Where(x => x.VerificationStatus == status);
+    }
+
+    query = sort switch
+    {
+        "created_date" => query.OrderBy(x => x.CreatedDate),
+        _ => query.OrderByDescending(x => x.CreatedDate)
+    };
+
+    var rows = await query.Take(limit).ToListAsync(cancellationToken);
+    var items = rows.Select(MapJournalismReportRow).Cast<object>().ToList();
+    return new EntityFilterResponse { Items = items, Total = items.Count };
+}
+
+private async Task<IActionResult> CreateJournalismReportCompat(JsonElement payload)
+{
+    var userId = User.GetUserId();
+    if (userId == Guid.Empty)
+    {
+        return Unauthorized(new { message = "Invalid user session." });
+    }
+
+    var headline = ReadString(payload, "headline");
+    if (string.IsNullOrWhiteSpace(headline))
+    {
+        return BadRequest(new { message = "headline is required." });
+    }
+
+    await EnsureJournalismReportStorageAsync();
+
+    var now = DateTime.UtcNow;
+    var row = new CompatJournalismReport
+    {
+        Id = Guid.NewGuid().ToString("N"),
+        CreatedById = userId.ToString(),
+        PostId = ReadString(payload, "post_id"),
+        Headline = headline.Trim(),
+        Description = ReadString(payload, "description"),
+        Region = ReadString(payload, "region"),
+        ImageUrl = ReadString(payload, "image_url"),
+        SourceUrl = ReadString(payload, "source_url"),
+        VerificationStatus = ReadString(payload, "verification_status") is { Length: > 0 } s ? s : "under_review",
+        CreatedDate = now,
+        UpdatedDate = now,
+    };
+
+    _db.CompatJournalismReports.Add(row);
+    await _db.SaveChangesAsync();
+    return Ok(MapJournalismReportRow(row));
+}
+
+private static object MapJournalismReportRow(CompatJournalismReport row)
+{
+    return new
+    {
+        id = row.Id,
+        created_by_id = row.CreatedById,
+        post_id = row.PostId,
+        headline = row.Headline,
+        description = row.Description,
+        region = row.Region,
+        image_url = row.ImageUrl,
+        source_url = row.SourceUrl,
+        verification_status = row.VerificationStatus,
+        created_date = row.CreatedDate,
+        updated_date = row.UpdatedDate,
+    };
 }
 
 private async Task<IActionResult> CreatePostCompat(JsonElement payload)

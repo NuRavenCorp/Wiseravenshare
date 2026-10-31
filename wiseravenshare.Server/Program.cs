@@ -2574,6 +2574,8 @@ if (enableHostedServices)
     builder.Services.AddHostedService(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>());
 }
 builder.Services.AddScoped<ITruthEngineService, TruthEngineService>();
+builder.Services.AddHttpClient("ExternalVerifier");
+builder.Services.AddSingleton<IExternalVerificationService, ExternalVerificationService>();
 builder.Services.AddSingleton<IReminderNotificationService, ReminderNotificationService>();
 if (enableHostedServices)
 {

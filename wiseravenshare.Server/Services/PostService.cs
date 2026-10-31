@@ -17,6 +17,7 @@ using Wiseravenshare.Server.Services.CrossPlatform;
 using Wiseravenshare.Server.Services.Communication;
 using Wiseravenshare.Server.DTOs.Social;
 using Wiseravenshare.Server.Services.Currency;
+using Wiseravenshare.Server.Services.Truth;
 
 namespace Wiseravenshare.Server.Services;
 
@@ -188,6 +189,7 @@ public class PostService : IPostService
         // many sentences; awaiting per-sentence AI calls here caused upstream 503 timeouts).
         post.TruthScore = null;
         post.TruthCorrection = null;
+        post.TruthStatus = IsOpinionOrQuestion(dto.Content ?? "") ? TruthStatuses.Opinion : TruthStatuses.Pending;
 
         var createdPostId = post.Id == Guid.Empty ? Guid.NewGuid() : post.Id;
         post.Id = createdPostId;
@@ -220,6 +222,7 @@ public class PostService : IPostService
                     {
                         saved.TruthScore = truthResult.TruthScore;
                         saved.TruthCorrection = truthResult.Correction;
+                        saved.TruthStatus = TruthStatusHelper.FromScore(truthResult.TruthScore);
                         await repo.UpdateAsync(saved);
                     }
                 }
@@ -671,6 +674,7 @@ public class PostService : IPostService
                         {
                             saved.TruthScore = truthResult.TruthScore;
                             saved.TruthCorrection = truthResult.Correction;
+                            saved.TruthStatus = TruthStatusHelper.FromScore(truthResult.TruthScore);
                             await repo.UpdateAsync(saved);
                         }
                     }
