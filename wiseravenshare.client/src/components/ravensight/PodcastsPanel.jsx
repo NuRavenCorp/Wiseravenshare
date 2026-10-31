@@ -137,11 +137,12 @@ export default function PodcastsPanel() {
     load();
   };
 
-  const handleLaunchComplete = (pod) => {
+  const handleLaunchComplete = (pod, options = {}) => {
     setLaunching(false);
     setShowForm(false);
     load();
-    selectEpisode(pod.id, "script");
+    const startTab = options?.startTab === "record" ? "record" : "script";
+    selectEpisode(pod.id, startTab);
   };
 
   const selected = podcasts.find((p) => p.id === selectedId);

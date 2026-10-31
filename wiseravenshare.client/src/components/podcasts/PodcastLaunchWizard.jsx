@@ -9,6 +9,7 @@ import {
   Loader2,
   Upload,
   Film,
+  Video,
   Users,
   ChevronRight,
   ChevronLeft,
@@ -16,7 +17,6 @@ import {
   UserPlus,
   Trash2,
   Monitor,
-  Video,
   Mic,
   Headphones,
   Scissors,
@@ -108,6 +108,7 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
   // Step 2: video
   const [videoUri, setVideoUri] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [videoInputMode, setVideoInputMode] = useState("upload");
   const fileInputRef = useRef(null);
 
   // Step 3: team
@@ -151,15 +152,23 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
     setUploading(true);
     setError("");
     try {
-      const pod = await createPodcastIfNeeded();
       const upload = await apiClient.ravensightMedia.uploadVideo(file, {
         title: file.name.replace(/\.[^/.]+$/, ""),
       });
       const fileUri = upload.mediaUrl || upload.file?.mediaUrl || "";
-      await apiClient.entities.Podcast.update(pod.id, { episode_media_uri: fileUri });
+      if (!fileUri) {
+        throw new Error("Upload completed but no playable media URL was returned.");
+      }
       setVideoUri(fileUri);
-    } catch {
-      setError("Upload failed");
+
+      try {
+        const pod = await createPodcastIfNeeded();
+        await apiClient.entities.Podcast.update(pod.id, { episode_media_uri: fileUri });
+      } catch {
+        setError("Video uploaded. It will be attached when you launch the episode.");
+      }
+    } catch (uploadError) {
+      setError(uploadError?.response?.data?.message || uploadError?.message || "Upload failed");
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -200,6 +209,9 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
       const updatePayload = {
         ai_pricing: buildAiPricingPayload(),
       };
+      if (videoUri) {
+        updatePayload.episode_media_uri = videoUri;
+      }
 
       // Create team if team name provided
       if (teamName.trim()) {
@@ -228,7 +240,7 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
       }
 
       await apiClient.entities.Podcast.update(pod.id, updatePayload);
-      onComplete(pod);
+      onComplete(pod, { startTab: videoInputMode === "feed" ? "record" : "script" });
     } catch (e) {
       setError(e?.response?.data?.error || e?.message || "Failed to create episode");
     } finally {
@@ -450,35 +462,72 @@ export default function PodcastLaunchWizard({ onComplete, onCancel }) {
       {step === 2 && (
         <div className="space-y-4">
           <div>
-            <h3 className="font-heading text-lg text-foreground mb-1">Upload Episode Video</h3>
-            <p className="text-sm text-muted-foreground">Upload your full episode video (stored privately). You can skip this and add it later.</p>
+            <h3 className="font-heading text-lg text-foreground mb-1">Video Source</h3>
+            <p className="text-sm text-muted-foreground">Choose whether to upload your episode video now or launch directly into a live video feed.</p>
           </div>
 
-          {videoUri ? (
-            <video src={videoUri} controls className="w-full max-h-[300px] rounded-lg border border-border" />
-          ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="w-full aspect-video rounded-lg border border-dashed border-border flex flex-col items-center justify-center bg-card/50 hover:border-primary/40 transition-colors"
+              type="button"
+              onClick={() => setVideoInputMode("upload")}
+              className={`rounded-lg border p-4 text-left transition-colors ${
+                videoInputMode === "upload"
+                  ? "border-primary bg-primary/10"
+                  : "border-border bg-card hover:border-primary/40"
+              }`}
             >
-              {uploading ? (
-                <>
-                  <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
-                  <p className="text-sm text-muted-foreground">Uploading...</p>
-                </>
-              ) : (
-                <>
-                  <Upload className="w-8 h-8 text-muted-foreground mb-3" />
-                  <p className="text-sm text-foreground">Click to upload video</p>
-                  <p className="text-xs text-muted-foreground mt-1">MP4, WebM, MOV</p>
-                </>
-              )}
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Upload className="w-4 h-4 text-primary" />
+                Upload Episode Video
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">Attach MP4, WebM, or MOV now.</p>
             </button>
-          )}
-          <input ref={fileInputRef} type="file" accept="video/*" onChange={handleVideoUpload} className="hidden" />
+            <button
+              type="button"
+              onClick={() => setVideoInputMode("feed")}
+              className={`rounded-lg border p-4 text-left transition-colors ${
+                videoInputMode === "feed"
+                  ? "border-primary bg-primary/10"
+                  : "border-border bg-card hover:border-primary/40"
+              }`}
+            >
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Video className="w-4 h-4 text-primary" />
+                Start Video Feed
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">Launch the episode and go straight to recording.</p>
+            </button>
+          </div>
 
-          {videoUri && !uploading && (
+          {videoInputMode === "upload" && (
+            <>
+              {videoUri ? (
+                <video src={videoUri} controls className="w-full max-h-[300px] rounded-lg border border-border" />
+              ) : (
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="w-full aspect-video rounded-lg border border-dashed border-border flex flex-col items-center justify-center bg-card/50 hover:border-primary/40 transition-colors"
+                >
+                  {uploading ? (
+                    <>
+                      <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+                      <p className="text-sm text-muted-foreground">Uploading...</p>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-8 h-8 text-muted-foreground mb-3" />
+                      <p className="text-sm text-foreground">Click to upload video</p>
+                      <p className="text-xs text-muted-foreground mt-1">MP4, WebM, MOV</p>
+                    </>
+                  )}
+                </button>
+              )}
+              <input ref={fileInputRef} type="file" accept="video/*" onChange={handleVideoUpload} className="hidden" />
+            </>
+          )}
+
+          {videoInputMode === "upload" && videoUri && !uploading && (
             <Button onClick={() => fileInputRef.current?.click()} variant="outline" size="sm">
               <Upload className="w-4 h-4" /> Replace Video
             </Button>
