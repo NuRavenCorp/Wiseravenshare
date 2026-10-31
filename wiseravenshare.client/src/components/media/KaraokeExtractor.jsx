@@ -15,6 +15,9 @@ function readAccessToken() {
     || "";
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Convert AssemblyAI words[] (start/end in seconds) to LRC format.
@@ -81,8 +84,8 @@ async function transcribeFile(file) {
     if (hasContent) return result;
   } catch (primaryError) {
     const status = primaryError?.status;
-    // If audio service not running (503) or misconfigured (404/405), fall through
-    if (![404, 405, 502, 503].includes(status)) throw primaryError;
+    // If audio service is unavailable/misconfigured/rate-limited, fall through.
+    if (![404, 405, 429, 502, 503].includes(status)) throw primaryError;
   }
 
   // Fallback: karaoke-speech microservice endpoints
@@ -97,28 +100,49 @@ async function transcribeFile(file) {
 
   let lastError = null;
   let preferredError = null;
+  let rateLimitError = null;
   const attempts = [];
   for (const endpoint of endpoints) {
-    const body = new FormData();
-    body.append("audio", file);
-    try {
-      const result = await apiClient.requestJson(endpoint, { method: "POST", body, omitAuth: true });
-      const transcript = (result?.lyrics || result?.text || result?.transcript || result?.lrc || "").toString().trim();
-      const hasWordPayload = Array.isArray(result?.words) && result.words.length > 0;
-      if (transcript.length > 0 || hasWordPayload) return result;
-      lastError = new Error("Transcription returned empty output.");
-      attempts.push(`${endpoint} -> empty`);
-    } catch (error) {
-      lastError = error;
-      const msg = String(error?.data?.message || error?.message || "").trim();
-      attempts.push(`${endpoint} -> ${error?.status ?? "ERR"}${msg ? ` (${msg})` : ""}`);
-      if (!preferredError && ![404, 405].includes(error?.status)) preferredError = error;
-      if (![400, 401, 403, 404, 405, 415, 422, 500, 502, 503, 504].includes(error?.status)) throw error;
+    let retry429 = 0;
+    while (retry429 < 4) {
+      const body = new FormData();
+      body.append("audio", file);
+      try {
+        const result = await apiClient.requestJson(endpoint, { method: "POST", body, omitAuth: true });
+        const transcript = (result?.lyrics || result?.text || result?.transcript || result?.lrc || "").toString().trim();
+        const hasWordPayload = Array.isArray(result?.words) && result.words.length > 0;
+        if (transcript.length > 0 || hasWordPayload) return result;
+        lastError = new Error("Transcription returned empty output.");
+        attempts.push(`${endpoint} -> empty`);
+        break;
+      } catch (error) {
+        const status = error?.status;
+        if (status === 429 && retry429 < 3) {
+          retry429 += 1;
+          attempts.push(`${endpoint} -> 429 (retry ${retry429})`);
+          await wait(Math.min(750 * (2 ** (retry429 - 1)), 5000));
+          continue;
+        }
+        lastError = error;
+        const msg = String(error?.data?.message || error?.message || "").trim();
+        attempts.push(`${endpoint} -> ${status ?? "ERR"}${msg ? ` (${msg})` : ""}`);
+        if (status === 429 && !rateLimitError) {
+          rateLimitError = error;
+        } else if (!preferredError && ![404, 405, 429].includes(status)) {
+          preferredError = error;
+        }
+        if (![400, 401, 403, 404, 405, 415, 422, 429, 500, 502, 503, 504].includes(status)) throw error;
+        break;
+      }
     }
   }
 
-  const err = preferredError || lastError;
+  const err = preferredError || rateLimitError || lastError;
   if (err) {
+    if (err?.status === 429 && !preferredError) {
+      err.message = "Transcription providers are temporarily rate limited. Please retry in 20-30 seconds.";
+      throw err;
+    }
     const details = attempts.length ? ` Tried: ${attempts.join(", ")}` : "";
     err.message = `${err.message}${details}`;
   }
@@ -135,7 +159,7 @@ async function transcribeUrl(url, fileName) {
     if (hasContent) return result;
   } catch (primaryError) {
     const status = primaryError?.status;
-    if (![404, 405, 502, 503].includes(status)) throw primaryError;
+    if (![404, 405, 429, 502, 503].includes(status)) throw primaryError;
   }
 
   // Fallback: download the file locally and send to old endpoints
@@ -360,6 +384,39 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
     }
   };
 
+  const resolveSelectedSourceCandidates = useCallback(async (source) => {
+    if (!source) return [];
+    const candidates = new Set([source.url, source.fallbackUrl].filter(Boolean));
+
+    if (source.kind === "music" && source.sourceId) {
+      candidates.add(`/api/ravensight/media/music/${encodeURIComponent(String(source.sourceId))}/stream`);
+    }
+
+    try {
+      if (source.kind === "music") {
+        const music = await apiClient.ravensightMedia.listMusic();
+        const match = (music || []).find((item) => String(item?.id || "") === String(source.sourceId || ""));
+        if (match) {
+          if (match.mediaUrl) candidates.add(match.mediaUrl);
+          if (match.file_uri) candidates.add(match.file_uri);
+          if (match.id) candidates.add(`/api/ravensight/media/music/${encodeURIComponent(String(match.id))}/stream`);
+        }
+      } else if (source.kind === "video") {
+        const videos = await apiClient.ravensightMedia.listVideos();
+        const match = (videos || []).find((item) => String(item?.id || "") === String(source.sourceId || ""));
+        if (match) {
+          if (match.mediaUrl) candidates.add(match.mediaUrl);
+          if (match.videoUrl) candidates.add(match.videoUrl);
+          if (match.file_uri) candidates.add(match.file_uri);
+        }
+      }
+    } catch {
+      // Keep original candidates if refresh is unavailable.
+    }
+
+    return Array.from(candidates);
+  }, []);
+
 
   const handleExtractSelected = async () => {
     if (!selectedSource) return;
@@ -367,10 +424,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
     setError("");
     setLyrics("");
     try {
-      const sourceCandidates = Array.from(new Set([
-        selectedSource.url,
-        selectedSource.fallbackUrl,
-      ].filter(Boolean)));
+      const sourceCandidates = await resolveSelectedSourceCandidates(selectedSource);
       if (sourceCandidates.length === 0) {
         throw new Error("This item does not have a playable media URL.");
       }
