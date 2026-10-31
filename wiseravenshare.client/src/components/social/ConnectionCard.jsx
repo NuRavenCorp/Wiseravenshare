@@ -31,6 +31,34 @@ const PLATFORM_URL_HINTS = {
   youtube:   "https://www.youtube.com/@yourchannel",
 };
 
+function parseYouTubeIdentifiers(details) {
+  const rawProfileUrl = (details?.profileUrl || "").trim();
+  const rawUsername = (details?.username || "").trim();
+  let channelId = "";
+  let userId = "";
+
+  if (rawProfileUrl) {
+    const channelMatch = rawProfileUrl.match(/youtube\.com\/channel\/([^/?#]+)/i);
+    const handleMatch = rawProfileUrl.match(/youtube\.com\/@([^/?#]+)/i);
+    if (channelMatch?.[1]) {
+      channelId = channelMatch[1].trim();
+    }
+    if (handleMatch?.[1]) {
+      userId = handleMatch[1].trim();
+    }
+  }
+
+  if (!channelId && rawUsername.toUpperCase().startsWith("UC")) {
+    channelId = rawUsername;
+  }
+
+  if (!userId && rawUsername && !rawUsername.toUpperCase().startsWith("UC")) {
+    userId = rawUsername.replace(/^@/, "");
+  }
+
+  return { channelId, userId };
+}
+
 export default function ConnectionCard({ platform }) {
   const meta = PLATFORM_META[platform] || PLATFORM_META.facebook;
   const { Icon, color, oauthSupported } = meta;
@@ -51,6 +79,8 @@ export default function ConnectionCard({ platform }) {
   const [profileUrl, setProfileUrl]   = useState("");
   const [feedUrl, setFeedUrl]         = useState("");
   const [designation, setDesignation] = useState("");
+  const [youtubeChannelId, setYoutubeChannelId] = useState("");
+  const [youtubeUserId, setYoutubeUserId] = useState("");
   const [autoFilled, setAutoFilled]   = useState(false);
 
   const applyDetails = useCallback((details) => {
@@ -63,9 +93,14 @@ export default function ConnectionCard({ platform }) {
       setProfileUrl(details.profileUrl || "");
       setFeedUrl(details.feedUrl       || "");
       setDesignation(details.designation || "");
+      if (platform === "youtube") {
+        const identifiers = parseYouTubeIdentifiers(details);
+        setYoutubeChannelId(identifiers.channelId);
+        setYoutubeUserId(identifiers.userId);
+      }
       setAutoFilled(true);
     }
-  }, []);
+  }, [platform]);
 
   const fetchStatus = useCallback(async () => {
     setStatusError("");
@@ -140,12 +175,25 @@ export default function ConnectionCard({ platform }) {
     setSaved(false);
     setError("");
     try {
-      await apiClient.social.saveDetails(platform, userId, {
+      const payload = {
         username: username.trim(),
         profile_url: profileUrl.trim(),
         feed_url: feedUrl.trim(),
         designation: designation.trim(),
-      });
+      };
+
+      if (platform === "youtube") {
+        const normalizedYouTubeUserId = youtubeUserId.trim().replace(/^@/, "");
+        const normalizedYouTubeChannelId = youtubeChannelId.trim();
+
+        payload.username = normalizedYouTubeUserId || payload.username;
+        payload.channel_handle = normalizedYouTubeUserId;
+        payload.channel_id = normalizedYouTubeChannelId;
+        payload.youtube_user_id = normalizedYouTubeUserId;
+        payload.youtube_channel_id = normalizedYouTubeChannelId;
+      }
+
+      await apiClient.social.saveDetails(platform, userId, payload);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
       fetchStatus();
@@ -164,6 +212,7 @@ export default function ConnectionCard({ platform }) {
       await apiClient.social.disconnect(platform, userId);
       setStatus({ connected: false, details: {} });
       setUsername(""); setProfileUrl(""); setFeedUrl(""); setDesignation("");
+      setYoutubeChannelId(""); setYoutubeUserId("");
       setAutoFilled(false);
     } catch (e) {
       setError(e?.message || "Disconnect failed.");
@@ -239,6 +288,8 @@ export default function ConnectionCard({ platform }) {
                 profileUrl={profileUrl} setProfileUrl={setProfileUrl}
                 feedUrl={feedUrl} setFeedUrl={setFeedUrl}
                 designation={designation} setDesignation={setDesignation}
+                youtubeChannelId={youtubeChannelId} setYoutubeChannelId={setYoutubeChannelId}
+                youtubeUserId={youtubeUserId} setYoutubeUserId={setYoutubeUserId}
                 autoFilled={false}
               />
               <Button
@@ -268,6 +319,8 @@ export default function ConnectionCard({ platform }) {
               profileUrl={profileUrl} setProfileUrl={setProfileUrl}
               feedUrl={feedUrl} setFeedUrl={setFeedUrl}
               designation={designation} setDesignation={setDesignation}
+              youtubeChannelId={youtubeChannelId} setYoutubeChannelId={setYoutubeChannelId}
+              youtubeUserId={youtubeUserId} setYoutubeUserId={setYoutubeUserId}
               autoFilled={autoFilled}
             />
 
@@ -325,6 +378,8 @@ function ProfileFields({
   profileUrl, setProfileUrl,
   feedUrl, setFeedUrl,
   designation, setDesignation,
+  youtubeChannelId, setYoutubeChannelId,
+  youtubeUserId, setYoutubeUserId,
   autoFilled,
 }) {
   const hint = PLATFORM_URL_HINTS[platform] || "https://example.com/profile";
@@ -335,15 +390,49 @@ function ProfileFields({
   return (
     <div className={`space-y-3 rounded-md p-3 border border-border ${badgeCls}`}>
       <div>
-        <Label className="text-xs text-muted-foreground mb-1 block">
-          Username / Handle
-        </Label>
-        <Input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder={`@your_${platform}_handle`}
-          className="h-9 text-sm"
-        />
+        {platform === "youtube" ? (
+          <>
+            <Label className="text-xs text-muted-foreground mb-1 block">
+              YouTube Channel ID
+            </Label>
+            <Input
+              value={youtubeChannelId}
+              onChange={(e) => setYoutubeChannelId(e.target.value)}
+              placeholder="UCxxxxxxxxxxxxxxxxxxxxxx"
+              className="h-9 text-sm"
+            />
+            <Label className="text-xs text-muted-foreground mb-1 mt-3 block">
+              YouTube User ID / Handle
+            </Label>
+            <Input
+              value={youtubeUserId}
+              onChange={(e) => {
+                setYoutubeUserId(e.target.value);
+                setUsername(e.target.value);
+              }}
+              placeholder="@yourhandle"
+              className="h-9 text-sm"
+            />
+            <p className="text-[11px] text-muted-foreground leading-relaxed mt-2">
+              How to find them: open your YouTube channel page. If the URL contains
+              <span className="text-foreground"> /channel/UC...</span>, copy that as Channel ID.
+              If it contains <span className="text-foreground">/@yourhandle</span>, use that as User ID/Handle.
+              In YouTube Studio, you can also find Channel ID in Settings → Channel → Advanced settings.
+            </p>
+          </>
+        ) : (
+          <>
+            <Label className="text-xs text-muted-foreground mb-1 block">
+              Username / Handle
+            </Label>
+            <Input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={`@your_${platform}_handle`}
+              className="h-9 text-sm"
+            />
+          </>
+        )}
       </div>
       <div>
         <Label className="text-xs text-muted-foreground mb-1 block">

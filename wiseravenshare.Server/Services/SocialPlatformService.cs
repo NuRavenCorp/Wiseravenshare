@@ -1265,7 +1265,8 @@ public class SocialPlatformService : ISocialPlatformService
     private bool IsYouTubeSyncConfigured()
     {
         var apiKey = _configuration["YouTubeSync:ApiKey"];
-        var channelId = _configuration["YouTubeSync:ChannelId"];
+        var channelId = _configuration["YouTubeSync:ChannelId"]
+            ?? _configuration["Social:YouTube:ChannelId"];
         return !string.IsNullOrWhiteSpace(apiKey) && !string.IsNullOrWhiteSpace(channelId);
     }
 

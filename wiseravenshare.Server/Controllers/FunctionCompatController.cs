@@ -2102,11 +2102,19 @@ public sealed class FunctionCompatController : ControllerBase
             .Where(channel => !string.IsNullOrWhiteSpace(channel.Id))
             .ToList();
 
-        var singleChannelId = (_configuration["YouTubeSync:ChannelId"] ?? string.Empty).Trim();
+        var singleChannelId = (_configuration["YouTubeSync:ChannelId"]
+            ?? _configuration["Social:YouTube:ChannelId"]
+            ?? string.Empty).Trim();
+        var singleUserId = (_configuration["Social:YouTube:UserID"]
+            ?? _configuration["Social:YouTube:UserId"]
+            ?? string.Empty).Trim().TrimStart('@');
         if (!string.IsNullOrWhiteSpace(singleChannelId)
             && channels.All(channel => !channel.Id.Equals(singleChannelId, StringComparison.OrdinalIgnoreCase)))
         {
-            channels.Insert(0, new ConfiguredYouTubeChannel(singleChannelId, "YouTube Channel", true));
+            var configuredName = !string.IsNullOrWhiteSpace(singleUserId)
+                ? $"@{singleUserId}"
+                : "YouTube Channel";
+            channels.Insert(0, new ConfiguredYouTubeChannel(singleChannelId, configuredName, true));
         }
 
         return channels;
