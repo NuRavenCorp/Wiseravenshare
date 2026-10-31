@@ -587,14 +587,16 @@ public class AuthController : ControllerBase
 
         CleanupExpiredOAuthStates();
         var state = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        var (pkceVerifier, pkceChallenge) = BuildPkceChallenge(normalizedProvider);
         OAuthStatesByToken[state] = new OAuthStateRecord
         {
             Provider = normalizedProvider,
             ReturnUrl = normalizedReturnUrl,
-            ExpiresAtUtc = DateTime.UtcNow.Add(OAuthStateLifetime)
+            ExpiresAtUtc = DateTime.UtcNow.Add(OAuthStateLifetime),
+            CodeVerifier = pkceVerifier
         };
 
-        var authorizationUrl = BuildOAuthAuthorizationUrl(normalizedProvider, providerConfig, callbackUrl, state);
+        var authorizationUrl = BuildOAuthAuthorizationUrl(normalizedProvider, providerConfig, callbackUrl, state, pkceChallenge);
         return Redirect(authorizationUrl);
     }
 
@@ -642,16 +644,18 @@ public class AuthController : ControllerBase
 
         CleanupExpiredOAuthStates();
         var state = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        var (pkceVerifier, pkceChallenge) = BuildPkceChallenge(normalizedPlatform);
         OAuthStatesByToken[state] = new OAuthStateRecord
         {
             Provider = normalizedPlatform,
             ReturnUrl = normalizedReturnUrl,
             ExpiresAtUtc = DateTime.UtcNow.Add(OAuthStateLifetime),
             IsSocialConnect = true,
-            RequestedUserId = requestedUserId
+            RequestedUserId = requestedUserId,
+            CodeVerifier = pkceVerifier
         };
 
-        var authorizationUrl = BuildOAuthAuthorizationUrl(normalizedPlatform, providerConfig, callbackUrl, state);
+        var authorizationUrl = BuildOAuthAuthorizationUrl(normalizedPlatform, providerConfig, callbackUrl, state, pkceChallenge);
         return Ok(new
         {
             provider = normalizedPlatform,
@@ -897,7 +901,7 @@ public class AuthController : ControllerBase
         SocialProfile profile;
         try
         {
-            profile = await ResolveSocialProfileAsync(normalizedProvider, providerConfig, code, callbackUrl);
+            profile = await ResolveSocialProfileAsync(normalizedProvider, providerConfig, code, callbackUrl, stateRecord.CodeVerifier);
         }
         catch (HttpRequestException ex)
         {
@@ -2533,17 +2537,8 @@ public class AuthController : ControllerBase
             return explicitRedirectUri.ToString();
         }
 
-        var configuredBaseUrl = (_configuration["App:PublicBaseUrl"] ?? string.Empty).Trim();
-        if (Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var publicBaseUri))
-        {
-            var configuredOrigin = publicBaseUri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
-            return $"{configuredOrigin}{callbackPath}";
-        }
-
-        var requestOrigin = Request.Host.HasValue
-            ? $"{Request.Scheme}://{Request.Host}".TrimEnd('/')
-            : ResolvePublicAppOrigin();
-        return $"{requestOrigin}{callbackPath}";
+        var origin = ResolvePublicAppOrigin();
+        return $"{origin}{callbackPath}";
     }
 
     private string ResolveOAuthCallbackUrlForTokenExchange(string provider, OAuthProviderConfig providerConfig)
@@ -2644,7 +2639,7 @@ public class AuthController : ControllerBase
         return configuredOrigin;
     }
 
-    private string BuildOAuthAuthorizationUrl(string provider, OAuthProviderConfig config, string callbackUrl, string state)
+    private string BuildOAuthAuthorizationUrl(string provider, OAuthProviderConfig config, string callbackUrl, string state, string codeChallenge = "")
     {
         return provider switch
         {
@@ -2656,7 +2651,9 @@ public class AuthController : ControllerBase
                 ["scope"] = "openid email profile",
                 ["state"] = state,
                 ["access_type"] = "offline",
-                ["prompt"] = "consent"
+                ["prompt"] = "consent",
+                ["code_challenge"] = string.IsNullOrWhiteSpace(codeChallenge) ? null : codeChallenge,
+                ["code_challenge_method"] = string.IsNullOrWhiteSpace(codeChallenge) ? null : "S256"
             }),
             "microsoft" => BuildUrl($"https://login.microsoftonline.com/{(string.IsNullOrWhiteSpace(config.TenantId) ? "common" : config.TenantId)}/oauth2/v2.0/authorize", new Dictionary<string, string?>
             {
@@ -2703,13 +2700,15 @@ public class AuthController : ControllerBase
                 ["state"] = state,
                 ["access_type"] = "offline",
                 ["prompt"] = "consent",
-                ["include_granted_scopes"] = "true"
+                ["include_granted_scopes"] = "true",
+                ["code_challenge"] = string.IsNullOrWhiteSpace(codeChallenge) ? null : codeChallenge,
+                ["code_challenge_method"] = string.IsNullOrWhiteSpace(codeChallenge) ? null : "S256"
             }),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
         };
     }
 
-    private async Task<SocialProfile> ResolveSocialProfileAsync(string provider, OAuthProviderConfig config, string code, string callbackUrl)
+    private async Task<SocialProfile> ResolveSocialProfileAsync(string provider, OAuthProviderConfig config, string code, string callbackUrl, string codeVerifier = "")
     {
         using var httpClient = new HttpClient
         {
@@ -2718,26 +2717,30 @@ public class AuthController : ControllerBase
 
         return provider switch
         {
-            "google" => await ResolveGoogleProfileAsync(httpClient, config, code, callbackUrl),
+            "google" => await ResolveGoogleProfileAsync(httpClient, config, code, callbackUrl, codeVerifier),
             "microsoft" => await ResolveMicrosoftProfileAsync(httpClient, config, code, callbackUrl),
             "facebook" => await ResolveFacebookProfileAsync(httpClient, config, code, callbackUrl),
             "instagram" => await ResolveInstagramProfileAsync(httpClient, config, code, callbackUrl),
             "tiktok" => await ResolveTikTokProfileAsync(httpClient, config, code, callbackUrl),
-            "youtube" => await ResolveYouTubeProfileAsync(httpClient, config, code, callbackUrl),
+            "youtube" => await ResolveYouTubeProfileAsync(httpClient, config, code, callbackUrl, codeVerifier),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
         };
     }
 
-    private static async Task<SocialProfile> ResolveGoogleProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    private static async Task<SocialProfile> ResolveGoogleProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl, string codeVerifier = "")
     {
-        var tokenPayload = await ExchangeCodeForTokenAsync(httpClient, "https://oauth2.googleapis.com/token", new Dictionary<string, string>
+        var tokenParams = new Dictionary<string, string>
         {
             ["code"] = code,
             ["client_id"] = config.ClientId,
             ["client_secret"] = config.ClientSecret,
             ["redirect_uri"] = callbackUrl,
             ["grant_type"] = "authorization_code"
-        });
+        };
+        if (!string.IsNullOrWhiteSpace(codeVerifier))
+            tokenParams["code_verifier"] = codeVerifier;
+
+        var tokenPayload = await ExchangeCodeForTokenAsync(httpClient, "https://oauth2.googleapis.com/token", tokenParams);
 
         if (string.IsNullOrWhiteSpace(tokenPayload.AccessToken))
         {
@@ -2760,16 +2763,20 @@ public class AuthController : ControllerBase
         };
     }
 
-    private static async Task<SocialProfile> ResolveYouTubeProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    private static async Task<SocialProfile> ResolveYouTubeProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl, string codeVerifier = "")
     {
-        var tokenPayload = await ExchangeCodeForTokenAsync(httpClient, "https://oauth2.googleapis.com/token", new Dictionary<string, string>
+        var tokenParams = new Dictionary<string, string>
         {
             ["code"] = code,
             ["client_id"] = config.ClientId,
             ["client_secret"] = config.ClientSecret,
             ["redirect_uri"] = callbackUrl,
             ["grant_type"] = "authorization_code"
-        });
+        };
+        if (!string.IsNullOrWhiteSpace(codeVerifier))
+            tokenParams["code_verifier"] = codeVerifier;
+
+        var tokenPayload = await ExchangeCodeForTokenAsync(httpClient, "https://oauth2.googleapis.com/token", tokenParams);
 
         if (string.IsNullOrWhiteSpace(tokenPayload.AccessToken))
         {
@@ -3441,6 +3448,34 @@ public class AuthController : ControllerBase
         return $"{baseUrl}{separator}{string.Join("&", encoded)}";
     }
 
+    /// <summary>
+    /// Generates a PKCE code_verifier and S256 code_challenge pair.
+    /// Only Google and YouTube flows use PKCE; other providers receive empty strings.
+    /// </summary>
+    private static (string verifier, string challenge) BuildPkceChallenge(string provider)
+    {
+        if (!string.Equals(provider, "google", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(provider, "youtube", StringComparison.OrdinalIgnoreCase))
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        // RFC 7636: verifier is 43-128 unreserved characters
+        var verifierBytes = RandomNumberGenerator.GetBytes(48);
+        var verifier = Convert.ToBase64String(verifierBytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+
+        var challengeBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(verifier));
+        var challenge = Convert.ToBase64String(challengeBytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+
+        return (verifier, challenge);
+    }
+
     private static void CleanupExpiredOAuthStates()
     {
         var utcNow = DateTime.UtcNow;
@@ -3983,6 +4018,8 @@ LIMIT 1;";
         public DateTime ExpiresAtUtc { get; set; }
         public bool IsSocialConnect { get; set; }
         public string RequestedUserId { get; set; } = string.Empty;
+        /// <summary>PKCE code verifier stored server-side; matched to the code_challenge sent to the provider.</summary>
+        public string CodeVerifier { get; set; } = string.Empty;
     }
 
     private sealed class OAuthProviderConfig
