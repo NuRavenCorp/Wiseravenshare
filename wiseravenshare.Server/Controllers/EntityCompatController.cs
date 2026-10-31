@@ -67,6 +67,7 @@ public sealed partial class EntityCompatController : ControllerBase
                 "conversation" => Ok(await FilterConversationsAsync(userId, body, limit, cancellationToken)),
                 "message" => Ok(await FilterMessagesAsync(userId, body, limit, cancellationToken)),
                 "livestream" => Ok(FilterLiveStreams(body, limit)),
+                "jamsession" => Ok(await FilterJamSessionsAsync(userId, body, limit, cancellationToken)),
                 _ => Ok(EmptyResult())
             };
         }
@@ -128,6 +129,7 @@ public sealed partial class EntityCompatController : ControllerBase
                     .CountAsync(c => c.Participants.Any(p => p.UserId == userId), cancellationToken),
                 "message" => await CountMessagesAsync(userId, body, cancellationToken),
                 "livestream" => CountLiveStreams(body),
+                "jamsession" => await CountJamSessionsAsync(userId, body, cancellationToken),
                 _ => 0
             };
             return Ok(new { count });
@@ -153,6 +155,11 @@ public sealed partial class EntityCompatController : ControllerBase
         if (string.Equals(entityName, "Message", StringComparison.OrdinalIgnoreCase))
         {
             return await CreateMessageCompat(payload);
+        }
+
+        if (string.Equals(entityName, "JamSession", StringComparison.OrdinalIgnoreCase))
+        {
+            return await CreateJamSessionCompat(payload);
         }
 
         if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
@@ -211,6 +218,11 @@ public sealed partial class EntityCompatController : ControllerBase
         if (string.Equals(entityName, "Post", StringComparison.OrdinalIgnoreCase))
         {
             return await UpdatePostCompat(id, payload);
+        }
+
+        if (string.Equals(entityName, "JamSession", StringComparison.OrdinalIgnoreCase))
+        {
+            return await UpdateJamSessionCompat(id, payload);
         }
 
         if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
@@ -744,6 +756,316 @@ public sealed partial class EntityCompatController : ControllerBase
         var raw = ReadString(body, dotPath);
         return DateTime.TryParse(raw, out var parsed) ? parsed : null;
     }
+
+private async Task EnsureJamSessionStorageAsync(CancellationToken cancellationToken = default)
+{
+    await _db.Database.ExecuteSqlRawAsync(
+        """
+        CREATE TABLE IF NOT EXISTS app_data.compat_jam_sessions (
+            id TEXT PRIMARY KEY,
+            created_by_id TEXT NOT NULL,
+            description TEXT NULL,
+            title TEXT NOT NULL,
+            participants JSONB NOT NULL DEFAULT '[]'::jsonb,
+            signup_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            scheduled_date TEXT NULL,
+            started_at TEXT NULL,
+            bpm INTEGER NOT NULL DEFAULT 120,
+            status TEXT NOT NULL DEFAULT 'active',
+            max_participants INTEGER NULL,
+            track_uris JSONB NOT NULL DEFAULT '[]'::jsonb,
+            created_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_date TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS ix_compat_jam_sessions_status ON app_data.compat_jam_sessions(status);
+        CREATE INDEX IF NOT EXISTS ix_compat_jam_sessions_created_date ON app_data.compat_jam_sessions(created_date DESC);
+        """,
+        cancellationToken);
+}
+
+private async Task<EntityFilterResponse> FilterJamSessionsAsync(Guid userId, JsonElement body, int limit, CancellationToken cancellationToken)
+{
+    await EnsureJamSessionStorageAsync(cancellationToken);
+    var status = ReadString(body, "query.status");
+    var statusIn = TryReadStringArray(body, "query.status.$in");
+    var sort = ReadString(body, "options.sort");
+
+    var query = _db.CompatJamSessions.AsNoTracking();
+
+    if (statusIn is { Length: > 0 })
+    {
+        var normalized = statusIn
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim())
+            .ToArray();
+        if (normalized.Length > 0)
+        {
+            query = query.Where(x => normalized.Contains(x.Status));
+        }
+    }
+    else if (!string.IsNullOrWhiteSpace(status))
+    {
+        query = query.Where(x => x.Status == status);
+    }
+
+    query = sort switch
+    {
+        "created_date" => query.OrderBy(x => x.CreatedDate),
+        "-created_date" => query.OrderByDescending(x => x.CreatedDate),
+        "started_at" => query.OrderBy(x => x.StartedAtRaw),
+        "-started_at" => query.OrderByDescending(x => x.StartedAtRaw),
+        _ => query.OrderBy(x => x.StartedAtRaw).ThenBy(x => x.CreatedDate)
+    };
+
+    var rows = await query.Take(limit).ToListAsync(cancellationToken);
+    var items = rows.Select(MapJamSessionCompatRow).Cast<object>().ToList();
+    return new EntityFilterResponse { Items = items, Total = items.Count };
+}
+
+private async Task<int> CountJamSessionsAsync(Guid userId, JsonElement body, CancellationToken cancellationToken)
+{
+    await EnsureJamSessionStorageAsync(cancellationToken);
+    var status = ReadString(body, "query.status");
+    var statusIn = TryReadStringArray(body, "query.status.$in");
+
+    var query = _db.CompatJamSessions.AsNoTracking();
+
+    if (statusIn is { Length: > 0 })
+    {
+        var normalized = statusIn
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim())
+            .ToArray();
+        if (normalized.Length > 0)
+        {
+            query = query.Where(x => normalized.Contains(x.Status));
+        }
+    }
+    else if (!string.IsNullOrWhiteSpace(status))
+    {
+        query = query.Where(x => x.Status == status);
+    }
+
+    return await query.CountAsync(cancellationToken);
+}
+
+private async Task<IActionResult> CreateJamSessionCompat(JsonElement payload)
+{
+    var userId = User.GetUserId();
+    if (userId == Guid.Empty)
+    {
+        return Unauthorized(new { message = "Invalid user session." });
+    }
+
+    var title = ReadString(payload, "title");
+    if (string.IsNullOrWhiteSpace(title))
+    {
+        return BadRequest(new { message = "title is required." });
+    }
+
+    await EnsureJamSessionStorageAsync();
+
+    var userIdText = userId.ToString();
+    var participants = TryReadStringArray(payload, "participants")?
+        .Where(v => !string.IsNullOrWhiteSpace(v))
+        .Select(v => v.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList()
+        ?? [];
+    if (!participants.Contains(userIdText, StringComparer.OrdinalIgnoreCase))
+    {
+        participants.Add(userIdText);
+    }
+
+    var signupIds = TryReadStringArray(payload, "signup_ids")?
+        .Where(v => !string.IsNullOrWhiteSpace(v))
+        .Select(v => v.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList()
+        ?? [userIdText];
+
+    var startedAt = ReadString(payload, "started_at");
+    var scheduledDate = ReadString(payload, "scheduled_date");
+    var now = DateTime.UtcNow;
+    if (string.IsNullOrWhiteSpace(startedAt))
+    {
+        startedAt = !string.IsNullOrWhiteSpace(scheduledDate) ? scheduledDate : now.ToString("O");
+    }
+
+    var row = new CompatJamSession
+    {
+        Id = Guid.NewGuid().ToString("N"),
+        CreatedById = userIdText,
+        Title = title.Trim(),
+        Description = ReadString(payload, "description"),
+        ParticipantsJson = SerializeStringArray(participants),
+        SignupIdsJson = SerializeStringArray(signupIds),
+        ScheduledDateRaw = scheduledDate,
+        StartedAtRaw = startedAt,
+        Bpm = TryReadInt(payload, "bpm", out var bpm) ? Math.Clamp(bpm, 40, 300) : 120,
+        Status = ReadString(payload, "status") is { Length: > 0 } s ? s : "active",
+        MaxParticipants = TryReadInt(payload, "max_participants", out var maxParticipants) ? Math.Max(1, maxParticipants) : null,
+        TrackUrisJson = SerializeStringArray(TryReadStringArray(payload, "track_uris") ?? []),
+        CreatedDate = now,
+        UpdatedDate = now,
+    };
+
+    _db.CompatJamSessions.Add(row);
+    await _db.SaveChangesAsync();
+    return Ok(MapJamSessionCompatRow(row));
+}
+
+private async Task<IActionResult> UpdateJamSessionCompat(string id, JsonElement payload)
+{
+    var userId = User.GetUserId();
+    if (userId == Guid.Empty)
+    {
+        return Unauthorized(new { message = "Invalid user session." });
+    }
+
+    await EnsureJamSessionStorageAsync();
+
+    var row = await _db.CompatJamSessions.FirstOrDefaultAsync(x => x.Id == id);
+    if (row is null)
+    {
+        return NotFound(new { message = "Jam session not found." });
+    }
+
+    var userIdText = userId.ToString();
+    var participants = ParseStringArray(row.ParticipantsJson);
+    var isAdmin = User.IsInRole("Admin");
+    if (!isAdmin
+        && !string.Equals(row.CreatedById, userIdText, StringComparison.OrdinalIgnoreCase)
+        && !participants.Contains(userIdText, StringComparer.OrdinalIgnoreCase))
+    {
+        return StatusCode(StatusCodes.Status403Forbidden, new { message = "You do not have access to update this jam session." });
+    }
+
+    var title = ReadString(payload, "title");
+    if (!string.IsNullOrWhiteSpace(title))
+    {
+        row.Title = title.Trim();
+    }
+
+    var description = ReadString(payload, "description");
+    if (description is not null)
+    {
+        row.Description = description;
+    }
+
+    var status = ReadString(payload, "status");
+    if (!string.IsNullOrWhiteSpace(status))
+    {
+        row.Status = status.Trim();
+    }
+
+    if (TryReadInt(payload, "bpm", out var bpm))
+    {
+        row.Bpm = Math.Clamp(bpm, 40, 300);
+    }
+
+    if (TryReadInt(payload, "max_participants", out var maxParticipants))
+    {
+        row.MaxParticipants = Math.Max(1, maxParticipants);
+    }
+
+    var startedAt = ReadString(payload, "started_at");
+    if (startedAt is not null)
+    {
+        row.StartedAtRaw = startedAt;
+    }
+
+    var scheduledDate = ReadString(payload, "scheduled_date");
+    if (scheduledDate is not null)
+    {
+        row.ScheduledDateRaw = scheduledDate;
+    }
+
+    var participantUpdate = TryReadStringArray(payload, "participants");
+    if (participantUpdate is { Length: > 0 })
+    {
+        row.ParticipantsJson = SerializeStringArray(
+            participantUpdate
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray());
+    }
+
+    var signupUpdate = TryReadStringArray(payload, "signup_ids");
+    if (signupUpdate is not null)
+    {
+        row.SignupIdsJson = SerializeStringArray(
+            signupUpdate
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray());
+    }
+
+    var trackUrisUpdate = TryReadStringArray(payload, "track_uris");
+    if (trackUrisUpdate is not null)
+    {
+        row.TrackUrisJson = SerializeStringArray(trackUrisUpdate);
+    }
+
+    row.UpdatedDate = DateTime.UtcNow;
+    await _db.SaveChangesAsync();
+    return Ok(MapJamSessionCompatRow(row));
+}
+
+private static object MapJamSessionCompatRow(CompatJamSession row)
+{
+    return new
+    {
+        id = row.Id,
+        created_by_id = row.CreatedById,
+        description = row.Description,
+        title = row.Title,
+        participants = ParseStringArray(row.ParticipantsJson),
+        signup_ids = ParseStringArray(row.SignupIdsJson),
+        scheduled_date = row.ScheduledDateRaw,
+        started_at = row.StartedAtRaw,
+        bpm = row.Bpm,
+        status = row.Status,
+        max_participants = row.MaxParticipants,
+        track_uris = ParseStringArray(row.TrackUrisJson),
+        created_date = row.CreatedDate,
+        updated_date = row.UpdatedDate
+    };
+}
+
+private static string[] ParseStringArray(string? raw)
+{
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+        return [];
+    }
+
+    try
+    {
+        var values = JsonSerializer.Deserialize<string[]>(raw);
+        return values?
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v.Trim())
+            .ToArray()
+            ?? [];
+    }
+    catch
+    {
+        return [];
+    }
+}
+
+private static string SerializeStringArray(IEnumerable<string> values)
+{
+    var normalized = values
+        .Where(v => !string.IsNullOrWhiteSpace(v))
+        .Select(v => v.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    return JsonSerializer.Serialize(normalized);
+}
 
 private async Task<IActionResult> CreatePostCompat(JsonElement payload)
 {

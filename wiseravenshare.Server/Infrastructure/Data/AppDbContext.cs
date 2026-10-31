@@ -168,6 +168,7 @@ public class AppDbContext : DbContext
     public DbSet<PodcastSession> PodcastSessions => Set<PodcastSession>();
     public DbSet<PodcastSessionDevice> PodcastSessionDevices => Set<PodcastSessionDevice>();
     public DbSet<WorkspacePage> WorkspacePages => Set<WorkspacePage>();
+    public DbSet<CompatJamSession> CompatJamSessions => Set<CompatJamSession>();
 
     // Media Library (user saved photos, videos, music with visibility control)
     public DbSet<SavedMedia> SavedMediaItems => Set<SavedMedia>();
@@ -234,6 +235,29 @@ public class AppDbContext : DbContext
         {
             entity.ToTable("FeatureAuditLogs");
             entity.HasIndex(x => x.FeatureKey);
+        });
+
+        modelBuilder.Entity<CompatJamSession>(entity =>
+        {
+            entity.ToTable("compat_jam_sessions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id").HasColumnType("text");
+            entity.Property(x => x.CreatedById).HasColumnName("created_by_id").HasColumnType("text");
+            entity.Property(x => x.Description).HasColumnName("description").HasColumnType("text");
+            entity.Property(x => x.Title).HasColumnName("title").HasColumnType("text");
+            entity.Property(x => x.ParticipantsJson).HasColumnName("participants").HasColumnType("jsonb");
+            entity.Property(x => x.SignupIdsJson).HasColumnName("signup_ids").HasColumnType("jsonb");
+            entity.Property(x => x.ScheduledDateRaw).HasColumnName("scheduled_date").HasColumnType("text");
+            entity.Property(x => x.StartedAtRaw).HasColumnName("started_at").HasColumnType("text");
+            entity.Property(x => x.Bpm).HasColumnName("bpm");
+            entity.Property(x => x.Status).HasColumnName("status").HasColumnType("text");
+            entity.Property(x => x.MaxParticipants).HasColumnName("max_participants");
+            entity.Property(x => x.TrackUrisJson).HasColumnName("track_uris").HasColumnType("jsonb");
+            entity.Property(x => x.CreatedDate).HasColumnName("created_date");
+            entity.Property(x => x.UpdatedDate).HasColumnName("updated_date");
+
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.CreatedDate);
         });
 
         modelBuilder.Entity<Follow>(entity =>
