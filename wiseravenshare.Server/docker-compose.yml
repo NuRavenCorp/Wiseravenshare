@@ -106,9 +106,11 @@ services:
       PREDICTOR_MODELS_DIR: /var/lib/posting/models
       CHAT_ENABLED: ${CHAT_ENABLED:-true}
       RAVENSIGHT_ENABLED: ${RAVENSIGHT_ENABLED:-true}
+      # Workers = (2 × vCPU) + 1. For a 1-vCPU Basic Droplet use 3; 2-vCPU → 5.
+      # Override at deploy time: WEB_CONCURRENCY=5 docker compose up
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-3}
     volumes:
       - predictor-models:/var/lib/posting/models
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005"]
     ports:
       - "${PYTHON_MATRIX_PORT:-8005}:8005"
     networks:
@@ -291,7 +293,8 @@ services:
     environment:
       PORT: ${PYTHON_METRICS_API_PORT:-8010}
       PG_DSN: ${PYTHON_PG_DSN:-postgresql://wiseravenshare_user:wiseravenshare_dev_password@postgres:5432/wiseravenshare_db}
-    command: ["uvicorn", "metrics_api:app", "--host", "0.0.0.0", "--port", "8010"]
+    command: ["uvicorn", "metrics_api:app", "--host", "0.0.0.0", "--port", "8010",
+              "--workers", "2", "--loop", "uvloop"]
     ports:
       - "${PYTHON_METRICS_API_PORT:-8010}:8010"
     networks:

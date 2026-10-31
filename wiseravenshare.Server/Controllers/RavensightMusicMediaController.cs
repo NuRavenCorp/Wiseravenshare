@@ -59,7 +59,15 @@ public sealed class RavensightMusicMediaController : ControllerBase
             return Unauthorized(new { message = "Unable to determine current user." });
         }
 
-        var bucketTracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
+        IReadOnlyList<UserMusicTrackDto> bucketTracks = Array.Empty<UserMusicTrackDto>();
+        try
+        {
+            bucketTracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Bucket query failed for user {UserId} during GetUserMusic; serving catalog tracks only.", userId);
+        }
         var bucketFileNames = new HashSet<string>(bucketTracks.Select(t => t.FileName), StringComparer.OrdinalIgnoreCase);
 
         IEnumerable<UserMusicTrackDto> catalogTracks = [];
@@ -214,7 +222,15 @@ public sealed class RavensightMusicMediaController : ControllerBase
         string? objectKey = null;
         string fileName = "audio-file";
         RavensightMediaAssetRecord? catalogAsset = null;
-        var tracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
+        IReadOnlyList<UserMusicTrackDto> tracks = Array.Empty<UserMusicTrackDto>();
+        try
+        {
+            tracks = await _musicLibraryStore.GetUserMusicAsync(userId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Bucket query failed for user {UserId} during ResolveTrackSourceAsync; falling back to media catalog.", userId);
+        }
         var track = tracks.FirstOrDefault(candidate => string.Equals(candidate.Id, trackId, StringComparison.OrdinalIgnoreCase));
         if (track is not null)
         {

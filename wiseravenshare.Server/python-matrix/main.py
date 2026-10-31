@@ -18,6 +18,7 @@ import redis
 import redis.asyncio as aredis
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from live_ranker import rank_live_feed
@@ -94,7 +95,14 @@ def get_connection() -> psycopg.Connection:
 def get_redis_client() -> redis.Redis:
     global _redis_client
     if _redis_client is None:
-        _redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+        _redis_client = redis.Redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            max_connections=20,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            retry_on_timeout=True,
+        )
     return _redis_client
 
 
@@ -696,6 +704,9 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Python Matrix Service", lifespan=lifespan)
+
+# Compress JSON responses ≥ 1 KB — cuts feed payload wire size by ~75 %.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 if CHAT_ENABLED:
     app.include_router(chat_router)
