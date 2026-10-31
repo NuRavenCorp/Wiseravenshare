@@ -2986,7 +2986,7 @@ using (var scope = app.Services.CreateScope())
     try
     {
         await platformBrandingStore.EnsureSchemaAsync();
-        await platformBrandingStore.SetDefaultValueAsync("brand_logo_url", "/assets/branding/th-512.jpg");
+        await platformBrandingStore.SetDefaultValueAsync("brand_logo_url", "/assets/branding/website-icon.jpg");
     }
     catch (Exception ex)
     {

@@ -6,7 +6,7 @@ const CONTACT_EMAIL = "privacy@wiseravenshare.com";
 
 export default function Privacy() {
   return (
-    <LegalLayout title="Privacy Policy" subtitle="How WiseRavenShare collects, uses, and protects your information." lastUpdated={EFFECTIVE_DATE}>
+    <LegalLayout title="WiseRavenShare Privacy Policy" subtitle="How WiseRavenShare collects, uses, and protects your information." lastUpdated={EFFECTIVE_DATE}>
       <LegalSection title="1. Introduction">
         <p>
           WiseRavenShare ("we," "us," or "the Platform") is a creator-focused media platform offering AI-verified truth

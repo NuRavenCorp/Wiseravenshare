@@ -8,7 +8,9 @@ namespace Wiseravenshare.Server.Controllers;
 [Route("api/platform/branding")]
 public sealed class PlatformBrandingController : ControllerBase
 {
-    private const string DefaultBrandLogoUrl = "/assets/branding/th-512.jpg";
+    private const string DefaultBrandLogoUrl = "/assets/branding/website-icon.jpg";
+    private const string PreviousDefaultBrandLogoUrl = "/favicon.svg";
+    private const string LegacyDefaultBrandLogoUrl = "/assets/branding/th-512.jpg";
     private const string BrandLogoSettingKey = "brand_logo_url";
 
     private readonly PlatformBrandingStore _brandingStore;
@@ -30,6 +32,11 @@ public sealed class PlatformBrandingController : ControllerBase
         {
             var storedLogoUrl = await _brandingStore.GetValueAsync(BrandLogoSettingKey, cancellationToken);
             var logoUrl = string.IsNullOrWhiteSpace(storedLogoUrl) ? DefaultBrandLogoUrl : storedLogoUrl.Trim();
+            if (string.Equals(logoUrl, LegacyDefaultBrandLogoUrl, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(logoUrl, PreviousDefaultBrandLogoUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                logoUrl = DefaultBrandLogoUrl;
+            }
             return Ok(new
             {
                 brand_logo_url = logoUrl

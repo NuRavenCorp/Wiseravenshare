@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { resolveApiUrl } from "@/api/client";
 
-export const DEFAULT_BRAND_LOGO_URL = "/assets/branding/th-512.jpg";
+export const DEFAULT_BRAND_LOGO_URL = "/assets/branding/website-icon.jpg";
 
 let brandingPromise = null;
 

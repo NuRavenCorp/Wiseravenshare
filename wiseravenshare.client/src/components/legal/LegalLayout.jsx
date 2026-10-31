@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Feather, ArrowLeft } from "lucide-react";
 
@@ -9,6 +9,27 @@ const legalLinks = [
 ];
 
 export default function LegalLayout({ title, subtitle, lastUpdated, children }) {
+  useEffect(() => {
+    const previousTitle = document.title;
+    const descriptionMeta = document.querySelector('meta[name="description"]');
+    const previousDescription = descriptionMeta?.getAttribute("content");
+
+    if (title) {
+      document.title = title;
+    }
+
+    if (subtitle && descriptionMeta) {
+      descriptionMeta.setAttribute("content", subtitle);
+    }
+
+    return () => {
+      document.title = previousTitle;
+      if (descriptionMeta && previousDescription) {
+        descriptionMeta.setAttribute("content", previousDescription);
+      }
+    };
+  }, [title, subtitle]);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/90 backdrop-blur-xl">
