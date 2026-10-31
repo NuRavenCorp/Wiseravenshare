@@ -1,6 +1,9 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Wiseravenshare.Server.DTOs.Social;
+using Wiseravenshare.Server.Entities;
 
 namespace Wiseravenshare.Server.Services;
 
@@ -55,17 +58,20 @@ public sealed class NewsAggregationService : INewsAggregationService
     private readonly IRssFeedService _rssFeedService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<NewsAggregationService> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public NewsAggregationService(
         HttpClient httpClient,
         IRssFeedService rssFeedService,
         IConfiguration configuration,
-        ILogger<NewsAggregationService> logger)
+        ILogger<NewsAggregationService> logger,
+        IServiceScopeFactory scopeFactory)
     {
         _httpClient = httpClient;
         _rssFeedService = rssFeedService;
         _configuration = configuration;
         _logger = logger;
+        _scopeFactory = scopeFactory;
 
         // Keep each provider call short to avoid request timeout amplification.
         _httpClient.Timeout = TimeSpan.FromSeconds(8);
@@ -113,7 +119,9 @@ public sealed class NewsAggregationService : INewsAggregationService
             // ── optional API key sources ──────────────────────────────────
             FetchGNewsApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
             FetchGuardianApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
-            FetchTheNewsApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken)
+            FetchTheNewsApiAsync(normalizedQuery, normalizedLanguage, normalizedLimit, cancellationToken),
+            // ── WiseRavenShare amateur journalists — always on ────────────
+            FetchWrsAmateurJournalismAsync(normalizedQuery, normalizedLimit, cancellationToken)
         };
         var providers = (await Task.WhenAll(providerTasks)).ToList();
 
@@ -917,6 +925,93 @@ public sealed class NewsAggregationService : INewsAggregationService
             "ja" or "japanese" => ("ja-JP", "JP", "ja"),
             _ => ("en-US", "US", "en")
         };
+    }
+
+    private async Task<ProviderFetchResult> FetchWrsAmateurJournalismAsync(
+        string query,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        const string providerName = "WRS-Amateurs";
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<Wiseravenshare.Server.Infrastructure.Data.AppDbContext>();
+
+            // Ensure the table exists (idempotent, cheap on subsequent calls via PG catalog cache).
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS app_data.compat_journalism_reports (
+                    id TEXT PRIMARY KEY,
+                    created_by_id TEXT NOT NULL,
+                    post_id TEXT NULL,
+                    headline TEXT NOT NULL,
+                    description TEXT NULL,
+                    region TEXT NULL,
+                    image_url TEXT NULL,
+                    source_url TEXT NULL,
+                    verification_status TEXT NOT NULL DEFAULT 'under_review',
+                    created_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_date TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS ix_compat_journalism_reports_verification_status
+                    ON app_data.compat_journalism_reports(verification_status);
+                CREATE INDEX IF NOT EXISTS ix_compat_journalism_reports_created_date
+                    ON app_data.compat_journalism_reports(created_date DESC);
+                """,
+                cancellationToken);
+
+            var normalizedQuery = query.ToLowerInvariant();
+            var rows = await db.CompatJournalismReports
+                .AsNoTracking()
+                .Where(r => r.VerificationStatus != "rejected")
+                .OrderByDescending(r => r.CreatedDate)
+                .Take(limit * 2)
+                .ToListAsync(cancellationToken);
+
+            // If a query term is supplied filter by headline/description/region relevance.
+            if (!string.IsNullOrWhiteSpace(normalizedQuery)
+                && normalizedQuery != "breaking news")
+            {
+                var queryTokens = normalizedQuery
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(t => t.Length > 2)
+                    .ToArray();
+
+                if (queryTokens.Length > 0)
+                {
+                    rows = rows
+                        .Where(r =>
+                            queryTokens.Any(token =>
+                                (r.Headline?.Contains(token, StringComparison.OrdinalIgnoreCase) == true)
+                                || (r.Description?.Contains(token, StringComparison.OrdinalIgnoreCase) == true)
+                                || (r.Region?.Contains(token, StringComparison.OrdinalIgnoreCase) == true)))
+                        .ToList();
+                }
+            }
+
+            var articles = rows
+                .Take(limit)
+                .Select(r => new NewsArticle
+                {
+                    Provider = providerName,
+                    Source = "WRS-Amateurs",
+                    Title = r.Headline,
+                    Description = r.Description,
+                    Url = r.SourceUrl,
+                    ImageUrl = r.ImageUrl,
+                    Author = null,
+                    PublishedAtUtc = new DateTimeOffset(r.CreatedDate, TimeSpan.Zero),
+                })
+                .ToList();
+
+            return ProviderFetchResult.Success(providerName, articles);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "WRS-Amateurs journalism fetch failed.");
+            return ProviderFetchResult.Failed(providerName, ex.Message);
+        }
     }
 
     private sealed class ProviderFetchResult

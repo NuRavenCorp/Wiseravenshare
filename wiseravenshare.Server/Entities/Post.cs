@@ -15,6 +15,11 @@ namespace Wiseravenshare.Server.Entities
         public decimal? TruthScore { get; set; }
         public string? TruthCorrection { get; set; }
         public JsonDocument? TruthSources { get; set; }
+        /// <summary>
+        /// pending | verified | false | opinion | disputed | expert_verified | source_verified
+        /// Set automatically when TruthScore is recorded; can also be set by admin / expert override.
+        /// </summary>
+        public string? TruthStatus { get; set; }
         public string? LocationName { get; set; }
         public bool IsTruthDispatch { get; set; }
         public bool TruthDeclarationAccepted { get; set; }

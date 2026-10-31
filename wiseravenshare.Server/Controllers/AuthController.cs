@@ -2315,11 +2315,22 @@ public class AuthController : ControllerBase
 
         var fallbackClientId = provider switch
         {
+            "facebook" => ResolveOAuthSettingValue(
+                _configuration["Social:Facebook:AppId"],
+                _configuration["FACEBOOK_APP_ID"],
+                _configuration["META_APP_ID"]),
             // Instagram uses the same Meta app credentials as Facebook in most deployments.
             "instagram" => ResolveOAuthSettingValue(
                 _configuration["Authentication:OAuthProviders:Facebook:ClientId"],
+                _configuration["Social:Facebook:AppId"],
                 _configuration["FACEBOOK_OAUTH_CLIENT_ID"],
-                _configuration["FACEBOOK_CLIENT_ID"]),
+                _configuration["FACEBOOK_CLIENT_ID"],
+                _configuration["FACEBOOK_APP_ID"],
+                _configuration["META_APP_ID"]),
+            "tiktok" => ResolveOAuthSettingValue(
+                _configuration["TIKTOK_CLIENT_ID"],
+                _configuration["TIKTOK_APP_ID"],
+                _configuration["Social:TikTok:ClientId"]),
             // YouTube OAuth uses Google OAuth credentials.
             "youtube" => ResolveOAuthSettingValue(
                 _configuration["Authentication:OAuthProviders:Google:ClientId"],
@@ -2329,10 +2340,21 @@ public class AuthController : ControllerBase
         };
         var fallbackClientSecret = provider switch
         {
+            "facebook" => ResolveOAuthSettingValue(
+                _configuration["Social:Facebook:AppSecret"],
+                _configuration["FACEBOOK_APP_SECRET"],
+                _configuration["META_APP_SECRET"]),
             "instagram" => ResolveOAuthSettingValue(
                 _configuration["Authentication:OAuthProviders:Facebook:ClientSecret"],
+                _configuration["Social:Facebook:AppSecret"],
                 _configuration["FACEBOOK_OAUTH_CLIENT_SECRET"],
-                _configuration["FACEBOOK_CLIENT_SECRET"]),
+                _configuration["FACEBOOK_CLIENT_SECRET"],
+                _configuration["FACEBOOK_APP_SECRET"],
+                _configuration["META_APP_SECRET"]),
+            "tiktok" => ResolveOAuthSettingValue(
+                _configuration["TIKTOK_CLIENT_SECRET"],
+                _configuration["TIKTOK_APP_SECRET"],
+                _configuration["Social:TikTok:ClientSecret"]),
             "youtube" => ResolveOAuthSettingValue(
                 _configuration["Authentication:OAuthProviders:Google:ClientSecret"],
                 _configuration["GOOGLE_OAUTH_CLIENT_SECRET"],
@@ -2341,10 +2363,19 @@ public class AuthController : ControllerBase
         };
         var fallbackRedirectUri = provider switch
         {
-            "instagram" => ResolveOAuthSettingValue(
-                _configuration["Authentication:OAuthProviders:Facebook:RedirectUri"],
+            "facebook" => ResolveOAuthSettingValue(
+                _configuration["Social:Facebook:RedirectUri"],
                 _configuration["FACEBOOK_OAUTH_REDIRECT_URI"],
                 _configuration["FACEBOOK_REDIRECT_URI"]),
+            "instagram" => ResolveOAuthSettingValue(
+                _configuration["Authentication:OAuthProviders:Facebook:RedirectUri"],
+                _configuration["Social:Facebook:RedirectUri"],
+                _configuration["FACEBOOK_OAUTH_REDIRECT_URI"],
+                _configuration["FACEBOOK_REDIRECT_URI"]),
+            "tiktok" => ResolveOAuthSettingValue(
+                _configuration["Social:TikTok:RedirectUri"],
+                _configuration["TIKTOK_OAUTH_REDIRECT_URI"],
+                _configuration["TIKTOK_REDIRECT_URI"]),
             _ => string.Empty
         };
 
@@ -2357,6 +2388,8 @@ public class AuthController : ControllerBase
             _configuration[$"{providerPrefix}_OAUTH_CLIENTID"],
             _configuration[$"{providerPrefix}_CLIENT_ID"],
             _configuration[$"{providerPrefix}_CLIENTID"],
+            provider == "facebook" ? _configuration["FACEBOOK_APP_ID"] : null,
+            provider == "instagram" ? _configuration["INSTAGRAM_APP_ID"] : null,
             provider == "tiktok" ? _configuration["TIKTOK_CLIENT_KEY"] : null,
             fallbackClientId);
         var clientSecret = ResolveOAuthSettingValue(
@@ -2368,6 +2401,8 @@ public class AuthController : ControllerBase
             _configuration[$"{providerPrefix}_OAUTH_CLIENTSECRET"],
             _configuration[$"{providerPrefix}_CLIENT_SECRET"],
             _configuration[$"{providerPrefix}_CLIENTSECRET"],
+            provider == "facebook" ? _configuration["FACEBOOK_APP_SECRET"] : null,
+            provider == "instagram" ? _configuration["INSTAGRAM_APP_SECRET"] : null,
             fallbackClientSecret);
         var tenantId = ResolveOAuthSettingValue(
             section["TenantId"],

@@ -169,6 +169,8 @@ public class AppDbContext : DbContext
     public DbSet<PodcastSessionDevice> PodcastSessionDevices => Set<PodcastSessionDevice>();
     public DbSet<WorkspacePage> WorkspacePages => Set<WorkspacePage>();
     public DbSet<CompatJamSession> CompatJamSessions => Set<CompatJamSession>();
+    public DbSet<CompatJournalismReport> CompatJournalismReports => Set<CompatJournalismReport>();
+    public DbSet<ExternalVerifier> ExternalVerifiers => Set<ExternalVerifier>();
 
     // Media Library (user saved photos, videos, music with visibility control)
     public DbSet<SavedMedia> SavedMediaItems => Set<SavedMedia>();
@@ -258,6 +260,44 @@ public class AppDbContext : DbContext
 
             entity.HasIndex(x => x.Status);
             entity.HasIndex(x => x.CreatedDate);
+        });
+
+        modelBuilder.Entity<CompatJournalismReport>(entity =>
+        {
+            entity.ToTable("compat_journalism_reports");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id").HasColumnType("text");
+            entity.Property(x => x.CreatedById).HasColumnName("created_by_id").HasColumnType("text");
+            entity.Property(x => x.PostId).HasColumnName("post_id").HasColumnType("text");
+            entity.Property(x => x.Headline).HasColumnName("headline").HasColumnType("text");
+            entity.Property(x => x.Description).HasColumnName("description").HasColumnType("text");
+            entity.Property(x => x.Region).HasColumnName("region").HasColumnType("text");
+            entity.Property(x => x.ImageUrl).HasColumnName("image_url").HasColumnType("text");
+            entity.Property(x => x.SourceUrl).HasColumnName("source_url").HasColumnType("text");
+            entity.Property(x => x.VerificationStatus).HasColumnName("verification_status").HasColumnType("text");
+            entity.Property(x => x.CreatedDate).HasColumnName("created_date");
+            entity.Property(x => x.UpdatedDate).HasColumnName("updated_date");
+
+            entity.HasIndex(x => x.VerificationStatus);
+            entity.HasIndex(x => x.CreatedDate);
+        });
+
+        modelBuilder.Entity<ExternalVerifier>(entity =>
+        {
+            entity.ToTable("external_verifiers");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id").HasColumnType("text");
+            entity.Property(x => x.Name).HasColumnName("name").HasColumnType("text");
+            entity.Property(x => x.EndpointTemplate).HasColumnName("endpoint_template").HasColumnType("text");
+            entity.Property(x => x.FetchType).HasColumnName("fetch_type").HasColumnType("text").HasDefaultValue("stub");
+            entity.Property(x => x.ApiKeyEnvVar).HasColumnName("api_key_env_var").HasColumnType("text");
+            entity.Property(x => x.Weight).HasColumnName("weight").HasColumnType("numeric").HasDefaultValue(0.10m);
+            entity.Property(x => x.IsEnabled).HasColumnName("is_enabled").HasDefaultValue(true);
+            entity.Property(x => x.ScoreJsonPath).HasColumnName("score_json_path").HasColumnType("text");
+            entity.Property(x => x.Notes).HasColumnName("notes").HasColumnType("text");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            entity.HasIndex(x => x.IsEnabled);
         });
 
         modelBuilder.Entity<Follow>(entity =>

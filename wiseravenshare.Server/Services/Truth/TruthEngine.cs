@@ -28,17 +28,23 @@ public class TruthEngineService : ITruthEngineService
     private readonly IKnowledgeBaseService _knowledgeBaseService;
     private readonly IConsensusService _consensusService;
     private readonly INewsAggregationService? _newsAggregationService;
+    private readonly IExternalVerificationService _externalVerification;
     private readonly IMemoryCache _cache;
     private readonly ILogger<TruthEngineService> _logger;
 
-    private const decimal HIGH_CONFIDENCE_THRESHOLD = 0.85m;
-    private const decimal MEDIUM_CONFIDENCE_THRESHOLD = 0.60m;
-    private const decimal LOW_CONFIDENCE_THRESHOLD = 0.40m;
+    // Internal component weights — these are REDUCED proportionally when active external
+    // verifiers add their own weight, keeping the grand total at 1.0.
     private const decimal KNOWLEDGE_BASE_WEIGHT = 0.35m;
     private const decimal AI_REASONING_WEIGHT = 0.25m;
     private const decimal CONSENSUS_WEIGHT = 0.20m;
     private const decimal SOURCE_VERIFICATION_WEIGHT = 0.15m;
     private const decimal TEMPORAL_WEIGHT = 0.05m;
+    private const decimal INTERNAL_WEIGHT_TOTAL = KNOWLEDGE_BASE_WEIGHT + AI_REASONING_WEIGHT
+                                                  + CONSENSUS_WEIGHT + SOURCE_VERIFICATION_WEIGHT + TEMPORAL_WEIGHT;
+
+    private const decimal HIGH_CONFIDENCE_THRESHOLD = 0.85m;
+    private const decimal MEDIUM_CONFIDENCE_THRESHOLD = 0.60m;
+    private const decimal LOW_CONFIDENCE_THRESHOLD = 0.40m;
 
     public TruthEngineService(
         ITruthRepository truthRepository,
@@ -47,6 +53,7 @@ public class TruthEngineService : ITruthEngineService
         IConsensusService consensusService,
         IMemoryCache cache,
         ILogger<TruthEngineService> logger,
+        IExternalVerificationService externalVerification,
         INewsAggregationService? newsAggregationService = null)
     {
         _truthRepository = truthRepository;
@@ -55,6 +62,7 @@ public class TruthEngineService : ITruthEngineService
         _consensusService = consensusService;
         _cache = cache;
         _logger = logger;
+        _externalVerification = externalVerification;
         _newsAggregationService = newsAggregationService;
     }
 
@@ -178,7 +186,20 @@ public class TruthEngineService : ITruthEngineService
         var temporalAnalysisResult = await AnalyzeTemporalAsync(normalizedClaim);
         var consensusResult = await GetConsensusAsync(normalizedClaim);
 
-        var result = CombineVerificationResults(knowledgeBaseResult, aiReasoningResult, sourceVerificationResult, temporalAnalysisResult, consensusResult);
+        // External verifiers run in parallel with internal checks and are already done
+        // by the time we reach this point (Task.WhenAll below).
+        IReadOnlyList<ExternalVerifierResult> externalResults;
+        try
+        {
+            externalResults = await _externalVerification.QueryAllAsync(claim);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "External verification query failed; skipping external signals.");
+            externalResults = [];
+        }
+
+        var result = CombineVerificationResults(knowledgeBaseResult, aiReasoningResult, sourceVerificationResult, temporalAnalysisResult, consensusResult, externalResults);
         result.Claim = claim;
         result.NormalizedClaim = normalizedClaim;
         result.Timestamp = DateTime.UtcNow;
@@ -231,6 +252,7 @@ public class TruthEngineService : ITruthEngineService
                 Score = 0.50m,
                 Confidence = 0.50m,
                 Accuracy = 0.50m,
+                IsOpinionContent = results.Any() && results.All(r => r.IsOpinion || r.IsQuestion),
                 Claims = results.Select(r => new ClaimScore { Claim = r.Claim, Score = r.ConfidenceScore, IsTrue = r.IsTrue, Evidence = r.Sources.Select(s => s.Url).ToList() }).ToList()
             };
         }
@@ -407,7 +429,13 @@ public class TruthEngineService : ITruthEngineService
         return await _consensusService.GetConsensusAsync(claim.Id);
     }
 
-    private TruthVerificationResult CombineVerificationResults(KnowledgeBaseResult knowledgeBase, AIReasoningResult aiReasoning, SourceVerificationResult sources, TemporalAnalysisResult temporal, ConsensusResult consensus)
+    private TruthVerificationResult CombineVerificationResults(
+        KnowledgeBaseResult knowledgeBase,
+        AIReasoningResult aiReasoning,
+        SourceVerificationResult sources,
+        TemporalAnalysisResult temporal,
+        ConsensusResult consensus,
+        IReadOnlyList<ExternalVerifierResult>? external = null)
     {
         var knowledgeScore = knowledgeBase.Found ? knowledgeBase.Confidence : 0.50m;
         var aiScore = aiReasoning.Confidence;
@@ -415,14 +443,66 @@ public class TruthEngineService : ITruthEngineService
         var temporalScore = CalculateTemporalScore(temporal);
         var consensusScore = consensus.Confidence;
 
-        var confidenceScore = (knowledgeScore * KNOWLEDGE_BASE_WEIGHT) + (aiScore * AI_REASONING_WEIGHT) + (sourceScore * SOURCE_VERIFICATION_WEIGHT) + (temporalScore * TEMPORAL_WEIGHT) + (consensusScore * CONSENSUS_WEIGHT);
+        // ── Dynamic weight redistribution ──────────────────────────────────
+        // Sum up external verifier weights; scale internal weights down so the
+        // grand total remains 1.0.  e.g. if externals total 0.30, each internal
+        // weight is multiplied by (1.0 - 0.30) / INTERNAL_WEIGHT_TOTAL.
+        var activeExternal = (external ?? []).Where(e => e.Succeeded).ToList();
+        var externalWeightTotal = activeExternal.Sum(e => e.Weight);
+        var externalWeightClamped = Math.Clamp(externalWeightTotal, 0m, 0.50m); // cap at 50 % so internals always matter
+        var internalScale = (1m - externalWeightClamped) / INTERNAL_WEIGHT_TOTAL;
+
+        var confidenceScore =
+            (knowledgeScore * KNOWLEDGE_BASE_WEIGHT * internalScale)
+            + (aiScore * AI_REASONING_WEIGHT * internalScale)
+            + (sourceScore * SOURCE_VERIFICATION_WEIGHT * internalScale)
+            + (temporalScore * TEMPORAL_WEIGHT * internalScale)
+            + (consensusScore * CONSENSUS_WEIGHT * internalScale);
+
+        // Add external contribution (scaled so weights sum to externalWeightClamped)
+        if (activeExternal.Count > 0 && externalWeightTotal > 0m)
+        {
+            var externalNorm = externalWeightClamped / externalWeightTotal;
+            confidenceScore += activeExternal.Sum(e => e.Score * e.Weight * externalNorm);
+        }
+
+        confidenceScore = Math.Clamp(confidenceScore, 0m, 1m);
+
+        var externalSources = activeExternal
+            .Where(e => !string.IsNullOrWhiteSpace(e.SourceUrl))
+            .Select(e => new Source
+            {
+                Url = e.SourceUrl!,
+                Title = e.VerifierName,
+                SourceType = "External Verifier",
+                ReliabilityScore = e.Weight,
+                Verdict = e.Score >= 0.60m ? SourceVerdict.Supports : e.Score <= 0.40m ? SourceVerdict.Contradicts : SourceVerdict.Neutral,
+                IsVerified = true
+            })
+            .ToList();
 
         return new TruthVerificationResult
         {
             ConfidenceScore = confidenceScore,
-            IsTrue = confidenceScore >= HIGH_CONFIDENCE_THRESHOLD ? true : confidenceScore <= LOW_CONFIDENCE_THRESHOLD ? false : null,
-            Sources = (knowledgeBase.Sources ?? new List<Source>()).Concat(sources.Sources ?? new List<Source>()).DistinctBy(s => s.Url).ToList(),
-            Breakdown = new VerificationBreakdown { KnowledgeBaseScore = knowledgeScore, AIScore = aiScore, SourceScore = sourceScore, TemporalScore = temporalScore, ConsensusScore = consensusScore }
+            IsTrue = confidenceScore >= HIGH_CONFIDENCE_THRESHOLD ? true
+                   : confidenceScore <= LOW_CONFIDENCE_THRESHOLD ? false
+                   : null,
+            Sources = (knowledgeBase.Sources ?? [])
+                .Concat(sources.Sources ?? [])
+                .Concat(externalSources)
+                .DistinctBy(s => s.Url)
+                .ToList(),
+            Breakdown = new VerificationBreakdown
+            {
+                KnowledgeBaseScore = knowledgeScore,
+                AIScore = aiScore,
+                SourceScore = sourceScore,
+                TemporalScore = temporalScore,
+                ConsensusScore = consensusScore,
+                ExternalScores = activeExternal.ToDictionary(
+                    e => e.VerifierId,
+                    e => new ExternalVerifierBreakdown { Score = e.Score, Weight = e.Weight, Name = e.VerifierName })
+            }
         };
     }
 
@@ -572,6 +652,8 @@ public class TruthScore
     public decimal Score { get; set; }
     public decimal Confidence { get; set; }
     public decimal Accuracy { get; set; }
+    /// <summary>True when all extracted claims are opinions or questions — no factual scoring applies.</summary>
+    public bool IsOpinionContent { get; set; }
     public List<ClaimScore> Claims { get; set; } = new();
 }
 
@@ -664,6 +746,14 @@ public class VerificationBreakdown
     public decimal SourceScore { get; set; }
     public decimal TemporalScore { get; set; }
     public decimal ConsensusScore { get; set; }
+    public Dictionary<string, ExternalVerifierBreakdown> ExternalScores { get; set; } = [];
+}
+
+public class ExternalVerifierBreakdown
+{
+    public string Name { get; set; } = string.Empty;
+    public decimal Score { get; set; }
+    public decimal Weight { get; set; }
 }
 
 public class AIResponse
