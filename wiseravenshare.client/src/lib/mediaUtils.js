@@ -26,7 +26,8 @@ const normalizeCandidateUrl = (raw) => {
 };
 
 const isProtectedMediaPath = (pathName) => PROTECTED_MEDIA_PATH_PREFIXES.some((prefix) =>
-  pathName.startsWith(prefix));
+  pathName.startsWith(prefix))
+  || (/^\/api\/ravensight\/media\/music\/[^/]+\/(stream|browser-compatible)$/i.test(pathName));
 
 const buildBlobProxyPath = (objectKey) => {
   const normalized = String(objectKey || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
