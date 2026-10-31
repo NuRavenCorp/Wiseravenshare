@@ -2625,17 +2625,20 @@ public class AuthController : ControllerBase
         }
 
         var configuredOrigin = configuredUri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
-        if (Request.Host.HasValue && string.Equals(configuredUri.Host, Request.Host.Host, StringComparison.OrdinalIgnoreCase))
-        {
-            return configuredOrigin;
-        }
-
-        // Prefer the active request origin to avoid redirecting users to stale/misconfigured domains.
-        if (Request.Host.HasValue)
+        if (configuredUri.IsLoopback
+            || string.Equals(configuredUri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(configuredUri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
             return requestOrigin;
         }
 
+        if (!string.Equals(configuredUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return requestOrigin;
+        }
+
+        // For OAuth callbacks in production, prefer the configured public origin.
+        // Proxy/container request hosts can be internal and fail provider domain checks.
         return configuredOrigin;
     }
 
@@ -3328,8 +3331,8 @@ public class AuthController : ControllerBase
             return string.Empty;
         }
 
-        var channelHandle = ReadField(fields, "channel_handle", "channelHandle", "username", "handle");
-        var channelId = ReadField(fields, "channel_id", "channelId", "id");
+        var channelHandle = ReadField(fields, "channel_handle", "channelHandle", "youtube_user_id", "youtubeUserId", "user_id", "userId", "username", "handle");
+        var channelId = ReadField(fields, "channel_id", "channelId", "youtube_channel_id", "youtubeChannelId", "id");
         var pageId = ReadField(fields, "page_id", "pageId");
         var pageName = ReadField(fields, "page_name", "pageName");
         var instagramUserId = ReadField(fields, "user_id", "instagram_user_id", "business_user_id");

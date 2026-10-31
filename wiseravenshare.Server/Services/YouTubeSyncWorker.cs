@@ -40,7 +40,9 @@ public sealed class YouTubeSyncWorker : BackgroundService
     private async Task RunSyncPassAsync(CancellationToken ct)
     {
         var apiKey = _configuration["YouTubeSync:ApiKey"];
-        var channelId = _configuration["YouTubeSync:ChannelId"];
+        var channelId = (_configuration["YouTubeSync:ChannelId"]
+            ?? _configuration["Social:YouTube:ChannelId"]
+            ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(channelId))
         {
             _logger.LogDebug("YouTubeSync not configured. Skipping sync pass.");
