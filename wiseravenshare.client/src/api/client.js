@@ -813,6 +813,7 @@ export const apiClient = {
     uploadVideo(file, fields = {}) {
       const body = new FormData();
       body.append("file", file);
+      body.append("File", file);
       body.append("title", fields.title || file.name.replace(/\.[^/.]+$/, ""));
       body.append("description", fields.description || "");
       body.append("destinationFolder", fields.destinationFolder || "my-library");
@@ -1267,6 +1268,5 @@ export const apiClient = {
     throw lastError;
   },
 };
-
 
 
