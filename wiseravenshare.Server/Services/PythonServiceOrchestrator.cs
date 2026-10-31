@@ -99,14 +99,23 @@ public sealed class PythonServiceOrchestrator : IHostedService, IDisposable
     //  IHostedService
     // ─────────────────────────────────────────────────────────────────────────
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
     {
         if (!_cfg.Enabled)
         {
             _logger.LogInformation("[PythonOrchestrator] Disabled — skipping Python service startup.");
-            return;
+            return Task.CompletedTask;
         }
 
+        // Launch Python service setup in the background so ASP.NET responds to
+        // health checks immediately. venv creation and pip install can take 30-90s
+        // on first deploy; blocking StartAsync was causing DO App Platform 503s.
+        _ = Task.Run(() => StartServicesAsync(cancellationToken), CancellationToken.None);
+        return Task.CompletedTask;
+    }
+
+    private async Task StartServicesAsync(CancellationToken cancellationToken)
+    {
         var servicesRoot = ResolveServicesRoot();
         _logger.LogInformation("[PythonOrchestrator] Services root: {Root}", servicesRoot);
 
