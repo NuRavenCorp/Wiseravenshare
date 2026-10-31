@@ -2422,6 +2422,8 @@ public class AuthController : ControllerBase
             _configuration[$"{providerPrefix}_REDIRECT_URI"],
             _configuration[$"{providerPrefix}_CALLBACK_URL"],
             fallbackRedirectUri);
+        var requiresClientSecret = !string.Equals(provider, "facebook", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(provider, "instagram", StringComparison.OrdinalIgnoreCase);
 
         return new OAuthProviderConfig
         {
@@ -2429,7 +2431,8 @@ public class AuthController : ControllerBase
             ClientSecret = clientSecret,
             TenantId = tenantId,
             RedirectUri = redirectUri,
-            IsEnabled = !string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(clientSecret)
+            IsEnabled = !string.IsNullOrWhiteSpace(clientId)
+                && (!requiresClientSecret || !string.IsNullOrWhiteSpace(clientSecret))
         };
     }
 
