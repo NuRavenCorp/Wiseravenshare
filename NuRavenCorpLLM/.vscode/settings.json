@@ -1,0 +1,9 @@
+{
+    "python.terminal.useEnvFile": true,
+    "chat.tools.terminal.autoApprove": {
+        "/^dotnet build \"E:\\\\NuRavenCorp\\\\NuRavenCorpLLM\\\\NuRavenCorpLLM\\.Server\\\\NuRavenCorpLLM\\.Server\\.csproj\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

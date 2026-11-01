@@ -82,9 +82,11 @@ public sealed class AdminUsersController : ControllerBase
     }
 
     [HttpGet("activity-feed")]
-    public async Task<IActionResult> GetActivityFeed()
+    public async Task<IActionResult> GetActivityFeed([FromQuery] int page = 1, [FromQuery] int pageSize = 100)
     {
         if (!IsAdmin()) return Forbid();
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 500);
 
         var users = _userStore.GetAllUsersSnapshot();
         var activeUserIds = _refreshTokenStore.GetActiveUserIdsSnapshot();
@@ -116,7 +118,7 @@ public sealed class AdminUsersController : ControllerBase
             x => affirmationByGuid.GetValueOrDefault(x.GuidId, 0),
             StringComparer.OrdinalIgnoreCase);
 
-        var items = users
+        var allItems = users
             .Select(u => new
             {
                 id = u.Id,
@@ -130,16 +132,24 @@ public sealed class AdminUsersController : ControllerBase
             .OrderBy(x => x.name)
             .ToList();
 
-        var activeUserCount = items.Count(x => x.isLoggedOn);
-        var inactiveUserCount = items.Count - activeUserCount;
-        var activeAffirmations = items.Where(x => x.isLoggedOn).Sum(x => x.affirmationTally);
-        var inactiveAffirmations = items.Where(x => !x.isLoggedOn).Sum(x => x.affirmationTally);
+        var totalCount = allItems.Count;
+        var activeUserCount = allItems.Count(x => x.isLoggedOn);
+        var inactiveUserCount = allItems.Count - activeUserCount;
+        var activeAffirmations = allItems.Where(x => x.isLoggedOn).Sum(x => x.affirmationTally);
+        var inactiveAffirmations = allItems.Where(x => !x.isLoggedOn).Sum(x => x.affirmationTally);
         var totalAffirmations = activeAffirmations + inactiveAffirmations;
+
+        var items = allItems
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
 
         return Ok(new
         {
             generatedAtUtc = DateTime.UtcNow,
-            totalUsers = items.Count,
+            totalUsers = totalCount,
+            page,
+            pageSize,
             activeUserCount,
             inactiveUserCount,
             loggedOnUsers = activeUserCount,
