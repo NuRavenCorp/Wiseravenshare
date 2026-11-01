@@ -1,7 +1,6 @@
 ﻿// src/hooks/useAssistant.js
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as signalR from '@microsoft/signalr';
-import { assistantService } from '../services/assistantService';
 
 export function useAssistant(conversationId) {
     const [messages, setMessages] = useState([]);

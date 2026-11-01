@@ -23,5 +23,9 @@ export const assistantService = {
 
     submitFeedback: async (messageId, payload) => {
         await api.post(`/assistant/messages/${messageId}/feedback`, payload);
+    },
+
+    commenceTraining: async (payload = {}) => {
+        return api.post('/assistant/training/commence', payload);
     }
 };
