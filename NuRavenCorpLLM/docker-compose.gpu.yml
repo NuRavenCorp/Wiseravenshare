@@ -1,0 +1,59 @@
+services:
+  # The Reverse Proxy router that balances incoming traffic
+  gateway:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - inference-worker-1
+      - inference-worker-2
+
+  # Independent isolated model serving execution instances
+  inference-worker-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: custom-llm-core:latest
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - MODEL_ID=distilgpt2
+      - HF_HOME=/workspace/.cache/huggingface
+    expose:
+      - "8000"
+    gpus: all
+    volumes:
+      - hf_cache:/workspace/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  inference-worker-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: custom-llm-core:latest
+    environment:
+      - CUDA_VISIBLE_DEVICES=1
+      - MODEL_ID=distilgpt2
+      - HF_HOME=/workspace/.cache/huggingface
+    expose:
+      - "8000"
+    gpus: all
+    volumes:
+      - hf_cache:/workspace/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  hf_cache:

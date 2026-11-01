@@ -198,7 +198,8 @@ namespace Wiseravenshare.Server.Services
         public async Task<IEnumerable<AgentDto>> GetAgentsAsync()
         {
             var agents = await _agentRepository.GetAllAsync();
-            return agents.Select(a => GetAgentDtoAsync(a).Result);
+            var dtos = await Task.WhenAll(agents.Select(a => GetAgentDtoAsync(a)));
+            return dtos;
         }
 
         public async Task<AgentDto> GetAgentAsync(Guid agentId)

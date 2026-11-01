@@ -69,6 +69,7 @@ public class SocialController : ControllerBase
         var tiktokTask = _socialPlatformService.GetTikTokFeedAsync(username, limit);
         var blueskyTask = _socialPlatformService.GetBlueskyFeedAsync(blueskyHandle, limit);
         await Task.WhenAll(facebookTask, tiktokTask, blueskyTask);
+        // .Result is safe here: all tasks are already completed after WhenAll.
         var facebook = facebookTask.Result;
         var tiktok = tiktokTask.Result;
         var bluesky = blueskyTask.Result;

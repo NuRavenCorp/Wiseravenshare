@@ -94,40 +94,28 @@ public class CopyrightFilingController : ControllerBase
     /// </summary>
     [HttpPut("{filingId}/update")]
     [ProducesResponseType(200)]
+    [ProducesResponseType(501)]
     public IActionResult UpdateFiling(string filingId, [FromBody] UpdateFilingRequest request)
     {
         if (string.IsNullOrWhiteSpace(filingId))
             return BadRequest(new { message = "FilingId is required" });
 
-        try
+        _logger.LogWarning("UpdateFiling called for {FilingId} but database persistence is not yet implemented", filingId);
+        return StatusCode(StatusCodes.Status501NotImplemented, new
         {
-            // TODO: Load filing from database
-            // var filing = await _filingRepository.GetById(filingId);
-            // if (filing == null) return NotFound();
-            
-            // Update fields
-            // filing.WorkTitle = request.WorkTitle;
-            // filing.CreatorName = request.CreatorName;
-            // filing.WorkDescription = request.WorkDescription;
-            // await _filingRepository.Update(filing);
-
-            _logger.LogInformation($"Updated filing {filingId}");
-            return Ok(new { message = "Filing updated successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error updating filing {filingId}");
-            return StatusCode(500, new { message = "Error updating filing" });
-        }
+            message = "Filing update persistence is not yet implemented. Changes will not be saved.",
+            filingId
+        });
     }
 
     /// <summary>
     /// POST /api/copyright-filing/{filingId}/upload
-    /// Uploads a file (audio, sheet music, text) to a filing
+    /// Uploads a file (audio, sheet music, text) to a filing.
+    /// NOTE: File storage integration is not yet implemented.
     /// </summary>
     [HttpPost("{filingId}/upload")]
-    [ProducesResponseType(200)]
-    public async Task<IActionResult> UploadFilingDocument(string filingId, IFormFile file)
+    [ProducesResponseType(501)]
+    public IActionResult UploadFilingDocument(string filingId, IFormFile file)
     {
         if (string.IsNullOrWhiteSpace(filingId))
             return BadRequest(new { message = "FilingId is required" });
@@ -135,33 +123,16 @@ public class CopyrightFilingController : ControllerBase
         if (file == null || file.Length == 0)
             return BadRequest(new { message = "File is required" });
 
-        // Max 50MB
         if (file.Length > 50 * 1024 * 1024)
             return BadRequest(new { message = "File exceeds 50MB limit" });
 
-        try
+        _logger.LogWarning("UploadFilingDocument called for {FilingId}/{FileName} but cloud storage is not yet wired up", filingId, file.FileName);
+        return StatusCode(StatusCodes.Status501NotImplemented, new
         {
-            // TODO: Upload file to GCS/S3
-            // var storageKey = await _fileStorage.Upload(filingId, file);
-            // var filing = await _filingRepository.GetById(filingId);
-            // filing.UploadedFileKeys.Add(storageKey);
-            // await _filingRepository.Update(filing);
-
-            var mockStorageKey = $"filing/{filingId}/{file.FileName}";
-            _logger.LogInformation($"Uploaded file {file.FileName} to filing {filingId}");
-            
-            return Ok(new {
-                storageKey = mockStorageKey,
-                fileName = file.FileName,
-                fileSize = file.Length,
-                message = "File uploaded successfully"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error uploading file to filing {filingId}");
-            return StatusCode(500, new { message = "Error uploading file" });
-        }
+            message = "File upload storage is not yet implemented. No file has been stored.",
+            filingId,
+            fileName = file.FileName
+        });
     }
 
     /// <summary>
@@ -169,162 +140,75 @@ public class CopyrightFilingController : ControllerBase
     /// Validates filing is complete before payment
     /// </summary>
     [HttpPost("{filingId}/validate")]
-    [ProducesResponseType(200)]
+    [ProducesResponseType(501)]
     public IActionResult ValidateFiling(string filingId)
     {
         if (string.IsNullOrWhiteSpace(filingId))
             return BadRequest(new { message = "FilingId is required" });
 
-        try
+        _logger.LogWarning("ValidateFiling called for {FilingId} but database-backed validation is not yet implemented", filingId);
+        return StatusCode(StatusCodes.Status501NotImplemented, new
         {
-            // TODO: Load filing from database
-            // var filing = await _filingRepository.GetById(filingId);
-            // var (isValid, missingFields) = _filingService.ValidateFilingForPayment(filing);
-
-            // Mock validation response
-            var mockFiling = new
-            {
-                filingId = filingId,
-                isValid = true,
-                missingFields = new List<string>()
-            };
-
-            _logger.LogInformation($"Validated filing {filingId}");
-            return Ok(mockFiling);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error validating filing {filingId}");
-            return StatusCode(500, new { message = "Error validating filing" });
-        }
+            message = "Filing validation against persisted data is not yet implemented.",
+            filingId
+        });
     }
 
     /// <summary>
     /// POST /api/copyright-filing/{filingId}/checkout
-    /// Initiates payment for filing (creates Stripe payment intent)
+    /// Initiates Stripe payment for filing. Not yet implemented.
     /// </summary>
     [HttpPost("{filingId}/checkout")]
-    [ProducesResponseType(200)]
+    [ProducesResponseType(501)]
     public IActionResult InitiateCheckout(string filingId)
     {
         if (string.IsNullOrWhiteSpace(filingId))
             return BadRequest(new { message = "FilingId is required" });
 
-        try
+        _logger.LogWarning("InitiateCheckout called for {FilingId} but Stripe integration is not yet implemented", filingId);
+        return StatusCode(StatusCodes.Status501NotImplemented, new
         {
-            // TODO: Load filing, create Stripe PaymentIntent
-            // var filing = await _filingRepository.GetById(filingId);
-            // var paymentIntent = await _stripeService.CreatePaymentIntent(
-            //     amountCents: (long)(filing.TotalPrice * 100),
-            //     description: $"Copyright {filing.FormCode} Filing - {filing.WorkTitle}",
-            //     metadata: new { filingId = filing.FilingId }
-            // );
-
-            var mockPaymentIntent = new {
-                clientSecret = "pi_test_secret_XXXX",
-                paymentIntentId = "pi_test_1234",
-                amount = 97.50m,
-                currency = "usd",
-                status = "requires_payment_method",
-                filingId = filingId
-            };
-
-            _logger.LogInformation($"Initiated checkout for filing {filingId}");
-            return Ok(mockPaymentIntent);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error initiating checkout for filing {filingId}");
-            return StatusCode(500, new { message = "Error initiating payment" });
-        }
+            message = "Payment checkout is not yet implemented. No charge has been created.",
+            filingId
+        });
     }
 
     /// <summary>
     /// POST /api/copyright-filing/{filingId}/confirm-payment
-    /// Confirms payment and submits to Copyright Office
+    /// Confirms payment and submits to Copyright Office. Not yet implemented.
     /// </summary>
     [HttpPost("{filingId}/confirm-payment")]
-    [ProducesResponseType(200)]
+    [ProducesResponseType(501)]
     public IActionResult ConfirmPaymentAndSubmit(string filingId, [FromBody] ConfirmPaymentRequest request)
     {
         if (string.IsNullOrWhiteSpace(filingId) || string.IsNullOrWhiteSpace(request?.PaymentIntentId))
             return BadRequest(new { message = "FilingId and PaymentIntentId are required" });
 
-        try
+        _logger.LogWarning("ConfirmPaymentAndSubmit called for {FilingId} but Stripe verification and submission pipeline are not yet implemented", filingId);
+        return StatusCode(StatusCodes.Status501NotImplemented, new
         {
-            // TODO: Verify payment with Stripe
-            // var paymentIntent = await _stripeService.RetrievePaymentIntent(request.PaymentIntentId);
-            // if (paymentIntent.Status != "succeeded") return BadRequest(...);
-            
-            // var filing = await _filingRepository.GetById(filingId);
-            // _filingService.ConfirmPaymentAndSubmit(filing, request.PaymentIntentId);
-            // await _filingRepository.Update(filing);
-            
-            // TODO: Queue Copyright Office submission job
-
-            var mockResponse = new {
-                filingId = filingId,
-                status = "SubmittedToOffice",
-                paymentIntentId = request.PaymentIntentId,
-                submittedAt = DateTime.UtcNow,
-                expectedRegistration = new {
-                    earliestDate = DateTime.UtcNow.AddDays(28),
-                    latestDate = DateTime.UtcNow.AddDays(42),
-                    estimatedWeeks = "4-6 weeks"
-                },
-                message = "Filing submitted to Copyright Office. You will receive your registration number via email in 4-6 weeks."
-            };
-
-            _logger.LogInformation($"Confirmed payment and submitted filing {filingId} to Copyright Office");
-            return Ok(mockResponse);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error confirming payment for filing {filingId}");
-            return StatusCode(500, new { message = "Error confirming payment" });
-        }
+            message = "Payment confirmation and Copyright Office submission are not yet implemented. No funds have been captured.",
+            filingId
+        });
     }
 
     /// <summary>
     /// GET /api/copyright-filing/{filingId}/status
-    /// Gets filing status and registration details
+    /// Gets filing status and registration details. Not yet implemented.
     /// </summary>
     [HttpGet("{filingId}/status")]
-    [ProducesResponseType(200)]
+    [ProducesResponseType(501)]
     public IActionResult GetFilingStatus(string filingId)
     {
         if (string.IsNullOrWhiteSpace(filingId))
             return BadRequest(new { message = "FilingId is required" });
 
-        try
+        _logger.LogWarning("GetFilingStatus called for {FilingId} but database persistence is not yet implemented", filingId);
+        return StatusCode(StatusCodes.Status501NotImplemented, new
         {
-            // TODO: Load filing from database
-            var mockFiling = new {
-                filingId = filingId,
-                formCode = "SR",
-                status = "SubmittedToOffice",
-                workTitle = "Sample Song",
-                creatorName = "Artist Name",
-                totalPrice = 97.50m,
-                copyrightOfficeFee = 65.00m,
-                wiseravenServiceFee = 32.50m,
-                submittedAt = DateTime.UtcNow.AddDays(-1),
-                registrationNumber = (string?)null,
-                registeredAt = (DateTime?)null,
-                expectedRegistration = new {
-                    earliestDate = DateTime.UtcNow.AddDays(27),
-                    latestDate = DateTime.UtcNow.AddDays(41)
-                }
-            };
-
-            _logger.LogInformation($"Retrieved status for filing {filingId}");
-            return Ok(mockFiling);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error retrieving filing {filingId}");
-            return StatusCode(500, new { message = "Error retrieving filing" });
-        }
+            message = "Filing status retrieval from database is not yet implemented.",
+            filingId
+        });
     }
 
     /// <summary>
@@ -333,24 +217,20 @@ public class CopyrightFilingController : ControllerBase
     /// </summary>
     [HttpGet("user/filings")]
     [ProducesResponseType(200)]
+    /// <summary>
+    /// GET /api/copyright-filing/user/filings
+    /// Lists all filings for the authenticated user. Not yet implemented.
+    /// </summary>
+    [HttpGet("user/filings")]
+    [ProducesResponseType(501)]
     public IActionResult GetUserFilings()
     {
-        try
+        var userId = User.FindFirst("sub")?.Value ?? User.Identity?.Name;
+        _logger.LogWarning("GetUserFilings called for user {UserId} but database persistence is not yet implemented", userId);
+        return StatusCode(StatusCodes.Status501NotImplemented, new
         {
-            // TODO: Extract userId from JWT
-            var userId = User.FindFirst("sub")?.Value ?? "guest-user";
-            
-            // TODO: Load filings from database where UserId == userId
-            var mockFilings = new List<dynamic>();
-            
-            _logger.LogInformation($"Retrieved filings for user {userId}");
-            return Ok(mockFilings);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving user filings");
-            return StatusCode(500, new { message = "Error retrieving filings" });
-        }
+            message = "User filing retrieval from database is not yet implemented."
+        });
     }
 }
 
