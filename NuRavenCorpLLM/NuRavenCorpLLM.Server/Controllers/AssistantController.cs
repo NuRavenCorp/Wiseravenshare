@@ -5,6 +5,8 @@ using NuRavenCorpLLM.Application.Services.Assistant;
 using NuRavenCorpLLM.Core.Interfaces.Repositories.Assistant;
 using NuRavenCorpLLM.Entities;
 using NuRavenCorpLLM.Infrastructure.Security;
+using NuRavenCorpLLM.Services;
+using System.Text;
 
 namespace NuRavenCorpLLM.Controllers;
 
@@ -90,8 +92,70 @@ public class AssistantController : ControllerBase
     public async Task<IActionResult> GetMessage(Guid messageId) =>
         Ok(await _msgRepo.GetByIdAsync(messageId));
 
+    [HttpPost("training/commence")]
+    public async Task<IActionResult> CommenceTraining(
+        [FromBody] CommenceTrainingDto? dto,
+        [FromServices] IFeedbackLearningService feedbackLearningService,
+        [FromServices] IChatterLearningService chatterLearningService,
+        CancellationToken ct)
+    {
+        var lookbackDays = Math.Clamp(dto?.LookbackDays ?? 30, 1, 3650);
+        var curateBatchSize = Math.Clamp(dto?.CurateBatchSize ?? 100, 1, 5000);
+
+        var feedbackApplied = await feedbackLearningService.ApplyFeedbackToSamplesAsync(ct);
+        await chatterLearningService.CurateAndPromoteAsync(curateBatchSize);
+
+        var sinceUtc = DateTime.UtcNow.AddDays(-lookbackDays);
+        var dataset = await feedbackLearningService.BuildFineTuneDatasetAsync(sinceUtc, ct);
+        var lineCount = CountJsonlRecords(dataset);
+
+        var outputDirectory = ResolveOutputDirectory(dto?.OutputDirectory);
+        Directory.CreateDirectory(outputDirectory);
+        var fileName = $"nuravencorp-llm-finetune-{DateTime.UtcNow:yyyyMMdd-HHmmss}.jsonl";
+        var outputPath = Path.Combine(outputDirectory, fileName);
+        await System.IO.File.WriteAllBytesAsync(outputPath, dataset, ct);
+
+        return Ok(new
+        {
+            status = "training_dataset_ready",
+            lookbackDays,
+            curateBatchSize,
+            feedbackApplied,
+            records = lineCount,
+            bytes = dataset.Length,
+            sinceUtc = sinceUtc.ToString("O"),
+            outputPath
+        });
+    }
+
+    private static int CountJsonlRecords(byte[] payload)
+    {
+        if (payload.Length == 0)
+        {
+            return 0;
+        }
+
+        var content = Encoding.UTF8.GetString(payload);
+        return content
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Length;
+    }
+
+    private static string ResolveOutputDirectory(string? configured)
+    {
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return Path.IsPathRooted(configured)
+                ? configured
+                : Path.Combine(AppContext.BaseDirectory, configured);
+        }
+
+        return Path.Combine(AppContext.BaseDirectory, "App_Data", "training");
+    }
+
     public record CreateConversationDto(string? Title, string? Persona);
     public record SendMessageDto(string Text, bool IsVoice = false);
     public record SpeakDto(string Text, string? VoiceId);
     public record FeedbackDto(string Vote, int? Rating, string? Comment, string? CorrectedResponse);
+    public record CommenceTrainingDto(int LookbackDays = 30, int CurateBatchSize = 100, string? OutputDirectory = null);
 }

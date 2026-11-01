@@ -10,6 +10,7 @@ using Wiseravenshare.Server.Hubs;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Shared;
 using Wiseravenshare.Server.Services;
+using System.Globalization;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -115,7 +116,8 @@ public sealed class LiveController : ControllerBase
             var raw = await response.Content.ReadAsStringAsync(cancellationToken);
             var mediaType = response.Content.Headers.ContentType?.MediaType;
 
-            if (string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase))
+            if (response.IsSuccessStatusCode
+                && string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase))
             {
                 return new ContentResult
                 {
@@ -125,13 +127,229 @@ public sealed class LiveController : ControllerBase
                 };
             }
 
-            return StatusCode((int)response.StatusCode, new { message = raw });
+            _logger.LogWarning(
+                "Python live training-data upstream returned {StatusCode}. Using local fallback.",
+                (int)response.StatusCode);
+            return Ok(await BuildLocalTrainingDataFallbackAsync(boundedLimit, cancellationToken));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Live feed training data proxy request failed.");
-            return StatusCode(503, new { message = "Live feed training data is unavailable." });
+            _logger.LogWarning(ex, "Live feed training data proxy request failed. Using local fallback.");
+            return Ok(await BuildLocalTrainingDataFallbackAsync(boundedLimit, cancellationToken));
         }
+    }
+
+    private async Task<object> BuildLocalTrainingDataFallbackAsync(int limit, CancellationToken cancellationToken)
+    {
+        var normalizedLimit = Math.Clamp(limit, 1, 5000);
+        var connectionString = _db.Database.GetDbConnection().ConnectionString;
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return new
+            {
+                samples = Array.Empty<object>(),
+                count = 0,
+                source = "local-fallback",
+                message = "Live training data fallback is unavailable because the database connection string is missing."
+            };
+        }
+
+        try
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            var schema = await ResolveLiveRankSchemaAsync(connection, cancellationToken);
+            if (string.IsNullOrWhiteSpace(schema))
+            {
+                return new
+                {
+                    samples = Array.Empty<object>(),
+                    count = 0,
+                    source = "local-fallback",
+                    message = "No live rank impression table is available yet."
+                };
+            }
+
+            var interactionsExists = await TableExistsAsync(connection, schema, "live_interactions", cancellationToken);
+            var impressionsTable = $"{schema}.live_rank_impressions";
+            var interactionsTable = $"{schema}.live_interactions";
+
+            var query = interactionsExists
+                ? $"""
+SELECT
+    i.id,
+    i.viewer_id,
+    i.stream_id,
+    i.score,
+    i.score_source,
+    i.rank_position,
+    i.features::text,
+    i.created_at,
+    COALESCE(SUM(li.watch_seconds), 0) AS watch_seconds,
+    COALESCE(BOOL_OR(li.liked), FALSE) AS liked,
+    COALESCE(BOOL_OR(li.commented), FALSE) AS commented,
+    COALESCE(BOOL_OR(li.shared), FALSE) AS shared,
+    COALESCE(BOOL_OR(li.followed_after), FALSE) AS followed_after
+FROM {impressionsTable} i
+LEFT JOIN {interactionsTable} li
+    ON li.viewer_id = i.viewer_id
+   AND li.stream_id = i.stream_id
+   AND li.created_at >= i.created_at
+   AND li.created_at < i.created_at + interval '24 hours'
+GROUP BY
+    i.id, i.viewer_id, i.stream_id, i.score, i.score_source,
+    i.rank_position, i.features, i.created_at
+ORDER BY i.id DESC
+LIMIT @limit;
+"""
+                : $"""
+SELECT
+    i.id,
+    i.viewer_id,
+    i.stream_id,
+    i.score,
+    i.score_source,
+    i.rank_position,
+    i.features::text,
+    i.created_at,
+    0::double precision AS watch_seconds,
+    FALSE AS liked,
+    FALSE AS commented,
+    FALSE AS shared,
+    FALSE AS followed_after
+FROM {impressionsTable} i
+ORDER BY i.id DESC
+LIMIT @limit;
+""";
+
+            await using var command = new NpgsqlCommand(query, connection);
+            command.Parameters.AddWithValue("limit", normalizedLimit);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            var samples = new List<object>();
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var featuresRaw = reader.IsDBNull(6) ? "{}" : reader.GetString(6);
+                var features = ParseFeatureMap(featuresRaw);
+                var watchSeconds = reader.IsDBNull(8) ? 0d : Convert.ToDouble(reader.GetValue(8), CultureInfo.InvariantCulture);
+                var liked = !reader.IsDBNull(9) && reader.GetBoolean(9);
+                var commented = !reader.IsDBNull(10) && reader.GetBoolean(10);
+                var shared = !reader.IsDBNull(11) && reader.GetBoolean(11);
+                var followedAfter = !reader.IsDBNull(12) && reader.GetBoolean(12);
+                var label = DeriveRankLabel(watchSeconds, liked, commented, shared, followedAfter);
+
+                samples.Add(new
+                {
+                    impression_id = reader.IsDBNull(0) ? 0L : Convert.ToInt64(reader.GetValue(0), CultureInfo.InvariantCulture),
+                    viewer_id = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                    stream_id = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                    features,
+                    label,
+                    metadata = new
+                    {
+                        scored_at = reader.IsDBNull(7)
+                            ? DateTimeOffset.UtcNow.ToString("O")
+                            : reader.GetDateTime(7).ToUniversalTime().ToString("O"),
+                        heuristic_or_model_score = reader.IsDBNull(3) ? 0d : Convert.ToDouble(reader.GetValue(3), CultureInfo.InvariantCulture),
+                        score_source = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                        rank_position = reader.IsDBNull(5) ? 0 : Convert.ToInt32(reader.GetValue(5), CultureInfo.InvariantCulture),
+                        watch_seconds_24h = watchSeconds,
+                        liked_24h = liked,
+                        commented_24h = commented,
+                        shared_24h = shared,
+                        followed_after_24h = followedAfter
+                    }
+                });
+            }
+
+            return new
+            {
+                samples,
+                count = samples.Count,
+                source = "local-fallback",
+                schema
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to build local live training data fallback.");
+            return new
+            {
+                samples = Array.Empty<object>(),
+                count = 0,
+                source = "local-fallback",
+                message = "Live training data fallback failed."
+            };
+        }
+    }
+
+    private static async Task<string> ResolveLiveRankSchemaAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        foreach (var schema in new[] { "public", "app_data" })
+        {
+            if (await TableExistsAsync(connection, schema, "live_rank_impressions", cancellationToken))
+            {
+                return schema;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static async Task<bool> TableExistsAsync(NpgsqlConnection connection, string schema, string tableName, CancellationToken cancellationToken)
+    {
+        const string sql = """
+SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = @schema
+      AND table_name = @table
+);
+""";
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("schema", schema);
+        command.Parameters.AddWithValue("table", tableName);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is bool exists && exists;
+    }
+
+    private static Dictionary<string, object?> ParseFeatureMap(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, object?>>(raw);
+            return parsed ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static int DeriveRankLabel(double watchSeconds, bool liked, bool commented, bool shared, bool followedAfter)
+    {
+        if (shared || followedAfter)
+        {
+            return 3;
+        }
+
+        if (commented || watchSeconds >= 120d)
+        {
+            return 2;
+        }
+
+        if (liked || watchSeconds >= 30d)
+        {
+            return 1;
+        }
+
+        return 0;
     }
 
     [HttpGet("agora/token")]

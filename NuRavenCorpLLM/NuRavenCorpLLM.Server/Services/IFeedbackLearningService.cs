@@ -30,14 +30,14 @@ public class FeedbackLearningService : IFeedbackLearningService
 
     public async Task<int> ApplyFeedbackToSamplesAsync(CancellationToken ct = default)
     {
-        var feedbacks = await _fbRepo.GetUnprocessedAsync();
+        var feedbacks = await _fbRepo.GetUnprocessedAsync(ct);
         int count = 0;
         foreach (var fb in feedbacks)
         {
-            var msg = await _msgRepo.GetByIdAsync(fb.MessageId);
+            var msg = await _msgRepo.GetByIdAsync(fb.MessageId, ct);
             if (msg == null) continue;
 
-            var sample = await _samples.GetByMessageIdAsync(fb.MessageId);
+            var sample = await _samples.GetByMessageIdAsync(fb.MessageId, ct);
             if (sample != null)
             {
                 if (fb.Vote == FeedbackVote.ThumbUp)
@@ -59,7 +59,9 @@ public class FeedbackLearningService : IFeedbackLearningService
                         sample.QualityScore = 1;
                     }
                 }
-                await _samples.UpdateAsync(sample);
+                await _samples.UpdateAsync(sample, ct);
+                fb.IsProcessed = true;
+                await _fbRepo.UpdateAsync(fb, ct);
                 count++;
             }
         }
@@ -68,7 +70,7 @@ public class FeedbackLearningService : IFeedbackLearningService
 
     public async Task<byte[]> BuildFineTuneDatasetAsync(DateTime? since, CancellationToken ct = default)
     {
-        var samples = await _samples.GetApprovedAsync(since);
+        var samples = await _samples.GetApprovedAsync(since, ct);
 
         var sb = new StringBuilder();
         foreach (var s in samples)

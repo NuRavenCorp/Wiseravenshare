@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { FiThumbsUp, FiThumbsDown, FiExternalLink } from 'react-icons/fi';
-import { assistantService } from '../../services/assistantService';
+import { assistantService } from '../../services/assistantservice';
 
 export const AssistantMessage = ({ message }) => {
     const isUser = message.role === 'User' || message.role === 'user';

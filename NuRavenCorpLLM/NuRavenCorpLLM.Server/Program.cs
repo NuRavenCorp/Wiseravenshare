@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Identity.Web;
+using NuRavenCorpLLM.Application.Algtorithms;
 using NuRavenCorpLLM.Application.Services.Ai;
 using NuRavenCorpLLM.Application.Services.Ai.Repositories;
+using NuRavenCorpLLM.Application.Services;
 using NuRavenCorpLLM.Application.Services.Assistant;
 using NuRavenCorpLLM.Core.Interfaces.Repositories.Assistant;
 using NuRavenCorpLLM.Entities.Ai.DataSources;
@@ -24,14 +26,24 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
+builder.Services.AddMemoryCache();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 
 
 builder.Services.AddScoped<ILlmIntentRouter, LlmIntentRouter>();
 builder.Services.AddScoped<IAiDataOrchestrator, AiDataOrchestrator>();
 builder.Services.AddScoped<IJournalismBiasDetectionService, JournalismBiasDetectionService>();
+builder.Services.AddScoped<IAssistantOrchestrator, AssistantOrchestrator>();
+builder.Services.AddScoped<IRagRetriever, RagRetriever>();
+builder.Services.AddScoped<IAssistantSafetyService, AssistantSafetyService>();
+builder.Services.AddScoped<IAssistantPersonaService, AssistantPersonaService>();
+builder.Services.AddScoped<PromptBuilder>();
 builder.Services.Configure<FolderKnowledgeOptions>(builder.Configuration.GetSection("FolderKnowledge"));
 builder.Services.Configure<OpenAiOptions>(builder.Configuration.GetSection("OpenAI"));
+builder.Services.Configure<AssistantOptions>(builder.Configuration.GetSection("Assistant"));
+builder.Services.Configure<WebGroundingOptions>(builder.Configuration.GetSection("WebGrounding"));
+builder.Services.Configure<WhisperOptions>(builder.Configuration.GetSection("Whisper"));
+builder.Services.Configure<TtsOptions>(builder.Configuration.GetSection("Tts"));
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("DatabaseConnection")
@@ -52,6 +64,13 @@ builder.Services.AddScoped<ILlmGateway>(sp => sp.GetRequiredService<OpenAiClient
 builder.Services.AddScoped<IPgVectorStore, PgVectorStore>();
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 builder.Services.AddScoped<IAssistantKnowledgeRepository, AssistantKnowledgeRepository>();
+builder.Services.AddScoped<IAssistantConversationRepository, AssistantConversationRepository>();
+builder.Services.AddScoped<IAssistantMessageRepository, AssistantMessageRepository>();
+builder.Services.AddScoped<IAssistantFeedbackRepository, AssistantFeedbackRepository>();
+builder.Services.AddScoped<IAssistantLearningSampleRepository, AssistantLearningSampleRepository>();
+builder.Services.AddHttpClient<ISpeechToTextService, SpeechToTextService>();
+builder.Services.AddHttpClient<ITextToSpeechService, TextToSpeechService>();
+builder.Services.AddHttpClient<IWebGroundingService, WebGroundingService>();
 
 builder.Services.AddScoped<IDataSourceAdapter, PostsDataSource>();
 builder.Services.AddScoped<IDataSourceAdapter, VideosDataSource>();
@@ -62,9 +81,12 @@ builder.Services.AddScoped<IDataSourceAdapter, CurrencyDataSource>();
 builder.Services.AddScoped<IDataSourceAdapter, TruthDataSource>();
 builder.Services.AddScoped<IDataSourceAdapter, CollaborationDataSource>();
 builder.Services.AddScoped<IDataSourceAdapter, UsersDataSource>();
+builder.Services.AddScoped<IChatterLearningService, ChatterLearningService>();
+builder.Services.AddScoped<IFeedbackLearningService, FeedbackLearningService>();
 
 builder.Services.AddHostedService<AiDataSeedService>();
 builder.Services.AddHostedService<FolderKnowledgeIngestionService>();
+builder.Services.AddHostedService<ChatterLearningBackgroundService>();
 
 var app = builder.Build();
 

@@ -339,22 +339,3 @@ public class AssistantOrchestrator : IAssistantOrchestrator
         return msg;
     }
 }
-
-public interface IAssistantConversationRepository
-{
-    Task AddAsync(AssistantConversation conv);
-    Task<AssistantConversation?> GetAsync(Guid conversationId);
-    Task<AssistantConversation?> GetWithMessagesAsync(Guid conversationId);
-    Task UpdateAsync(object conv);
-}
-
-public interface IAssistantMessageRepository
-{
-    Task AddAsync(AssistantMessage msg);
-}
-
-public interface IAssistantFeedbackRepository
-{
-    Task AddAsync(AssistantFeedback msg);
-
-}
