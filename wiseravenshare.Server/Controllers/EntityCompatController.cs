@@ -1332,10 +1332,22 @@ private async Task<EntityFilterResponse> FilterJournalismReportsAsync(
 {
     await EnsureJournalismReportStorageAsync(cancellationToken);
     var status = ReadString(body, "query.verification_status");
+    var statusIn = TryReadStringArray(body, "query.verification_status.$in");
     var sort = ReadString(body, "options.sort");
 
     var query = _db.CompatJournalismReports.AsNoTracking();
-    if (!string.IsNullOrWhiteSpace(status))
+    if (statusIn is { Length: > 0 })
+    {
+        var normalized = statusIn
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim())
+            .ToArray();
+        if (normalized.Length > 0)
+        {
+            query = query.Where(x => normalized.Contains(x.VerificationStatus));
+        }
+    }
+    else if (!string.IsNullOrWhiteSpace(status))
     {
         query = query.Where(x => x.VerificationStatus == status);
     }

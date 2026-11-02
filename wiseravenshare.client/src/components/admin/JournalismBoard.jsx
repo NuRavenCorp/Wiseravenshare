@@ -10,7 +10,7 @@ import {
 const COLUMNS = [
   {
     id: "under_review",
-    label: "Under Review",
+    label: "Review",
     color: "border-amber-500/40 bg-amber-500/5",
     dot: "bg-amber-400",
     icon: Eye,
