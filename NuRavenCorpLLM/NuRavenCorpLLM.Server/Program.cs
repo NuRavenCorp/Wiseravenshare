@@ -74,8 +74,8 @@ builder.Services.AddCors(options =>
             .WithOrigins(
                 "http://localhost:5173",
                 "http://127.0.0.1:5173",
-                "https://wiseravenshare-wiseravenshare.com",
-                "https://www.wiseravenshare-wiseravenshare.com")
+                "https://wise-ravens.com",
+                "https://www.wise-ravens.com")
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials());
@@ -167,6 +167,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseDefaultFiles();
+app.UseStaticFiles();
 app.MapStaticAssets();
 
 // Configure the HTTP request pipeline.
