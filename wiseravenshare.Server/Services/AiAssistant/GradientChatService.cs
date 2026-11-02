@@ -93,7 +93,8 @@ public class GradientChatService : IOllamaChatService
             _configuration["DO_GRADIENT_INFERENCE_KEY"],
             _configuration["GRADIENT_INFERENCE_KEY"],
             _configuration["DIGITALOCEAN_AI_INFERENCE_KEY"],
-            _configuration["OPENAI_API_KEY"]);
+            _configuration["OPENAI_API_KEY"],
+            _configuration["OPENAI_SECRET_KEY"]);
     }
 
     private static string FirstNonEmpty(params string?[] values)

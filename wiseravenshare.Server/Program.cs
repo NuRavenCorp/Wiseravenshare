@@ -2114,6 +2114,36 @@ builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.
     builder.Configuration.GetSection("Assistant"));
 builder.Services.Configure<WiseRavenShare.Server.Infrastructure.External.OpenAiOptions>(
     builder.Configuration.GetSection("OpenAI"));
+builder.Services.PostConfigure<WiseRavenShare.Server.Infrastructure.External.OpenAiOptions>(opts =>
+{
+    if (string.IsNullOrWhiteSpace(opts.ApiKey))
+    {
+        opts.ApiKey =
+            builder.Configuration["OpenAI:ApiKey"] ??
+            builder.Configuration["OpenAI__ApiKey"] ??
+            builder.Configuration["OPENAI_API_KEY"] ??
+            builder.Configuration["OPENAI_SECRET_KEY"] ??
+            string.Empty;
+    }
+
+    if (string.IsNullOrWhiteSpace(opts.ProjectId))
+    {
+        opts.ProjectId =
+            builder.Configuration["OpenAI:ProjectId"] ??
+            builder.Configuration["OpenAI__ProjectId"] ??
+            builder.Configuration["OPENAI_PROJECT_ID"] ??
+            string.Empty;
+    }
+
+    if (string.IsNullOrWhiteSpace(opts.TrackingId))
+    {
+        opts.TrackingId =
+            builder.Configuration["OpenAI:TrackingId"] ??
+            builder.Configuration["OpenAI__TrackingId"] ??
+            builder.Configuration["OPENAI_TRACKING_ID"] ??
+            string.Empty;
+    }
+});
 builder.Services.Configure<WiseRavenShare.Server.Application.Services.Assistant.WhisperOptions>(
     builder.Configuration.GetSection("Whisper"));
 builder.Services.PostConfigure<WiseRavenShare.Server.Application.Services.Assistant.WhisperOptions>(opts =>
@@ -2125,6 +2155,7 @@ builder.Services.PostConfigure<WiseRavenShare.Server.Application.Services.Assist
             builder.Configuration["OpenAI:ApiKey"] ??
             builder.Configuration["OpenAI__ApiKey"] ??
             builder.Configuration["OPENAI_API_KEY"] ??
+            builder.Configuration["OPENAI_SECRET_KEY"] ??
             string.Empty;
     }
 

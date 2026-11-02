@@ -96,7 +96,15 @@ export default function MusicStampTab() {
     const track = tracks.find((t) => t.id === trackId);
     if (!track) return;
     try {
-      const url = await getPlayableUrl(track.file_uri);
+      const sourceUri =
+        track.file_uri
+        || track.fileUri
+        || track.media_url
+        || track.mediaUrl
+        || track.media_url_signed
+        || track.mediaUrlSigned
+        || `/api/ravensight/media/music/${encodeURIComponent(track.id)}/stream`;
+      const url = await getPlayableUrl(sourceUri);
       if (!url) {
         setError("Could not resolve a playable URL for this track.");
         return;

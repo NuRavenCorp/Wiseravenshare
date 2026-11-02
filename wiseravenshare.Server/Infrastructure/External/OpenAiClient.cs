@@ -13,6 +13,8 @@ public class OpenAiOptions
     public string BaseUrl { get; set; } = "https://api.openai.com/v1";
     public string ChatModel { get; set; } = "gpt-4o-mini";
     public string EmbeddingModel { get; set; } = "text-embedding-3-small";
+    public string ProjectId { get; set; } = string.Empty;
+    public string TrackingId { get; set; } = string.Empty;
 }
 
 public class OpenAiClient
@@ -30,6 +32,14 @@ public class OpenAiClient
         if (!string.IsNullOrEmpty(_opts.ApiKey))
         {
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _opts.ApiKey);
+        }
+        if (!string.IsNullOrWhiteSpace(_opts.ProjectId))
+        {
+            _http.DefaultRequestHeaders.TryAddWithoutValidation("OpenAI-Project", _opts.ProjectId);
+        }
+        if (!string.IsNullOrWhiteSpace(_opts.TrackingId))
+        {
+            _http.DefaultRequestHeaders.TryAddWithoutValidation("X-OpenAI-Tracking-Id", _opts.TrackingId);
         }
     }
 
