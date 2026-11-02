@@ -45,7 +45,7 @@ export default function AdminJournalism() {
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [view, setView] = useState("list");
+  const [view, setView] = useState("board");
 
   const reviewerName = currentUser?.full_name || currentUser?.email || "Admin";
 
@@ -149,7 +149,7 @@ export default function AdminJournalism() {
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        Reports publish by default. Admin can flag a report into <strong>Under Review</strong>, then accept (Verified) or reject.
+        Reports publish by default. Switch to <strong>Board</strong> to drag stories from <strong>Review</strong> to <strong>Verified</strong> or <strong>Rejected</strong>.
       </p>
 
       {view === "board" ? (

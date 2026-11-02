@@ -10,7 +10,7 @@ import {
 const COLUMNS = [
   {
     id: "under_review",
-    label: "Review",
+    label: "Under Review",
     color: "border-amber-500/40 bg-amber-500/5",
     dot: "bg-amber-400",
     icon: Eye,
@@ -85,6 +85,19 @@ export default function JournalismBoard() {
     const report = reports.find((r) => r.id === draggableId);
     if (!report) return;
     const newStatus = destination.droppableId;
+    const sourceStatus = source.droppableId;
+
+    const isAllowedTransition =
+      sourceStatus === "under_review" &&
+      (newStatus === "verified" || newStatus === "rejected");
+    if (!isAllowedTransition) {
+      toast({
+        title: "Move not allowed",
+        description: "Stories can only move from Under Review to Verified or Rejected.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     // Optimistic update
     setReports((prev) =>
@@ -101,7 +114,11 @@ export default function JournalismBoard() {
       });
       toast({ title: `Moved to ${COLUMN_MAP[newStatus].label}` });
     } catch (e) {
-      toast({ title: "Move failed", description: e.message, variant: "destructive" });
+      toast({
+        title: "Move failed",
+        description: e?.data?.message || e?.message || "Could not update verification status.",
+        variant: "destructive",
+      });
       // Revert
       setReports((prev) =>
         prev.map((r) => (r.id === draggableId ? { ...r, verification_status: source.droppableId } : r))

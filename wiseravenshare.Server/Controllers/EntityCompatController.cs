@@ -1416,7 +1416,7 @@ private async Task<IActionResult> UpdateJournalismReportCompat(string id, JsonEl
         return BadRequest(new { message = "verification_status is required." });
     }
 
-    if (!User.IsInRole("Admin"))
+    if (!AuthAccessPolicy.IsAllAccessAdmin(User) && !User.IsInRole("Admin"))
     {
         return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only admins can verify journalism reports." });
     }
