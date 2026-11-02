@@ -7,7 +7,7 @@
     <RootNamespace>NuRavenCorpLLM</RootNamespace>
     <UserSecretsId>fab75be2-e0c2-4861-91f4-68dd1d344276</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <SpaRoot>..\nuravencorpllm.client</SpaRoot>
+    <SpaRoot>..\frontend</SpaRoot>
     <SpaProxyLaunchCommand>npm run dev</SpaProxyLaunchCommand>
     <SpaProxyServerUrl>https://localhost:54923</SpaProxyServerUrl>
   </PropertyGroup>

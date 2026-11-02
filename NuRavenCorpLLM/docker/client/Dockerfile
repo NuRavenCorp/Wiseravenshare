@@ -1,9 +1,9 @@
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY nuravencorpllm.client/package*.json ./
+COPY frontend/package*.json ./
 RUN npm install
 ENV VITE_DISABLE_HTTPS_CERTS=1
-COPY nuravencorpllm.client/ .
+COPY frontend/ .
 RUN npm run build
 
 FROM nginx:1.27-alpine AS final

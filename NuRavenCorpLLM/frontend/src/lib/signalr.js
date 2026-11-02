@@ -6,7 +6,7 @@ export function createConnection(hubPath) {
   return new signalR.HubConnectionBuilder()
     .withUrl(`${baseURL}/hubs/${hubPath}`, {
       accessTokenFactory: () => localStorage.getItem('nr_token') || '',
-      withCredentials: true,
+      withCredentials: false,
     })
     .withAutomaticReconnect([0, 2_000, 5_000, 10_000, 30_000])
     .configureLogging(signalR.LogLevel.Warning)

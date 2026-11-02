@@ -2,7 +2,10 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using NuRavenCorpLLM.Entities;
+using NuRavenCorpLLM.Infrastructure.Data;
 using NuRavenCorpLLM.Infrastructure.Security;
 
 namespace NuRavenCorpLLM.Controllers;
@@ -13,18 +16,21 @@ public class AuthController : ControllerBase
 {
     private readonly BootstrapLoginOptions _bootstrapLogin;
     private readonly IJwtTokenFactory _tokenFactory;
+    private readonly ApplicationDbContext _db;
 
     public AuthController(
         IOptions<BootstrapLoginOptions> bootstrapLogin,
-        IJwtTokenFactory tokenFactory)
+        IJwtTokenFactory tokenFactory,
+        ApplicationDbContext db)
     {
         _bootstrapLogin = bootstrapLogin.Value;
         _tokenFactory = tokenFactory;
+        _db = db;
     }
 
     [HttpPost("login")]
     [AllowAnonymous]
-    public IActionResult Login([FromBody] LoginRequest? request)
+    public async Task<IActionResult> Login([FromBody] LoginRequest? request)
     {
         if (request is null ||
             string.IsNullOrWhiteSpace(request.Email) ||
@@ -54,6 +60,28 @@ public class AuthController : ControllerBase
         }
 
         var userId = CreateDeterministicUserId(normalizedEmail);
+        var existingUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (existingUser is null)
+        {
+            _db.Users.Add(new User
+            {
+                Id = userId,
+                Email = normalizedEmail,
+                DisplayName = "Admin",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                IsDeleted = false
+            });
+        }
+        else
+        {
+            existingUser.Email = normalizedEmail;
+            existingUser.DisplayName = "Admin";
+            existingUser.IsDeleted = false;
+            existingUser.DeletedAt = null;
+            existingUser.UpdatedAt = DateTime.UtcNow;
+        }
+        await _db.SaveChangesAsync();
 
         var token = _tokenFactory.Create(userId, normalizedEmail, "Admin", isAdmin: true);
         return Ok(new
