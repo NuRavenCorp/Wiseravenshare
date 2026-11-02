@@ -231,6 +231,11 @@ public sealed partial class EntityCompatController : ControllerBase
             return await UpdateJamSessionCompat(id, payload);
         }
 
+        if (string.Equals(entityName, "JournalismReport", StringComparison.OrdinalIgnoreCase))
+        {
+            return await UpdateJournalismReportCompat(id, payload);
+        }
+
         if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
         {
             return NotFound(new { message = $"Entity '{entityName}' does not support update in compat mode." });
@@ -1155,6 +1160,40 @@ private async Task<IActionResult> CreateJournalismReportCompat(JsonElement paylo
     };
 
     _db.CompatJournalismReports.Add(row);
+    await _db.SaveChangesAsync();
+    return Ok(MapJournalismReportRow(row));
+}
+
+private async Task<IActionResult> UpdateJournalismReportCompat(string id, JsonElement payload)
+{
+    await EnsureJournalismReportStorageAsync();
+
+    var row = await _db.CompatJournalismReports.FirstOrDefaultAsync(x => x.Id == id);
+    if (row is null)
+    {
+        return NotFound(new { message = "Journalism report not found." });
+    }
+
+    var status = ReadString(payload, "verification_status");
+    if (string.IsNullOrWhiteSpace(status))
+    {
+        return BadRequest(new { message = "verification_status is required." });
+    }
+
+    if (!User.IsInRole("Admin"))
+    {
+        return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only admins can verify journalism reports." });
+    }
+
+    var normalizedStatus = status.Trim().ToLowerInvariant();
+    if (normalizedStatus is not ("under_review" or "verified" or "rejected"))
+    {
+        return BadRequest(new { message = "verification_status must be under_review, verified, or rejected." });
+    }
+
+    row.VerificationStatus = normalizedStatus;
+    row.UpdatedDate = DateTime.UtcNow;
+
     await _db.SaveChangesAsync();
     return Ok(MapJournalismReportRow(row));
 }

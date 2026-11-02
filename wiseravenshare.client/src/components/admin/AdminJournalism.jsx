@@ -3,6 +3,7 @@ import { apiClient } from "@/api/client";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Loader2, ShieldCheck, Eye, XCircle, Newspaper, MapPin,
   CheckCircle2, X, ExternalLink, LayoutGrid, List, ShieldAlert
@@ -103,6 +104,10 @@ export default function AdminJournalism() {
   const openNotes = (report) => {
     setEditingId(editingId === report.id ? null : report.id);
     setNotes(report.review_notes || "");
+  };
+
+  const toggleVerified = async (report, isVerified) => {
+    await setStatus(report, isVerified ? "verified" : "under_review");
   };
 
   return (
@@ -253,6 +258,15 @@ export default function AdminJournalism() {
                       </div>
                     )}
                     <div className="flex items-center gap-2 pt-1">
+                      <label className="inline-flex items-center gap-2 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
+                        <Switch
+                          checked={r.verification_status === "verified"}
+                          onCheckedChange={(checked) => toggleVerified(r, checked)}
+                          disabled={saving}
+                          aria-label="Toggle verification status"
+                        />
+                        Verify
+                      </label>
                       {r.verification_status !== "under_review" && (
                         <Button
                           size="sm"
