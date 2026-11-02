@@ -12,7 +12,7 @@ namespace NuRavenCorpLLM.Infrastructure.External;
 public class OpenAiOptions
 {
     public string ApiKey { get; set; } = string.Empty;
-    public string BaseUrl { get; set; } = "https://api.openai.com/v1";
+    public string BaseUrl { get; set; } = "https://api.openai.com/v1/";
     public string ChatModel { get; set; } = "gpt-4o-mini";
     public string EmbeddingModel { get; set; } = "text-embedding-3-small";
 }
@@ -29,7 +29,8 @@ public class OpenAiClient
         _http = http;
         _opts = opts.Value;
         _logger = logger;
-        _http.BaseAddress = new Uri(_opts.BaseUrl);
+        var baseUrl = _opts.BaseUrl.EndsWith("/", StringComparison.Ordinal) ? _opts.BaseUrl : $"{_opts.BaseUrl}/";
+        _http.BaseAddress = new Uri(baseUrl);
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _opts.ApiKey);
     }
 
@@ -46,7 +47,7 @@ public class OpenAiClient
 
         var json = JsonSerializer.Serialize(body);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
-        using var response = await _http.PostAsync("/chat/completions", content, ct);
+        using var response = await _http.PostAsync("chat/completions", content, ct);
         response.EnsureSuccessStatusCode();
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -80,7 +81,7 @@ public class OpenAiClient
         };
 
         var json = JsonSerializer.Serialize(body);
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/chat/completions")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "chat/completions")
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
@@ -134,7 +135,7 @@ public class OpenAiClient
         };
         var json = JsonSerializer.Serialize(body);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
-        using var response = await _http.PostAsync("/embeddings", content, ct);
+        using var response = await _http.PostAsync("embeddings", content, ct);
         response.EnsureSuccessStatusCode();
         using var doc = await JsonDocument.ParseAsync(
             await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);

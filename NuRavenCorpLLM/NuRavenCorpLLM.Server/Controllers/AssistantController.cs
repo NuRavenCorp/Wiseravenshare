@@ -6,7 +6,9 @@ using NuRavenCorpLLM.Core.Interfaces.Repositories.Assistant;
 using NuRavenCorpLLM.Entities;
 using NuRavenCorpLLM.Infrastructure.Security;
 using NuRavenCorpLLM.Services;
+using System.Net;
 using System.Text;
+using System.Text.Json;
 
 namespace NuRavenCorpLLM.Controllers;
 
@@ -18,6 +20,7 @@ public class AssistantController : ControllerBase
     private readonly NuRavenCorpLLM.Application.Services.IAssistantOrchestrator _orchestrator;
     private readonly ISpeechToTextService _stt;
     private readonly ITextToSpeechService _tts;
+    private readonly IEmbeddingService _embedding;
     private readonly Core.Interfaces.Repositories.Assistant.IAssistantConversationRepository _convRepo;
     private readonly Core.Interfaces.Repositories.Assistant.IAssistantMessageRepository _msgRepo;
 
@@ -25,12 +28,14 @@ public class AssistantController : ControllerBase
         NuRavenCorpLLM.Application.Services.IAssistantOrchestrator orchestrator,
         ISpeechToTextService stt,
         ITextToSpeechService tts,
+        IEmbeddingService embedding,
         Core.Interfaces.Repositories.Assistant.IAssistantConversationRepository convRepo,
         Core.Interfaces.Repositories.Assistant.IAssistantMessageRepository msgRepo)
     {
         _orchestrator = orchestrator;
         _stt = stt;
         _tts = tts;
+        _embedding = embedding;
         _convRepo = convRepo;
         _msgRepo = msgRepo;
     }
@@ -91,6 +96,59 @@ public class AssistantController : ControllerBase
     [HttpGet("messages/{messageId:guid}")]
     public async Task<IActionResult> GetMessage(Guid messageId) =>
         Ok(await _msgRepo.GetByIdAsync(messageId));
+
+    [HttpPost("knowledge/ingest")]
+    public async Task<IActionResult> IngestKnowledge([FromBody] IngestKnowledgeDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Title) || string.IsNullOrWhiteSpace(dto.Content))
+        {
+            return BadRequest(new { message = "Title and content are required." });
+        }
+
+        var userId = User.GetUserId();
+        var content = dto.Content.Trim();
+        var knowledge = new AssistantKnowledge
+        {
+            Title = dto.Title.Trim(),
+            Content = content,
+            ContentHash = ComputeHash(content),
+            Source = string.IsNullOrWhiteSpace(dto.Source) ? "ui_ingestion" : dto.Source.Trim(),
+            SourceUrl = string.IsNullOrWhiteSpace(dto.SourceUrl) ? null : dto.SourceUrl.Trim(),
+            SourceId = $"ui:{Guid.NewGuid():N}",
+            Category = string.IsNullOrWhiteSpace(dto.Category) ? "document" : dto.Category.Trim(),
+            Tags = dto.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            IsPublic = true,
+            IsApproved = true,
+            ApprovedBy = userId == Guid.Empty ? null : userId,
+            Metadata = JsonSerializer.SerializeToDocument(new
+            {
+                channel = "ui.ingestion",
+                submittedBy = userId,
+                submittedAtUtc = DateTime.UtcNow,
+                note = dto.Note
+            })
+        };
+
+        try
+        {
+            await _embedding.EmbedAndStoreAsync(knowledge, ct);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                message = "OpenAI quota/rate limit reached. Please retry with an active quota-enabled API key."
+            });
+        }
+
+        return Ok(new
+        {
+            status = "ingested",
+            title = knowledge.Title,
+            source = knowledge.Source,
+            category = knowledge.Category
+        });
+    }
 
     [HttpPost("training/commence")]
     public async Task<IActionResult> CommenceTraining(
@@ -153,9 +211,23 @@ public class AssistantController : ControllerBase
         return Path.Combine(AppContext.BaseDirectory, "App_Data", "training");
     }
 
+    private static string ComputeHash(string value)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(value)));
+    }
+
     public record CreateConversationDto(string? Title, string? Persona);
     public record SendMessageDto(string Text, bool IsVoice = false);
     public record SpeakDto(string Text, string? VoiceId);
     public record FeedbackDto(string Vote, int? Rating, string? Comment, string? CorrectedResponse);
+    public record IngestKnowledgeDto(
+        string Title,
+        string Content,
+        string? Source,
+        string? SourceUrl,
+        string? Category,
+        string[]? Tags,
+        string? Note);
     public record CommenceTrainingDto(int LookbackDays = 30, int CurateBatchSize = 100, string? OutputDirectory = null);
 }

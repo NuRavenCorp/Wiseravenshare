@@ -9,11 +9,33 @@ export function useConversation(conversationId) {
   const connRef = useRef(null);
 
   useEffect(() => {
-    const conn = createConnection('conversation');
-    conn.on('route', (r) => setEvents((e) => [...e, { type: 'route', data: r }]));
-    conn.on('delta', (d) => setStreamText((t) => t + d));
-    conn.on('done', (d) => { setDone(d); setStreaming(false); });
-    conn.on('error', (err) => { setEvents((e) => [...e, { type: 'error', data: err }]); setStreaming(false); });
+    const conn = createConnection('assistant');
+    conn.on('chunk', (evt) => {
+      const type = evt?.type ?? evt?.Type;
+      const delta = evt?.delta ?? evt?.Delta;
+      const message = evt?.message ?? evt?.Message;
+      const error = evt?.error ?? evt?.Error;
+
+      if (type === 'delta' && delta) {
+        setStreamText((t) => t + delta);
+        return;
+      }
+
+      if (type === 'done') {
+        setDone({ message });
+        setStreaming(false);
+        return;
+      }
+
+      if (type === 'blocked' || error) {
+        setEvents((e) => [...e, { type: type || 'error', data: error || evt }]);
+        setStreaming(false);
+      }
+    });
+    conn.on('error', (err) => {
+      setEvents((e) => [...e, { type: 'error', data: err }]);
+      setStreaming(false);
+    });
     conn.start().then(() => { connRef.current = conn; }).catch(() => {});
     return () => { conn.stop().catch(() => {}); };
   }, []);
@@ -24,7 +46,7 @@ export function useConversation(conversationId) {
     setStreamText('');
     setDone(null);
     setEvents([]);
-    await connRef.current.invoke('StreamCompletion', conversationId, prompt);
+    await connRef.current.invoke('SendText', conversationId, prompt, false);
   }, [conversationId]);
 
   return { events, streaming, streamText, done, send };

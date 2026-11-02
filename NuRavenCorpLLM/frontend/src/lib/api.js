@@ -1,9 +1,12 @@
 import axios from 'axios';
 
-const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const configuredBaseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim().replace(/\/+$/, '');
+const baseURL = configuredBaseUrl.toLowerCase().endsWith('/api')
+  ? configuredBaseUrl
+  : `${configuredBaseUrl}/api`;
 
 export const api = axios.create({
-  baseURL: `${baseURL}/api`,
+  baseURL,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -27,7 +30,7 @@ api.interceptors.response.use(
 
 export const endpoints = {
   clients: '/clients',
-  conversations: '/conversations',
+  conversations: '/assistant/conversations',
   knowledge: '/knowledge',
   ingestion: '/ingestion',
   craft: '/craft',

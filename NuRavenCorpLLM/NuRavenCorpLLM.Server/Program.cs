@@ -1,8 +1,7 @@
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.ResponseCompression;
-using Microsoft.Identity.Web;
+using Microsoft.IdentityModel.Tokens;
 using NuRavenCorpLLM.Application.Algtorithms;
 using NuRavenCorpLLM.Application.Services.Ai;
 using NuRavenCorpLLM.Application.Services.Ai.Repositories;
@@ -13,14 +12,52 @@ using NuRavenCorpLLM.Entities.Ai.DataSources;
 using NuRavenCorpLLM.Hubs;
 using NuRavenCorpLLM.Infrastructure.External;
 using NuRavenCorpLLM.Infrastructure.Data;
+using NuRavenCorpLLM.Infrastructure.Security;
 using NuRavenCorpLLM.Infrastructure.Vector;
 using NuRavenCorpLLM.Services;
 using NuRavenCorpLLM.Server.Data.Repositories.Assistant;
+using System.Security.Claims;
+using System.Text;
 using System.Net;
 var builder = WebApplication.CreateBuilder(args);
 
+var jwtSettings = JwtAuthSettings.Create(builder.Configuration, builder.Environment.IsDevelopment());
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.SigningKey)),
+            ValidateIssuer = true,
+            ValidIssuer = jwtSettings.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwtSettings.Audience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(2),
+            NameClaimType = ClaimTypes.Name,
+            RoleClaimType = ClaimTypes.Role
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var path = context.HttpContext.Request.Path;
+                if (path.StartsWithSegments("/hubs/assistant") || path.StartsWithSegments("/hubs/ai-data"))
+                {
+                    var accessToken = context.Request.Query["access_token"];
+                    if (!string.IsNullOrWhiteSpace(accessToken))
+                    {
+                        context.Token = accessToken;
+                    }
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+    });
 
 // Add services to the container.
 
@@ -44,6 +81,9 @@ builder.Services.Configure<AssistantOptions>(builder.Configuration.GetSection("A
 builder.Services.Configure<WebGroundingOptions>(builder.Configuration.GetSection("WebGrounding"));
 builder.Services.Configure<WhisperOptions>(builder.Configuration.GetSection("Whisper"));
 builder.Services.Configure<TtsOptions>(builder.Configuration.GetSection("Tts"));
+builder.Services.Configure<BootstrapLoginOptions>(builder.Configuration.GetSection("BootstrapLogin"));
+builder.Services.AddSingleton(jwtSettings);
+builder.Services.AddSingleton<IJwtTokenFactory, JwtTokenFactory>();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("DatabaseConnection")
@@ -89,6 +129,18 @@ builder.Services.AddHostedService<FolderKnowledgeIngestionService>();
 builder.Services.AddHostedService<ChatterLearningBackgroundService>();
 
 var app = builder.Build();
+
+if (jwtSettings.IsEphemeralKey)
+{
+    app.Logger.LogWarning(
+        "Authentication:Jwt:Key is not set. Using an ephemeral development signing key; active sessions will be invalid after restart.");
+}
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    db.Database.EnsureCreated();
+}
 
 app.UseDefaultFiles();
 app.MapStaticAssets();

@@ -19,8 +19,10 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const { data } = await api.post('/auth/login', { email, password });
-      login(data.token, data.user || { email, name: data.name });
+      const normalizedEmail = email.trim();
+      const normalizedPassword = password.trim();
+      const { data } = await api.post('/auth/login', { email: normalizedEmail, password: normalizedPassword });
+      login(data.token, data.user || { email: normalizedEmail, name: data.name });
       toast.success('Welcome back');
       navigate('/');
     } catch (err) {
