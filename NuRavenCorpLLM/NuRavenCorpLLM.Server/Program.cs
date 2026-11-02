@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.ResponseCompression;
-using Microsoft.Identity.Web;
+using Microsoft.IdentityModel.Tokens;
 using NuRavenCorpLLM.Application.Algtorithms;
 using NuRavenCorpLLM.Application.Services.Ai;
 using NuRavenCorpLLM.Application.Services.Ai.Repositories;
@@ -17,10 +17,28 @@ using NuRavenCorpLLM.Infrastructure.Vector;
 using NuRavenCorpLLM.Services;
 using NuRavenCorpLLM.Server.Data.Repositories.Assistant;
 using System.Net;
+using System.Text;
 var builder = WebApplication.CreateBuilder(args);
 
+var jwtKey = builder.Configuration["Authentication:Jwt:Key"] ?? "NuRavenCorpLLM_ChangeMe_SigningKey_2026";
+var jwtIssuer = builder.Configuration["Authentication:Jwt:Issuer"] ?? "wiseravenshare.server";
+var jwtAudience = builder.Configuration["Authentication:Jwt:Audience"] ?? "wiseravenshare.client";
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(2),
+        };
+    });
 
 // Add services to the container.
 
