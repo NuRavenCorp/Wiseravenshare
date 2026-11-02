@@ -69,6 +69,7 @@ public sealed partial class EntityCompatController : ControllerBase
                 "livestream" => Ok(FilterLiveStreams(body, limit)),
                 "jamsession" => Ok(await FilterJamSessionsAsync(userId, body, limit, cancellationToken)),
                 "journalismreport" => Ok(await FilterJournalismReportsAsync(userId, body, limit, cancellationToken)),
+                "vibe" => Ok(await FilterVibesAsync(userId, body, limit, cancellationToken)),
                 _ => Ok(EmptyResult())
             };
         }
@@ -95,7 +96,7 @@ public sealed partial class EntityCompatController : ControllerBase
             var result = entityName.ToLowerInvariant() switch
             {
                 "post" => await AggregatePostsAsync(userId, cancellationToken),
-                "vibe" => (object)new { count = 0, total = 0, items = Array.Empty<object>() },
+                "vibe" => await AggregateVibesAsync(userId, body, cancellationToken),
                 _ => (object)new { count = 0, total = 0, items = Array.Empty<object>() }
             };
             return Ok(result);
@@ -131,6 +132,7 @@ public sealed partial class EntityCompatController : ControllerBase
                 "message" => await CountMessagesAsync(userId, body, cancellationToken),
                 "livestream" => CountLiveStreams(body),
                 "jamsession" => await CountJamSessionsAsync(userId, body, cancellationToken),
+                "vibe" => await CountVibesAsync(userId, body, cancellationToken),
                 _ => 0
             };
             return Ok(new { count });
@@ -166,6 +168,11 @@ public sealed partial class EntityCompatController : ControllerBase
         if (string.Equals(entityName, "JournalismReport", StringComparison.OrdinalIgnoreCase))
         {
             return await CreateJournalismReportCompat(payload);
+        }
+
+        if (string.Equals(entityName, "Vibe", StringComparison.OrdinalIgnoreCase))
+        {
+            return await CreateVibeCompat(payload);
         }
 
         if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
@@ -234,6 +241,11 @@ public sealed partial class EntityCompatController : ControllerBase
         if (string.Equals(entityName, "JournalismReport", StringComparison.OrdinalIgnoreCase))
         {
             return await UpdateJournalismReportCompat(id, payload);
+        }
+
+        if (string.Equals(entityName, "Vibe", StringComparison.OrdinalIgnoreCase))
+        {
+            return await UpdateVibeCompat(id, payload);
         }
 
         if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
@@ -767,6 +779,218 @@ public sealed partial class EntityCompatController : ControllerBase
         var raw = ReadString(body, dotPath);
         return DateTime.TryParse(raw, out var parsed) ? parsed : null;
     }
+
+private async Task EnsureVibeStorageAsync(CancellationToken cancellationToken = default)
+{
+    await _db.Database.ExecuteSqlRawAsync(
+        """
+        CREATE TABLE IF NOT EXISTS app_data.compat_vibes (
+            id TEXT PRIMARY KEY,
+            created_by_id TEXT NOT NULL,
+            mood TEXT NOT NULL,
+            note TEXT NULL,
+            created_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_date TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS ix_compat_vibes_created_by_id ON app_data.compat_vibes(created_by_id);
+        CREATE INDEX IF NOT EXISTS ix_compat_vibes_mood ON app_data.compat_vibes(mood);
+        CREATE INDEX IF NOT EXISTS ix_compat_vibes_created_date ON app_data.compat_vibes(created_date DESC);
+        """,
+        cancellationToken);
+}
+
+private async Task<EntityFilterResponse> FilterVibesAsync(
+    Guid userId, JsonElement body, int limit, CancellationToken cancellationToken)
+{
+    await EnsureVibeStorageAsync(cancellationToken);
+    var createdById = ReadString(body, "query.created_by_id");
+    var mood = ReadString(body, "query.mood");
+    var since = TryReadDateTime(body, "query.created_date.$gte");
+    var sort = ReadString(body, "options.sort");
+
+    var query = _db.CompatVibes.AsNoTracking();
+    if (!string.IsNullOrWhiteSpace(createdById))
+    {
+        query = query.Where(x => x.CreatedById == createdById);
+    }
+
+    if (!string.IsNullOrWhiteSpace(mood))
+    {
+        query = query.Where(x => x.Mood == mood);
+    }
+
+    if (since.HasValue)
+    {
+        query = query.Where(x => x.CreatedDate >= since.Value);
+    }
+
+    query = sort switch
+    {
+        "created_date" => query.OrderBy(x => x.CreatedDate),
+        "-created_date" => query.OrderByDescending(x => x.CreatedDate),
+        "updated_date" => query.OrderBy(x => x.UpdatedDate),
+        "-updated_date" => query.OrderByDescending(x => x.UpdatedDate),
+        _ => query.OrderByDescending(x => x.CreatedDate)
+    };
+
+    var rows = await query.Take(limit).ToListAsync(cancellationToken);
+    var items = rows.Select(MapVibeCompatRow).Cast<object>().ToList();
+    return new EntityFilterResponse { Items = items, Total = items.Count };
+}
+
+private async Task<int> CountVibesAsync(Guid userId, JsonElement body, CancellationToken cancellationToken)
+{
+    await EnsureVibeStorageAsync(cancellationToken);
+    var createdById = ReadString(body, "query.created_by_id");
+    var mood = ReadString(body, "query.mood");
+    var since = TryReadDateTime(body, "query.created_date.$gte");
+
+    var query = _db.CompatVibes.AsNoTracking();
+    if (!string.IsNullOrWhiteSpace(createdById))
+    {
+        query = query.Where(x => x.CreatedById == createdById);
+    }
+
+    if (!string.IsNullOrWhiteSpace(mood))
+    {
+        query = query.Where(x => x.Mood == mood);
+    }
+
+    if (since.HasValue)
+    {
+        query = query.Where(x => x.CreatedDate >= since.Value);
+    }
+
+    return await query.CountAsync(cancellationToken);
+}
+
+private async Task<object> AggregateVibesAsync(Guid userId, JsonElement body, CancellationToken cancellationToken)
+{
+    await EnsureVibeStorageAsync(cancellationToken);
+    var createdById = ReadString(body, "query.created_by_id");
+    var mood = ReadString(body, "query.mood");
+    var since = TryReadDateTime(body, "query.created_date.$gte");
+    var groupBy = ReadString(body, "groupBy");
+    var countRequested = ReadBool(body, "count", false);
+
+    var query = _db.CompatVibes.AsNoTracking();
+    if (!string.IsNullOrWhiteSpace(createdById))
+    {
+        query = query.Where(x => x.CreatedById == createdById);
+    }
+
+    if (!string.IsNullOrWhiteSpace(mood))
+    {
+        query = query.Where(x => x.Mood == mood);
+    }
+
+    if (since.HasValue)
+    {
+        query = query.Where(x => x.CreatedDate >= since.Value);
+    }
+
+    if (string.Equals(groupBy, "mood", StringComparison.OrdinalIgnoreCase) && countRequested)
+    {
+        var rows = await query
+            .GroupBy(x => x.Mood)
+            .Select(g => new { mood = g.Key, count = g.Count() })
+            .OrderByDescending(g => g.count)
+            .ToListAsync(cancellationToken);
+
+        return new
+        {
+            rows,
+            count = rows.Sum(r => r.count),
+            total = rows.Sum(r => r.count)
+        };
+    }
+
+    var total = await query.CountAsync(cancellationToken);
+    return new { rows = Array.Empty<object>(), count = total, total };
+}
+
+private async Task<IActionResult> CreateVibeCompat(JsonElement payload)
+{
+    var userId = User.GetUserId();
+    if (userId == Guid.Empty)
+    {
+        return Unauthorized(new { message = "Invalid user session." });
+    }
+
+    var mood = ReadString(payload, "mood");
+    if (string.IsNullOrWhiteSpace(mood))
+    {
+        return BadRequest(new { message = "mood is required." });
+    }
+
+    await EnsureVibeStorageAsync();
+
+    var now = DateTime.UtcNow;
+    var row = new CompatVibe
+    {
+        Id = Guid.NewGuid().ToString("N"),
+        CreatedById = userId.ToString(),
+        Mood = mood.Trim(),
+        Note = ReadString(payload, "note"),
+        CreatedDate = now,
+        UpdatedDate = now
+    };
+
+    _db.CompatVibes.Add(row);
+    await _db.SaveChangesAsync();
+    return Ok(MapVibeCompatRow(row));
+}
+
+private async Task<IActionResult> UpdateVibeCompat(string id, JsonElement payload)
+{
+    var userId = User.GetUserId();
+    if (userId == Guid.Empty)
+    {
+        return Unauthorized(new { message = "Invalid user session." });
+    }
+
+    await EnsureVibeStorageAsync();
+
+    var row = await _db.CompatVibes.FirstOrDefaultAsync(x => x.Id == id);
+    if (row is null)
+    {
+        return NotFound(new { message = "Vibe not found." });
+    }
+
+    if (!User.IsInRole("Admin") && !string.Equals(row.CreatedById, userId.ToString(), StringComparison.OrdinalIgnoreCase))
+    {
+        return StatusCode(StatusCodes.Status403Forbidden, new { message = "You do not have access to update this vibe." });
+    }
+
+    var mood = ReadString(payload, "mood");
+    if (!string.IsNullOrWhiteSpace(mood))
+    {
+        row.Mood = mood.Trim();
+    }
+
+    var note = ReadString(payload, "note");
+    if (note is not null)
+    {
+        row.Note = note;
+    }
+
+    row.UpdatedDate = DateTime.UtcNow;
+    await _db.SaveChangesAsync();
+    return Ok(MapVibeCompatRow(row));
+}
+
+private static object MapVibeCompatRow(CompatVibe row)
+{
+    return new
+    {
+        id = row.Id,
+        created_by_id = row.CreatedById,
+        mood = row.Mood,
+        note = row.Note,
+        created_date = row.CreatedDate,
+        updated_date = row.UpdatedDate
+    };
+}
 
 private async Task EnsureJamSessionStorageAsync(CancellationToken cancellationToken = default)
 {

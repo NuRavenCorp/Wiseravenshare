@@ -170,6 +170,7 @@ public class AppDbContext : DbContext
     public DbSet<WorkspacePage> WorkspacePages => Set<WorkspacePage>();
     public DbSet<CompatJamSession> CompatJamSessions => Set<CompatJamSession>();
     public DbSet<CompatJournalismReport> CompatJournalismReports => Set<CompatJournalismReport>();
+    public DbSet<CompatVibe> CompatVibes => Set<CompatVibe>();
     public DbSet<ExternalVerifier> ExternalVerifiers => Set<ExternalVerifier>();
 
     // Media Library (user saved photos, videos, music with visibility control)
@@ -280,6 +281,22 @@ public class AppDbContext : DbContext
 
             entity.HasIndex(x => x.VerificationStatus);
             entity.HasIndex(x => x.CreatedDate);
+        });
+
+        modelBuilder.Entity<CompatVibe>(entity =>
+        {
+            entity.ToTable("compat_vibes");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id").HasColumnType("text");
+            entity.Property(x => x.CreatedById).HasColumnName("created_by_id").HasColumnType("text");
+            entity.Property(x => x.Mood).HasColumnName("mood").HasColumnType("text");
+            entity.Property(x => x.Note).HasColumnName("note").HasColumnType("text");
+            entity.Property(x => x.CreatedDate).HasColumnName("created_date");
+            entity.Property(x => x.UpdatedDate).HasColumnName("updated_date");
+
+            entity.HasIndex(x => x.CreatedById);
+            entity.HasIndex(x => x.CreatedDate);
+            entity.HasIndex(x => x.Mood);
         });
 
         modelBuilder.Entity<ExternalVerifier>(entity =>
