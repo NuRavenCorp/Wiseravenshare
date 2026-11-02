@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using NuRavenCorpLLM.Application.Algtorithms;
 using NuRavenCorpLLM.Application.Services.Ai;
 using NuRavenCorpLLM.Application.Services.Ai.Repositories;
@@ -71,8 +74,8 @@ builder.Services.AddCors(options =>
             .WithOrigins(
                 "http://localhost:5173",
                 "http://127.0.0.1:5173",
-                "https://wise-ravens.com",
-                "https://www.wise-ravens.com")
+                "https://wiseravenshare-wiseravenshare.com",
+                "https://www.wiseravenshare-wiseravenshare.com")
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials());
@@ -153,6 +156,14 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     db.Database.EnsureCreated();
+    try
+    {
+        db.Database.ExecuteSqlRaw("""SELECT 1 FROM "Users" LIMIT 1;""");
+    }
+    catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+    {
+        db.GetService<IRelationalDatabaseCreator>().CreateTables();
+    }
 }
 
 app.UseDefaultFiles();
