@@ -7,27 +7,28 @@ instructions rather than just continue text.
 
 Usage (CPU, quick smoke-test):
     python finetune_lora.py --base-model ./quadro_fineweb_output/final \
-        --output-dir ./lora_output --dataset alpaca_sample --max-steps 200
+        --output-dir ./lora_output_safe --dataset alpaca_sample --max-steps 20
 
-Usage (full Alpaca dataset):
+Usage (safer run on small dataset):
     python finetune_lora.py --base-model ./quadro_fineweb_output/final \
-        --output-dir ./lora_output --dataset alpaca --max-steps 2000
+        --output-dir ./lora_output_safe --dataset alpaca_sample --epochs 4 --lr 3e-5 --lora-rank 16
 
 Usage (custom JSONL file with instruction/output columns):
     python finetune_lora.py --base-model ./quadro_fineweb_output/final \
-        --output-dir ./lora_output --dataset-file ./my_data.jsonl
+        --output-dir ./lora_output_safe --dataset-file ./my_data.jsonl --epochs 4 --lr 3e-5
 
 After training, merge and export:
     python finetune_lora.py --merge-only \
         --base-model ./quadro_fineweb_output/final \
-        --lora-adapter ./lora_output \
-        --output-dir ./lora_merged
+        --lora-adapter ./lora_output_safe \
+        --output-dir ./lora_merged_safe
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -250,17 +251,37 @@ def train(args: argparse.Namespace) -> None:
         return {"text": text}
 
     dataset = raw_ds.map(format_example)
+    dataset_size = len(dataset)
+    effective_batch = max(1, args.batch_size * args.grad_accum)
+    steps_per_epoch = max(1, math.ceil(dataset_size / effective_batch))
+    estimated_steps = int(max(1, round(steps_per_epoch * args.epochs)))
+    effective_max_steps = args.max_steps if args.max_steps and args.max_steps > 0 else -1
+    schedule_steps = args.max_steps if effective_max_steps > 0 else estimated_steps
+
+    print(
+        f"Dataset rows: {dataset_size}, effective batch: {effective_batch}, "
+        f"steps/epoch: {steps_per_epoch}, target epochs: {args.epochs}, "
+        f"estimated total steps: {estimated_steps}"
+    )
+    if dataset_size < 200:
+        print(
+            "WARNING: dataset has fewer than 200 rows. Small datasets can overfit quickly; "
+            "use low learning rate and <=5 epochs."
+        )
+    if args.lr > 5e-5:
+        print("WARNING: learning rate is high for small datasets. Recommended range: 2e-5 to 5e-5.")
 
     sft_config = SFTConfig(
         output_dir=args.output_dir,
-        max_steps=args.max_steps,
+        num_train_epochs=args.epochs,
+        max_steps=effective_max_steps,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         learning_rate=args.lr,
         lr_scheduler_type="cosine",
-        warmup_steps=min(50, args.max_steps // 10),
+        warmup_steps=min(50, max(1, schedule_steps // 10)),
         logging_steps=10,
-        save_steps=max(50, args.max_steps // 5),
+        save_steps=max(10, schedule_steps // 4),
         save_total_limit=2,
         fp16=False,
         bf16=False,
@@ -298,14 +319,17 @@ def main() -> int:
                              "(full 52k from HF), or any HF dataset name with instruction/output columns.")
     parser.add_argument("--dataset-file", default="",
                         help="Path to a custom JSONL file with instruction/output or prompt/completion columns.")
-    parser.add_argument("--max-steps", type=int, default=200,
-                        help="Total training steps (default 200 for quick CPU test; use 2000+ for full run).")
+    parser.add_argument("--epochs", type=float, default=4.0,
+                        help="Target epochs (safe default: 4.0 for small datasets).")
+    parser.add_argument("--max-steps", type=int, default=-1,
+                        help="Optional hard cap on total training steps. Use -1 to rely on --epochs.")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--grad-accum", type=int, default=4,
                         help="Gradient accumulation steps (effective batch = batch_size * grad_accum).")
-    parser.add_argument("--lr", type=float, default=2e-4)
-    parser.add_argument("--lora-rank", type=int, default=8,
-                        help="LoRA rank r (higher = more params, default 8).")
+    parser.add_argument("--lr", type=float, default=3e-5,
+                        help="Learning rate (safe default for small data: 3e-5).")
+    parser.add_argument("--lora-rank", type=int, default=16,
+                        help="LoRA rank r (default 16). Alpha is set to 2*r.")
     parser.add_argument("--max-seq-length", type=int, default=256,
                         help="Max sequence length for training (must fit model context window).")
     parser.add_argument("--max-train-samples", type=int, default=5000,

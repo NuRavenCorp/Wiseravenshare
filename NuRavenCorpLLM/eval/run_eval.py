@@ -116,19 +116,26 @@ def generate_text(
     max_new_tokens: int,
     temperature: float,
     top_p: float = 0.9,
+    response_format: str = "text",
+    json_schema_keys: list[str] | None = None,
+    strict_json: bool = False,
 ) -> str:
-    payloads = [
-        {
-            "prompt": prompt,
-            "max_new_tokens": max_new_tokens,
-            "temperature": temperature,
-            "top_k": 50,
-            "top_p": top_p,
-            "stream": False,
-        },
+    json_schema_keys = json_schema_keys or []
+    primary_payload = {
+        "prompt": prompt,
+        "max_new_tokens": max_new_tokens,
+        "temperature": temperature,
+        "top_k": 50,
+        "top_p": top_p,
+        "response_format": response_format,
+        "json_schema_keys": json_schema_keys,
+        "strict_json": strict_json,
+        "stream": False,
+    }
+    payloads = [primary_payload]
+    if not strict_json:
         # Fallback for simpler serve.py endpoint schema
-        {"prompt": prompt, "max_new_tokens": max_new_tokens, "temperature": temperature},
-    ]
+        payloads.append({"prompt": prompt, "max_new_tokens": max_new_tokens, "temperature": temperature})
 
     errors: list[str] = []
     for payload in payloads:
@@ -308,6 +315,9 @@ def run() -> int:
                 max_new_tokens=args.max_new_tokens,
                 temperature=args.temperature,
                 top_p=args.top_p,
+                response_format="json" if row.expects_json else "text",
+                json_schema_keys=row.json_required_keys,
+                strict_json=row.expects_json,
             )
             generated = extract_completion(raw_output, wrapped_prompt) if strip_prompt else raw_output
         except Exception as ex:  # noqa: BLE001

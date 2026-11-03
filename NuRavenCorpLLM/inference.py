@@ -17,6 +17,13 @@ class GenerateRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_k: int = Field(default=50, ge=0)
     top_p: float = Field(default=0.9, gt=0.0, le=1.0)
+    system_prompt: str | None = None
+    response_format: str = Field(default="text", pattern="^(text|json)$")
+    json_schema_keys: list[str] = Field(default_factory=list)
+    strict_json: bool = False
+    json_retries: int = Field(default=2, ge=0, le=10)
+    json_retry_token_buffer: int = Field(default=32, ge=0, le=512)
+    json_max_new_tokens_cap: int = Field(default=1024, ge=1, le=4096)
     stream: bool = False
 
 
@@ -26,6 +33,7 @@ class StreamingRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_k: int = Field(default=50, ge=0)
     top_p: float = Field(default=0.9, ge=0.0, le=1.0)
+    system_prompt: str | None = None
 
 
 app = FastAPI(title="Custom LLM Core")
@@ -68,17 +76,37 @@ def generate(req: GenerateRequest, _guard: None = Depends(require_api_key)) -> A
                 temperature=req.temperature,
                 top_k=req.top_k,
                 top_p=req.top_p,
+                system_prompt=req.system_prompt,
             ),
             media_type="text/plain",
         )
 
-    completion = llm.generate(
-        prompt=req.prompt,
-        max_new_tokens=req.max_new_tokens,
-        temperature=req.temperature,
-        top_k=req.top_k,
-        top_p=req.top_p,
-    )
+    try:
+        if req.response_format == "json" or req.strict_json:
+            completion = llm.generate_json(
+                prompt=req.prompt,
+                required_keys=req.json_schema_keys,
+                max_new_tokens=req.max_new_tokens,
+                temperature=req.temperature,
+                top_k=req.top_k,
+                top_p=req.top_p,
+                system_prompt=req.system_prompt,
+                retries=req.json_retries,
+                retry_token_buffer=req.json_retry_token_buffer,
+                max_retry_tokens=req.json_max_new_tokens_cap,
+            )
+        else:
+            completion = llm.generate(
+                prompt=req.prompt,
+                max_new_tokens=req.max_new_tokens,
+                temperature=req.temperature,
+                top_k=req.top_k,
+                top_p=req.top_p,
+                system_prompt=req.system_prompt,
+            )
+    except ValueError as ex:
+        raise HTTPException(status_code=422, detail=str(ex)) from ex
+
     return {"text": completion}
 
 
@@ -89,6 +117,7 @@ def sse_token_generator(req: StreamingRequest):
         temperature=req.temperature,
         top_k=req.top_k,
         top_p=req.top_p,
+        system_prompt=req.system_prompt,
     ):
         yield f"data: {text}\n\n"
 

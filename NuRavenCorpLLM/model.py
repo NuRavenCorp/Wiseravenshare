@@ -1,4 +1,6 @@
 import os
+import json
+import re
 from pathlib import Path
 from threading import Thread
 from typing import Generator
@@ -76,6 +78,54 @@ class LlmModel:
         self.model.eval()
         self.max_seq_len = getattr(self.model.config, "max_position_embeddings", None)
 
+    def _build_inputs(self, prompt: str, system_prompt: str | None = None) -> dict[str, torch.Tensor]:
+        if hasattr(self.tokenizer, "apply_chat_template") and getattr(self.tokenizer, "chat_template", None):
+            messages = []
+            if system_prompt and system_prompt.strip():
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            input_ids = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_tensors="pt",
+            )
+            if isinstance(input_ids, torch.Tensor):
+                attention_mask = torch.ones_like(input_ids)
+                return {
+                    "input_ids": input_ids.to(self.device),
+                    "attention_mask": attention_mask.to(self.device),
+                }
+        inputs = self.tokenizer(prompt, return_tensors="pt")
+        return {k: v.to(self.device) for k, v in inputs.items()}
+
+    def _extract_json_object(self, text: str) -> dict | None:
+        candidate = text.strip()
+        fence = re.search(r"```(?:json)?\s*(.*?)```", candidate, flags=re.IGNORECASE | re.DOTALL)
+        if fence:
+            candidate = fence.group(1).strip()
+        first = candidate.find("{")
+        if first == -1:
+            return None
+        depth = 0
+        start = -1
+        for i, ch in enumerate(candidate[first:], start=first):
+            if ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and start != -1:
+                    snippet = candidate[start : i + 1]
+                    try:
+                        parsed = json.loads(snippet)
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except json.JSONDecodeError:
+                        pass
+        return None
+
     def generate(
         self,
         prompt: str,
@@ -83,9 +133,10 @@ class LlmModel:
         temperature: float = 0.7,
         top_k: int = 50,
         top_p: float = 0.9,
+        system_prompt: str | None = None,
     ) -> str:
-        inputs = self.tokenizer(prompt, return_tensors="pt")
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        inputs = self._build_inputs(prompt, system_prompt=system_prompt)
+        prompt_len = inputs["input_ids"].shape[-1]
 
         # Truncate to fit context window, leaving room for new tokens
         if self.max_seq_len:
@@ -108,7 +159,56 @@ class LlmModel:
         with torch.inference_mode():
             output = self.model.generate(**generate_kwargs)
 
-        return self.tokenizer.decode(output[0], skip_special_tokens=True)
+        generated = output[0][prompt_len:]
+        return self.tokenizer.decode(generated, skip_special_tokens=True).strip()
+
+    def generate_json(
+        self,
+        prompt: str,
+        required_keys: list[str] | None = None,
+        max_new_tokens: int = 128,
+        temperature: float = 0.2,
+        top_k: int = 50,
+        top_p: float = 0.9,
+        system_prompt: str | None = None,
+        retries: int = 2,
+        retry_token_buffer: int = 32,
+        max_retry_tokens: int = 1024,
+    ) -> str:
+        required_keys = required_keys or []
+        key_hint = ""
+        if required_keys:
+            key_hint = f"Required keys: {', '.join(required_keys)}."
+        forced_prompt = (
+            f"{prompt}\n\n"
+            "Respond ONLY with valid JSON object. No prose, no markdown fences.\n"
+            f"{key_hint}"
+        )
+        forced_system = (
+            system_prompt
+            or "You are a strict JSON assistant. Return only valid JSON objects that satisfy requested keys."
+        )
+
+        attempts = max(1, retries + 1)
+        for attempt in range(attempts):
+            temp = 0.0 if attempt > 0 else temperature
+            current_max_new_tokens = min(max_retry_tokens, max_new_tokens + (attempt * max(0, retry_token_buffer)))
+            text = self.generate(
+                prompt=forced_prompt,
+                max_new_tokens=current_max_new_tokens,
+                temperature=temp,
+                top_k=top_k,
+                top_p=top_p,
+                system_prompt=forced_system,
+            )
+            parsed = self._extract_json_object(text)
+            if parsed is None:
+                continue
+            missing = [k for k in required_keys if k not in parsed]
+            if missing:
+                continue
+            return json.dumps(parsed, ensure_ascii=False)
+        raise ValueError("Model did not produce valid JSON for requested schema.")
 
     def stream_generate(
         self,
@@ -117,9 +217,9 @@ class LlmModel:
         temperature: float = 0.7,
         top_k: int = 50,
         top_p: float = 0.9,
+        system_prompt: str | None = None,
     ) -> Generator[str, None, None]:
-        inputs = self.tokenizer(prompt, return_tensors="pt")
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        inputs = self._build_inputs(prompt, system_prompt=system_prompt)
 
         # Truncate to fit context window, leaving room for new tokens
         if self.max_seq_len:
