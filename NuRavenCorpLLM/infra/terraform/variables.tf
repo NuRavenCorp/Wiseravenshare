@@ -30,7 +30,7 @@ variable "site_domains" {
   }))
   default = {
     wiseravenshare = {
-      domain = "wiseravenshare-wiseravenshare.com"
+      domain = "wise-ravens.com"
       site   = "wiseravenshare"
     }
     voteralliance = {

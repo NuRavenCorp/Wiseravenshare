@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-const defaultOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5000';
-const configuredBaseUrl = (import.meta.env.VITE_API_URL || defaultOrigin).trim().replace(/\/+$/, '');
+const runtimeOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5000';
+const configuredBaseUrl = (import.meta.env.VITE_API_URL || runtimeOrigin).trim().replace(/\/+$/, '');
 const baseURL = configuredBaseUrl.toLowerCase().endsWith('/api')
   ? configuredBaseUrl
   : `${configuredBaseUrl}/api`;

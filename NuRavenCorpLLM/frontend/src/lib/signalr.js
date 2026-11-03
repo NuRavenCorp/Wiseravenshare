@@ -1,7 +1,7 @@
 import * as signalR from '@microsoft/signalr';
 
-const defaultOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5000';
-const baseURL = import.meta.env.VITE_WS_URL || defaultOrigin;
+const runtimeOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5000';
+const baseURL = import.meta.env.VITE_WS_URL || runtimeOrigin;
 
 export function createConnection(hubPath) {
   return new signalR.HubConnectionBuilder()

@@ -21,6 +21,7 @@ FROM with-node AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["NuRavenCorpLLM.Server/NuRavenCorpLLM.Server.csproj", "NuRavenCorpLLM.Server/"]
+COPY ["nuravencorpllm.client/nuravencorpllm.client.esproj", "nuravencorpllm.client/"]
 RUN dotnet restore "./NuRavenCorpLLM.Server/NuRavenCorpLLM.Server.csproj"
 COPY . .
 WORKDIR "/src/NuRavenCorpLLM.Server"
@@ -31,16 +32,8 @@ FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
 RUN dotnet publish "./NuRavenCorpLLM.Server.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
-FROM with-node AS frontend-build
-WORKDIR /src/frontend
-COPY ["frontend/package.json", "./"]
-RUN npm install
-COPY ["frontend/", "./"]
-RUN npm run build
-
 # This stage is used in production or when running from VS in regular mode (Default when not using the Debug configuration)
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-COPY --from=frontend-build /src/frontend/dist ./wwwroot
 ENTRYPOINT ["dotnet", "NuRavenCorpLLM.Server.dll"]

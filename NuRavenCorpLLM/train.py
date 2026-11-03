@@ -1,39 +1,37 @@
+import argparse
 import gc
 import os
 import subprocess
+import sys
 
 import torch
 from datasets import load_dataset
 from torch.utils.data import IterableDataset
 from transformers import AutoTokenizer, GPT2Config, GPT2LMHeadModel, Trainer, TrainingArguments
 
+parser = argparse.ArgumentParser(description="NuRavenCorpLLM FineWeb trainer")
+parser.add_argument(
+    "--force-cpu",
+    action="store_true",
+    help="Skip GPU requirement and train on CPU (slow, for testing or incompatible hardware).",
+)
+args = parser.parse_args()
+
+FORCE_CPU = args.force_cpu
+
 
 # ============================================================
 # 1. Hardware check
 # ============================================================
-if not torch.backends.cuda.is_built():
-    raise RuntimeError(
-        "Installed PyTorch build is CPU-only. Install a CUDA-enabled torch wheel for this Python version."
-    )
-
-if not torch.cuda.is_available():
+def _smi_list():
     try:
-        smi = subprocess.run(
-            ["nvidia-smi", "-L"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        smi_out = smi.stdout.strip() or smi.stderr.strip() or "nvidia-smi returned no output"
+        result = subprocess.run(["nvidia-smi", "-L"], check=False, capture_output=True, text=True)
+        return result.stdout.strip() or result.stderr.strip() or "nvidia-smi returned no output"
     except OSError:
-        smi_out = "nvidia-smi not found on PATH"
-    raise RuntimeError(f"NVIDIA GPU context not detected by PyTorch. Driver check: {smi_out}")
+        return "nvidia-smi not found on PATH"
 
-gpu_cc = torch.cuda.get_device_capability(0)
-gpu_sm = f"sm_{gpu_cc[0]}{gpu_cc[1]}"
-supported_sms = sorted({arch for arch in torch.cuda.get_arch_list() if arch.startswith("sm_")})
 
-def parse_sm(sm_label):
+def _parse_sm(sm_label):
     digits = sm_label[3:]
     if not digits.isdigit():
         return None
@@ -43,28 +41,61 @@ def parse_sm(sm_label):
         return int(digits[:2]), int(digits[2])
     return None
 
-gpu_major, gpu_minor = gpu_cc
-has_compatible_sm = False
-for sm in supported_sms:
-    parsed = parse_sm(sm)
-    if parsed is None:
-        continue
-    major, minor = parsed
-    if major == gpu_major and minor <= gpu_minor:
-        has_compatible_sm = True
-        break
 
-if not has_compatible_sm:
-    supported_text = ", ".join(supported_sms) or "none reported"
-    raise RuntimeError(
-        f"Detected GPU {torch.cuda.get_device_name(0)} ({gpu_sm}), but this torch build only supports: {supported_text}. "
-        "Use a torch wheel that includes your GPU architecture."
+DEVICE = "cpu"
+
+if FORCE_CPU:
+    print("⚠  --force-cpu set: running on CPU. Training will be very slow.", flush=True)
+else:
+    if not torch.backends.cuda.is_built():
+        print(
+            "ERROR: Installed PyTorch build is CPU-only.\n"
+            "  To install a CUDA-enabled build for Python 3.11/3.12 + CUDA 11.8:\n"
+            "    pip install torch --index-url https://download.pytorch.org/whl/cu118\n"
+            "  Or use --force-cpu to run on CPU.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not torch.cuda.is_available():
+        print(
+            f"ERROR: NVIDIA GPU not detected by PyTorch.\n  Driver check: {_smi_list()}\n"
+            "  Try --force-cpu to run on CPU.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    gpu_cc = torch.cuda.get_device_capability(0)
+    gpu_sm = f"sm_{gpu_cc[0]}{gpu_cc[1]}"
+    supported_sms = sorted({arch for arch in torch.cuda.get_arch_list() if arch.startswith("sm_")})
+    gpu_major, gpu_minor = gpu_cc
+
+    has_compatible_sm = any(
+        (parsed := _parse_sm(sm)) is not None and parsed[0] == gpu_major and parsed[1] <= gpu_minor
+        for sm in supported_sms
     )
 
-print(f"Detected GPU: {torch.cuda.get_device_name(0)}")
-print("Configuring environment for legacy 8GB hardware architecture...")
+    if not has_compatible_sm:
+        supported_text = ", ".join(supported_sms) or "none reported"
+        gpu_name = torch.cuda.get_device_name(0)
+        print(
+            f"ERROR: GPU {gpu_name} ({gpu_sm}) is not supported by this torch build.\n"
+            f"  This build supports: {supported_text}\n\n"
+            f"  The {gpu_name} is Maxwell architecture (CC {gpu_major}.{gpu_minor}).\n"
+            "  To use this GPU you need PyTorch ≤ 1.13 with CUDA 10.2 and Python ≤ 3.10:\n"
+            "    pip install torch==1.13.1+cu102 -f https://download.pytorch.org/whl/torch_stable.html\n\n"
+            "  Alternatively, run on CPU with: python train.py --force-cpu",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    DEVICE = "cuda"
+    print(f"✓ GPU: {torch.cuda.get_device_name(0)} (CC {gpu_major}.{gpu_minor})", flush=True)
+
+print("Configuring environment for training...", flush=True)
+
+if DEVICE == "cuda":
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 os.environ["ACCELERATE_USE_FSDP"] = "false"
 
 
@@ -135,7 +166,8 @@ train_dataset = GroupedTextStream(dataset, tokenizer, block_size=config.n_positi
 # 5. Clear memory before training
 # ============================================================
 gc.collect()
-torch.cuda.empty_cache()
+if DEVICE == "cuda":
+    torch.cuda.empty_cache()
 
 
 # ============================================================
@@ -153,11 +185,12 @@ training_args = TrainingArguments(
     logging_steps=10,
     save_steps=500,
     save_total_limit=2,
-    fp16=True,  # legacy-safe precision path (monitor for NaN)
-    bf16=False,  # not supported on pre-Ampere
-    gradient_checkpointing=True,
+    fp16=(DEVICE == "cuda"),
+    bf16=False,
+    gradient_checkpointing=(DEVICE == "cuda"),
     optim="adamw_torch",
-    dataloader_pin_memory=True,
+    dataloader_pin_memory=(DEVICE == "cuda"),
+    use_cpu=(DEVICE == "cpu"),
     report_to="none",
 )
 

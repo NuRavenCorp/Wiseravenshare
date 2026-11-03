@@ -30,18 +30,9 @@ public class AssistantHub : Hub
 
     public async Task SendText(Guid conversationId, string text, bool voiceReply)
     {
-        try
+        await foreach (var evt in _orchestrator.StreamAsync(conversationId, Context.User!.GetUserId(), text))
         {
-            await foreach (var evt in _orchestrator.StreamAsync(conversationId, Context.User!.GetUserId(), text))
-            {
-                await Clients.Caller.SendAsync("chunk", ToHubEvent(evt));
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Assistant stream failed for conversation {ConversationId}", conversationId);
-            await Clients.Caller.SendAsync("chunk", new { type = "error", error = ex.Message });
-            return;
+            await Clients.Caller.SendAsync("chunk", evt);
         }
 
         if (voiceReply)
@@ -63,39 +54,8 @@ public class AssistantHub : Hub
 
         await foreach (var evt in _orchestrator.StreamAsync(conversationId, Context.User!.GetUserId(), stt.Text, true))
         {
-            await Clients.Caller.SendAsync("chunk", ToHubEvent(evt));
+            await Clients.Caller.SendAsync("chunk", evt);
         }
-    }
-
-    private static object ToHubEvent(AssistantStreamEvent evt)
-    {
-        if (evt.Message is null)
-        {
-            return new { type = evt.Type, delta = evt.Delta, message = (object?)null, error = evt.Error };
-        }
-
-        return new
-        {
-            type = evt.Type,
-            delta = evt.Delta,
-            error = evt.Error,
-            message = new
-            {
-                evt.Message.Id,
-                evt.Message.ConversationId,
-                evt.Message.UserId,
-                role = evt.Message.Role.ToString(),
-                evt.Message.Content,
-                evt.Message.AudioUrl,
-                evt.Message.AudioDurationMs,
-                evt.Message.Transcript,
-                evt.Message.PromptTokens,
-                evt.Message.CompletionTokens,
-                evt.Message.LatencyMs,
-                evt.Message.Status,
-                evt.Message.CreatedAt
-            }
-        };
     }
 
     private Task<AssistantMessage?> GetLastAssistantMessageAsync(Guid conversationId)

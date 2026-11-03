@@ -5,7 +5,7 @@ region             = "nyc3"
 
 site_domains = {
   wiseravenshare = {
-    domain = "wiseravenshare-wiseravenshare.com"
+    domain = "wise-ravens.com"
     site   = "wiseravenshare"
   }
   voteralliance = {

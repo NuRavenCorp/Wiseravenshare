@@ -1,10 +1,7 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.IdentityModel.Tokens;
-using Npgsql;
 using NuRavenCorpLLM.Application.Algtorithms;
 using NuRavenCorpLLM.Application.Services.Ai;
 using NuRavenCorpLLM.Application.Services.Ai.Repositories;
@@ -48,7 +45,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             OnMessageReceived = context =>
             {
                 var path = context.HttpContext.Request.Path;
-                if (path.StartsWithSegments("/hubs"))
+                if (path.StartsWithSegments("/hubs/assistant") || path.StartsWithSegments("/hubs/ai-data"))
                 {
                     var accessToken = context.Request.Query["access_token"];
                     if (!string.IsNullOrWhiteSpace(accessToken))
@@ -156,18 +153,9 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     db.Database.EnsureCreated();
-    try
-    {
-        db.Database.ExecuteSqlRaw("""SELECT 1 FROM "Users" LIMIT 1;""");
-    }
-    catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
-    {
-        db.GetService<IRelationalDatabaseCreator>().CreateTables();
-    }
 }
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
 app.MapStaticAssets();
 
 // Configure the HTTP request pipeline.
@@ -240,12 +228,6 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<AssistantHub>("/hubs/assistant");
 app.MapHub<AiDataHub>("/hubs/ai-data");
-// Backward-compatible hub aliases used by existing deployed frontends.
-app.MapHub<AssistantHub>("/hubs/conversation");
-app.MapHub<AiDataHub>("/hubs/analytics");
-app.MapHub<AiDataHub>("/hubs/clients");
-app.MapHub<AiDataHub>("/hubs/ingestion");
-app.MapHub<AiDataHub>("/hubs/learning");
 
 app.MapFallbackToFile("/index.html");
 
