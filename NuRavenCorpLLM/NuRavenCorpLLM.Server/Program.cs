@@ -38,6 +38,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(2),
         };
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                if (context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                {
+                    var accessToken = context.Request.Query["access_token"];
+                    if (!string.IsNullOrWhiteSpace(accessToken))
+                    {
+                        context.Token = accessToken;
+                    }
+                }
+
+                return Task.CompletedTask;
+            }
+        };
     });
 
 // Add services to the container.
@@ -193,6 +209,12 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<AssistantHub>("/hubs/assistant");
 app.MapHub<AiDataHub>("/hubs/ai-data");
+// Backward-compatible hub aliases used by existing deployed frontends.
+app.MapHub<AssistantHub>("/hubs/conversation");
+app.MapHub<AiDataHub>("/hubs/analytics");
+app.MapHub<AiDataHub>("/hubs/clients");
+app.MapHub<AiDataHub>("/hubs/ingestion");
+app.MapHub<AiDataHub>("/hubs/learning");
 
 app.MapFallbackToFile("/index.html");
 
