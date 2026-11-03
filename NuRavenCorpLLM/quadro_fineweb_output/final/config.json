@@ -11,7 +11,7 @@
   "embd_pdrop": 0.0,
   "eos_token_id": 50256,
   "initializer_range": 0.02,
-  "layer_norm_epsilon": 1e-05,
+  "layer_norm_epsilon": 1E-05,
   "model_type": "gpt2",
   "n_embd": 288,
   "n_head": 6,
@@ -31,5 +31,6 @@
   "tie_word_embeddings": true,
   "transformers_version": "5.5.3",
   "use_cache": false,
-  "vocab_size": 50257
+  "vocab_size": 50257,
+  "n_ctx": 256
 }

@@ -7,11 +7,23 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
 
+def _select_device() -> str:
+    if os.getenv("FORCE_CPU", "").strip().lower() in {"1", "true", "yes"}:
+        return "cpu"
+    if not torch.cuda.is_available():
+        return "cpu"
+    try:
+        _ = torch.zeros(1, device="cuda")
+        return "cuda"
+    except Exception:
+        return "cpu"
+
+
 class GPT(torch.nn.Module):
     def __init__(self, model_id: str | None = None) -> None:
         super().__init__()
         self.model_id = model_id or os.getenv("MODEL_ID", "distilgpt2")
-        self.device_name = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device_name = _select_device()
         dtype = torch.float16 if self.device_name == "cuda" else torch.float32
 
         self.model = AutoModelForCausalLM.from_pretrained(self.model_id, torch_dtype=dtype)
@@ -52,7 +64,7 @@ class GPT(torch.nn.Module):
 class LlmModel:
     def __init__(self) -> None:
         self.model_id = os.getenv("MODEL_ID", "distilgpt2")
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = _select_device()
         dtype = torch.float16 if self.device == "cuda" else torch.float32
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
@@ -62,6 +74,7 @@ class LlmModel:
         self.model = AutoModelForCausalLM.from_pretrained(self.model_id, torch_dtype=dtype)
         self.model.to(self.device)
         self.model.eval()
+        self.max_seq_len = getattr(self.model.config, "max_position_embeddings", None)
 
     def generate(
         self,

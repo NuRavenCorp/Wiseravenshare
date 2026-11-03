@@ -68,8 +68,22 @@ def keyword_recall(text: str, keywords: list[str]) -> float:
 
 
 def check_json_schema(text: str, required_keys: list[str]) -> tuple[bool, str | None]:
+    candidate = text.strip()
+
+    # If wrapped in markdown fences, prefer fenced payload.
+    fence_match = re.search(r"```(?:json)?\s*(.*?)```", candidate, flags=re.IGNORECASE | re.DOTALL)
+    if fence_match:
+        candidate = fence_match.group(1).strip()
+
+    # If there's conversational prefix/suffix, try first JSON object span.
+    if not candidate.startswith("{") or not candidate.endswith("}"):
+        first = candidate.find("{")
+        last = candidate.rfind("}")
+        if first != -1 and last != -1 and last > first:
+            candidate = candidate[first : last + 1].strip()
+
     try:
-        parsed = json.loads(text)
+        parsed = json.loads(candidate)
     except json.JSONDecodeError as ex:
         return False, f"invalid_json: {ex.msg}"
 
