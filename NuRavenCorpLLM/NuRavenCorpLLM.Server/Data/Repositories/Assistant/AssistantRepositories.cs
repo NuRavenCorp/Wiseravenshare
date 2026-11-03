@@ -255,6 +255,33 @@ public class AssistantKnowledgeRepository : IAssistantKnowledgeRepository
     public async Task<AssistantKnowledge?> GetByIdAsync(Guid id, CancellationToken ct = default)
         => await _ctx.Set<AssistantKnowledge>().FirstOrDefaultAsync(x => x.Id == id, ct);
 
+    public async Task<List<AssistantKnowledge>> ListAsync(int limit = 100, CancellationToken ct = default)
+        => await _ctx.Set<AssistantKnowledge>()
+            .Where(x => !x.IsDeleted)
+            .OrderByDescending(x => x.UpdatedAt)
+            .Take(limit)
+            .ToListAsync(ct);
+
+    public async Task<List<AssistantKnowledge>> SearchAsync(string query, int limit = 100, CancellationToken ct = default)
+    {
+        var normalized = query.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return await ListAsync(limit, ct);
+        }
+
+        var pattern = $"%{normalized}%";
+        return await _ctx.Set<AssistantKnowledge>()
+            .Where(x => !x.IsDeleted && (
+                EF.Functions.ILike(x.Title, pattern) ||
+                EF.Functions.ILike(x.Content, pattern) ||
+                EF.Functions.ILike(x.Source, pattern) ||
+                (x.Category != null && EF.Functions.ILike(x.Category, pattern))))
+            .OrderByDescending(x => x.UpdatedAt)
+            .Take(limit)
+            .ToListAsync(ct);
+    }
+
     public async Task<AssistantKnowledge> AddAsync(AssistantKnowledge entity, CancellationToken ct = default)
     {
         await _ctx.Set<AssistantKnowledge>().AddAsync(entity, ct);

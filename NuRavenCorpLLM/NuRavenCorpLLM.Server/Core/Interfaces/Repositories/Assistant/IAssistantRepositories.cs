@@ -21,6 +21,8 @@ public interface IAssistantFeedbackRepository : IRepository<AssistantFeedback>
 
 public interface IAssistantKnowledgeRepository : IRepository<AssistantKnowledge>
 {
+    Task<List<AssistantKnowledge>> ListAsync(int limit = 100, CancellationToken ct = default);
+    Task<List<AssistantKnowledge>> SearchAsync(string query, int limit = 100, CancellationToken ct = default);
 }
 
 public interface IAssistantLearningSampleRepository : IRepository<AssistantLearningSample>
