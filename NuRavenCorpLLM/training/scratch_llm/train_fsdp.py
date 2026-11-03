@@ -7,6 +7,7 @@ from pathlib import Path
 
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     FullOptimStateDictConfig,
@@ -20,9 +21,10 @@ from torch.utils.data import DataLoader
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from scratch_llm.data import MemmapTokenDataset
+from scratch_llm.data import MemmapTokenDataset, PreferencePairDataset
 from scratch_llm.model import ScratchGPT
 from scratch_llm.scheduler import PretrainingCosineSchedule
+from scratch_llm.simpo import avg_sequence_logprob, simpo_loss
 
 
 def setup_distributed():
@@ -101,10 +103,58 @@ def evaluate(model: FSDP, loader: DataLoader, device: torch.device, eval_batches
     return (total / count.clamp(min=1.0)).item()
 
 
+def _token_logprobs(logits: torch.Tensor, labels: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    safe_labels = labels.clamp_min(0)
+    gathered = F.log_softmax(logits, dim=-1).gather(-1, safe_labels.unsqueeze(-1)).squeeze(-1)
+    valid = (labels >= 0).float()
+    return gathered * valid, valid
+
+
+def compute_simpo_batch_loss(model: FSDP, batch: dict[str, torch.Tensor], beta: float, gamma: float) -> torch.Tensor:
+    chosen_logits, _ = model(batch["chosen_ids"])
+    rejected_logits, _ = model(batch["rejected_ids"])
+
+    chosen_logprobs, chosen_valid = _token_logprobs(chosen_logits, batch["chosen_labels"])
+    rejected_logprobs, rejected_valid = _token_logprobs(rejected_logits, batch["rejected_labels"])
+
+    chosen_mask = batch["chosen_response_mask"].float() * chosen_valid
+    rejected_mask = batch["rejected_response_mask"].float() * rejected_valid
+
+    chosen_avg = avg_sequence_logprob(chosen_logprobs, chosen_mask)
+    rejected_avg = avg_sequence_logprob(rejected_logprobs, rejected_mask)
+    return simpo_loss(chosen_avg, rejected_avg, beta=beta, gamma=gamma)
+
+
+@torch.no_grad()
+def evaluate_simpo(model: FSDP, loader: DataLoader, device: torch.device, eval_batches: int, beta: float, gamma: float):
+    model.eval()
+    total = torch.tensor(0.0, device=device)
+    count = torch.tensor(0.0, device=device)
+
+    for i, batch in enumerate(loader):
+        if i >= eval_batches:
+            break
+        device_batch = {k: v.to(device) for k, v in batch.items()}
+        loss = compute_simpo_batch_loss(model, device_batch, beta=beta, gamma=gamma)
+        total += loss.detach()
+        count += 1.0
+
+    dist.all_reduce(total, op=dist.ReduceOp.SUM)
+    dist.all_reduce(count, op=dist.ReduceOp.SUM)
+    model.train()
+    return (total / count.clamp(min=1.0)).item()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Scratch GPT pre-training loop with PyTorch FSDP orchestration.")
     parser.add_argument("--tokens-manifest", required=True, type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
+    parser.add_argument("--train-objective", choices=["sft", "simpo"], default="sft")
+    parser.add_argument("--simpo-train-jsonl", type=Path, default=None)
+    parser.add_argument("--simpo-val-jsonl", type=Path, default=None)
+    parser.add_argument("--simpo-beta", type=float, default=2.0)
+    parser.add_argument("--simpo-gamma", type=float, default=1.0)
+    parser.add_argument("--simpo-lr", type=float, default=5e-7)
     parser.add_argument("--block-size", type=int, default=1024)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--max-steps", type=int, default=20000)
@@ -166,18 +216,42 @@ def main() -> None:
         device_id=device if device.type == "cuda" else None,
     )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), weight_decay=args.weight_decay)
+    effective_lr = args.simpo_lr if args.train_objective == "simpo" else args.lr
+    optimizer = torch.optim.AdamW(model.parameters(), lr=effective_lr, betas=(0.9, 0.95), weight_decay=args.weight_decay)
     scaler = torch.GradScaler(enabled=use_amp and args.dtype == "fp16")
 
-    train_ds = MemmapTokenDataset(train_bin, args.block_size, data_dtype)
-    val_ds = MemmapTokenDataset(val_bin, args.block_size, data_dtype)
-    train_loader = iter(DataLoader(train_ds, batch_size=args.batch_size, num_workers=0))
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, num_workers=0)
+    if args.train_objective == "simpo":
+        if args.simpo_train_jsonl is None:
+            raise ValueError("--simpo-train-jsonl is required when --train-objective=simpo")
+        train_ds = PreferencePairDataset(args.simpo_train_jsonl, args.block_size)
+        val_path = args.simpo_val_jsonl if args.simpo_val_jsonl else args.simpo_train_jsonl
+        val_ds = PreferencePairDataset(val_path, args.block_size)
+        train_iterable = DataLoader(
+            train_ds,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=0,
+            collate_fn=PreferencePairDataset.collate,
+        )
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=0,
+            collate_fn=PreferencePairDataset.collate,
+        )
+    else:
+        train_ds = MemmapTokenDataset(train_bin, args.block_size, data_dtype)
+        val_ds = MemmapTokenDataset(val_bin, args.block_size, data_dtype)
+        train_iterable = DataLoader(train_ds, batch_size=args.batch_size, num_workers=0)
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size, num_workers=0)
+
+    train_loader = iter(train_iterable)
 
     scheduler = PretrainingCosineSchedule(
         warmup_steps=max(1, int(args.max_steps * args.warmup_ratio)),
         total_steps=args.max_steps,
-        max_lr=args.lr,
+        max_lr=effective_lr,
         min_lr_ratio=args.min_lr_ratio,
     )
 
@@ -206,13 +280,27 @@ def main() -> None:
         local_running = 0.0
 
         for micro in range(args.grad_accum):
-            x, y = next(train_loader)
-            x, y = x.to(device), y.to(device)
+            try:
+                micro_batch = next(train_loader)
+            except StopIteration:
+                train_loader = iter(train_iterable)
+                micro_batch = next(train_loader)
+
             should_sync = micro == args.grad_accum - 1
             sync_context = nullcontext() if should_sync else model.no_sync()
             with sync_context:
                 with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp):
-                    _, loss = model(x, y)
+                    if args.train_objective == "simpo":
+                        device_batch = {k: v.to(device) for k, v in micro_batch.items()}
+                        loss = compute_simpo_batch_loss(
+                            model,
+                            device_batch,
+                            beta=args.simpo_beta,
+                            gamma=args.simpo_gamma,
+                        )
+                    else:
+                        x, y = micro_batch[0].to(device), micro_batch[1].to(device)
+                        _, loss = model(x, y)
                     loss = loss / args.grad_accum
                 local_running += loss.item()
                 scaler.scale(loss).backward()
@@ -231,7 +319,17 @@ def main() -> None:
             rank0_print(rank, f"step={step} train_loss={avg_loss:.4f} lr={lr:.6e}")
 
         if step % args.eval_interval == 0:
-            val_loss = evaluate(model, val_loader, device, args.eval_batches)
+            if args.train_objective == "simpo":
+                val_loss = evaluate_simpo(
+                    model,
+                    val_loader,
+                    device,
+                    args.eval_batches,
+                    beta=args.simpo_beta,
+                    gamma=args.simpo_gamma,
+                )
+            else:
+                val_loss = evaluate(model, val_loader, device, args.eval_batches)
             rank0_print(rank, f"step={step} val_loss={val_loss:.4f}")
             if val_loss < state["best_val_loss"]:
                 state["best_val_loss"] = val_loss

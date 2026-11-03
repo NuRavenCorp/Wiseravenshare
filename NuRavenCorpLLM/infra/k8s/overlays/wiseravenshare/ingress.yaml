@@ -7,10 +7,21 @@ metadata:
 spec:
   tls:
     - hosts:
-        - wiseravenshare-wiseravenshare.com
+        - wise-ravens.com
+        - www.wise-ravens.com
       secretName: wiseravenshare-tls
   rules:
-    - host: wiseravenshare-wiseravenshare.com
+    - host: wise-ravens.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80
+    - host: www.wise-ravens.com
       http:
         paths:
           - path: /

@@ -15,7 +15,7 @@ configMapGenerator:
       - SITE_KEY=wiseravenshare
       - SITE_NAME=WiseRavenShare
       - SITE_THEME=share
-      - SITE_DOMAIN=wiseravenshare-wiseravenshare.com
+      - SITE_DOMAIN=wise-ravens.com
       - SPACES_BUCKET=nuravencorpllm-sites
       - SPACES_PREFIX=wiseravenshare
       - FolderKnowledge__RootPath=/data/sites
