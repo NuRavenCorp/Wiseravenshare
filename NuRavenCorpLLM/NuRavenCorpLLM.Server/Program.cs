@@ -216,6 +216,16 @@ app.MapHub<AiDataHub>("/hubs/clients");
 app.MapHub<AiDataHub>("/hubs/ingestion");
 app.MapHub<AiDataHub>("/hubs/learning");
 
-app.MapFallbackToFile("/index.html");
+app.MapFallback(async context =>
+{
+    var path = context.Request.Path;
+    if (path.StartsWithSegments("/api") || path.StartsWithSegments("/hubs"))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    await context.Response.SendFileAsync(Path.Combine(app.Environment.WebRootPath, "index.html"));
+});
 
 app.Run();
