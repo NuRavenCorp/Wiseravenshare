@@ -15,11 +15,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_USER: ${USERNAME:-arnol}
+        APP_UID: ${LOCAL_UID:-1000}
+        APP_GID: ${LOCAL_GID:-1000}
     image: custom-llm-core:latest
     environment:
       - CUDA_VISIBLE_DEVICES=0
       - MODEL_ID=distilgpt2
       - HF_HOME=/workspace/.cache/huggingface
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     expose:
       - "8000"
     gpus: all
@@ -37,11 +42,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_USER: ${USERNAME:-arnol}
+        APP_UID: ${LOCAL_UID:-1000}
+        APP_GID: ${LOCAL_GID:-1000}
     image: custom-llm-core:latest
     environment:
       - CUDA_VISIBLE_DEVICES=1
       - MODEL_ID=distilgpt2
       - HF_HOME=/workspace/.cache/huggingface
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     expose:
       - "8000"
     gpus: all
