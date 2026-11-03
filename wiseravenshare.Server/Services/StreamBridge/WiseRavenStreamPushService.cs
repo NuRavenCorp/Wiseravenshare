@@ -1,5 +1,6 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Entities.Stream;
@@ -18,8 +19,24 @@ public sealed class StreamBridgeOptions
     /// <summary>Base URL of the WiseRavenStream API (e.g. https://wiseravenstream.com).</summary>
     public string WiseRavenStreamBaseUrl { get; set; } = string.Empty;
 
-    /// <summary>API key sent as X-Stream-Api-Key to WiseRavenStream service endpoints.</summary>
-    public string ApiKey { get; set; } = string.Empty;
+    /// <summary>
+    /// Service identity key sent as X-WRS-Service header.
+    /// Must match WiseravenShareIntegration__ServiceKey configured in WiseRavenStream.
+    /// </summary>
+    public string ServiceKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// HMAC-SHA256 signing secret.
+    /// Must match WiseravenShareIntegration__ServiceSecret configured in WiseRavenStream.
+    /// </summary>
+    public string ServiceSecret { get; set; } = string.Empty;
+
+    /// <summary>
+    /// API key WiseRavenStream uses when calling back to WiseRavenShare's
+    /// /api/stream-transfer endpoints (X-Stream-Api-Key header).
+    /// Set this here so WiseRavenShare can verify inbound callbacks.
+    /// </summary>
+    public string WiseRavenStreamApiKey { get; set; } = string.Empty;
 
     /// <summary>How often the push loop polls for approved transfers (seconds).</summary>
     public int PollIntervalSeconds { get; set; } = 60;
@@ -144,12 +161,16 @@ public sealed class WiseRavenStreamPushService : BackgroundService
             file_size_bytes = transfer.FileSizeBytes
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/v1/library/videos")
+        var path = "/v1/library/videos";
+        var bodyJson = JsonSerializer.Serialize(payload, _jsonOpts);
+        var bodyBytes = Encoding.UTF8.GetBytes(bodyJson);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}{path}")
         {
-            Content = JsonContent.Create(payload)
+            Content = new StringContent(bodyJson, Encoding.UTF8, "application/json")
         };
 
-        ApplyServiceKey(request);
+        ApplyWrsSignature(request, "POST", path, bodyBytes);
 
         using var response = await http.SendAsync(request, ct);
         var body = await response.Content.ReadAsStringAsync(ct);
@@ -169,12 +190,35 @@ public sealed class WiseRavenStreamPushService : BackgroundService
         _logger.LogInformation("Transfer {Id} ({Title}) successfully pushed to WiseRavenStream.", transfer.Id, transfer.Title);
     }
 
-    private void ApplyServiceKey(HttpRequestMessage request)
+    /// <summary>
+    /// Adds the three WRS auth headers that WiseRavenStream's WiseravenShareSignatureValidator expects:
+    ///   X-WRS-Service   = ServiceKey (identity)
+    ///   X-WRS-Timestamp = Unix seconds
+    ///   X-WRS-Signature = HMAC-SHA256 of "{timestamp}.{METHOD}.{path+query}.{sha256(body)}"
+    /// </summary>
+    private void ApplyWrsSignature(HttpRequestMessage request, string method, string pathAndQuery, byte[] bodyBytes)
     {
-        var key = (_options.ApiKey ?? string.Empty).Trim();
-        if (!string.IsNullOrWhiteSpace(key))
+        var serviceKey = (_options.ServiceKey ?? string.Empty).Trim();
+        var serviceSecret = (_options.ServiceSecret ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(serviceKey) || string.IsNullOrWhiteSpace(serviceSecret))
         {
-            request.Headers.Add("X-Stream-Api-Key", key);
+            _logger.LogWarning(
+                "StreamBridge:ServiceKey or ServiceSecret is not configured — request will be unsigned and rejected by WiseRavenStream.");
+            return;
         }
+
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        var bodyHashHex = Convert.ToHexString(SHA256.HashData(bodyBytes)).ToLowerInvariant();
+        var message = $"{timestamp}.{method.ToUpperInvariant()}.{pathAndQuery}.{bodyHashHex}";
+        var signatureHex = Convert.ToHexString(
+            HMACSHA256.HashData(
+                Encoding.UTF8.GetBytes(serviceSecret),
+                Encoding.UTF8.GetBytes(message)))
+            .ToLowerInvariant();
+
+        request.Headers.Add("X-WRS-Service", serviceKey);
+        request.Headers.Add("X-WRS-Timestamp", timestamp);
+        request.Headers.Add("X-WRS-Signature", signatureHex);
     }
 }
