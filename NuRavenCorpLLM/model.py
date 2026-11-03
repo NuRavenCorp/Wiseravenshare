@@ -74,6 +74,13 @@ class LlmModel:
         inputs = self.tokenizer(prompt, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
+        # Truncate to fit context window, leaving room for new tokens
+        if self.max_seq_len:
+            max_input_len = max(1, self.max_seq_len - max_new_tokens)
+            for key in ("input_ids", "attention_mask"):
+                if key in inputs and inputs[key].shape[-1] > max_input_len:
+                    inputs[key] = inputs[key][..., -max_input_len:]
+
         generate_kwargs = dict(
             **inputs,
             do_sample=temperature > 0,
@@ -100,6 +107,14 @@ class LlmModel:
     ) -> Generator[str, None, None]:
         inputs = self.tokenizer(prompt, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        # Truncate to fit context window, leaving room for new tokens
+        if self.max_seq_len:
+            max_input_len = max(1, self.max_seq_len - max_new_tokens)
+            for key in ("input_ids", "attention_mask"):
+                if key in inputs and inputs[key].shape[-1] > max_input_len:
+                    inputs[key] = inputs[key][..., -max_input_len:]
+
         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
 
         generate_kwargs = dict(
