@@ -29,28 +29,43 @@ def evaluate(model, loader, device, eval_batches: int):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Scratch GPT pre-training loop.")
-    parser.add_argument("--tokens-manifest", required=True, type=Path)
-    parser.add_argument("--out-dir", required=True, type=Path)
-    parser.add_argument("--block-size", type=int, default=1024)
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--max-steps", type=int, default=10000)
-    parser.add_argument("--eval-interval", type=int, default=250)
-    parser.add_argument("--eval-batches", type=int, default=20)
-    parser.add_argument("--save-interval", type=int, default=500)
-    parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--warmup-ratio", type=float, default=0.01)
-    parser.add_argument("--min-lr-ratio", type=float, default=0.1)
-    parser.add_argument("--weight-decay", type=float, default=0.1)
-    parser.add_argument("--grad-clip", type=float, default=1.0)
-    parser.add_argument("--grad-accum", type=int, default=1)
-    parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
-    parser.add_argument("--resume-from", type=Path, default=None)
-    parser.add_argument("--d-model", type=int, default=768)
-    parser.add_argument("--n-layers", type=int, default=12)
-    parser.add_argument("--n-heads", type=int, default=12)
-    parser.add_argument("--mlp-mult", type=int, default=4)
-    parser.add_argument("--dropout", type=float, default=0.0)
+    parser = argparse.ArgumentParser(
+        description="Scratch GPT pre-training loop.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--tokens-manifest", required=True, type=Path,
+        metavar="MANIFEST_JSON",
+        help="Path to the tokens manifest JSON file produced by the tokenisation step. "
+             "Must contain keys: vocab_size, dtype, train_bin, val_bin.",
+    )
+    parser.add_argument(
+        "--out-dir", required=True, type=Path,
+        metavar="DIR",
+        help="Directory where checkpoints (best.pt, step-N.pt, last.pt) will be written. "
+             "Created automatically if it does not exist.",
+    )
+    parser.add_argument("--block-size",     type=int,   default=1024,   help="Token sequence length (context window).")
+    parser.add_argument("--batch-size",     type=int,   default=8,      help="Micro-batch size per gradient step.")
+    parser.add_argument("--max-steps",      type=int,   default=10000,  help="Total number of optimiser steps.")
+    parser.add_argument("--eval-interval",  type=int,   default=250,    help="Run validation every N steps.")
+    parser.add_argument("--eval-batches",   type=int,   default=20,     help="Number of validation batches used per evaluation.")
+    parser.add_argument("--save-interval",  type=int,   default=500,    help="Save a periodic checkpoint every N steps.")
+    parser.add_argument("--lr",             type=float, default=3e-4,   help="Peak learning rate for the cosine schedule.")
+    parser.add_argument("--warmup-ratio",   type=float, default=0.01,   help="Fraction of max-steps used for linear LR warm-up.")
+    parser.add_argument("--min-lr-ratio",   type=float, default=0.1,    help="Final LR as a fraction of --lr (cosine decay floor).")
+    parser.add_argument("--weight-decay",   type=float, default=0.1,    help="AdamW weight decay.")
+    parser.add_argument("--grad-clip",      type=float, default=1.0,    help="Gradient norm clipping threshold (0 = disabled).")
+    parser.add_argument("--grad-accum",     type=int,   default=1,      help="Gradient accumulation steps (effective batch = batch-size × grad-accum).")
+    parser.add_argument("--dtype",          choices=["bf16", "fp16", "fp32"], default="bf16",
+                        help="Training precision. bf16 recommended on Ampere+ GPUs.")
+    parser.add_argument("--resume-from",    type=Path,  default=None,   metavar="CHECKPOINT",
+                        help="Optional path to a .pt checkpoint to resume training from.")
+    parser.add_argument("--d-model",        type=int,   default=768,    help="Transformer hidden dimension.")
+    parser.add_argument("--n-layers",       type=int,   default=12,     help="Number of transformer layers.")
+    parser.add_argument("--n-heads",        type=int,   default=12,     help="Number of attention heads.")
+    parser.add_argument("--mlp-mult",       type=int,   default=4,      help="MLP hidden size multiplier relative to d-model.")
+    parser.add_argument("--dropout",        type=float, default=0.0,    help="Dropout probability (0.0 = disabled).")
     args = parser.parse_args()
 
     manifest = json.loads(args.tokens_manifest.read_text(encoding="utf-8"))
