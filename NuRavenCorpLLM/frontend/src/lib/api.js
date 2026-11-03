@@ -28,7 +28,7 @@ api.interceptors.response.use(
 
 export const endpoints = {
   clients: '/clients',
-  conversations: '/conversations',
+  conversations: '/assistant/conversations',
   knowledge: '/knowledge',
   ingestion: '/ingestion',
   craft: '/craft',
