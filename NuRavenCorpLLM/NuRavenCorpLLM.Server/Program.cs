@@ -91,6 +91,44 @@ builder.Services.Configure<AssistantOptions>(builder.Configuration.GetSection("A
 builder.Services.Configure<WebGroundingOptions>(builder.Configuration.GetSection("WebGrounding"));
 builder.Services.Configure<WhisperOptions>(builder.Configuration.GetSection("Whisper"));
 builder.Services.Configure<TtsOptions>(builder.Configuration.GetSection("Tts"));
+builder.Services.PostConfigure<OpenAiOptions>(options =>
+{
+    options.ApiKey = FirstNonEmpty(
+        options.ApiKey,
+        builder.Configuration["OPENAI_SECRET_KEY"],
+        builder.Configuration["OpenAI:SecretKey"],
+        builder.Configuration["OpenAI:ApiKey"]) ?? string.Empty;
+    options.BaseUrl = FirstNonEmpty(
+        options.BaseUrl,
+        builder.Configuration["OPENAI_BASE_URL"],
+        builder.Configuration["OpenAI:BaseUrl"]) ?? "https://api.openai.com/v1";
+    options.ProjectId = FirstNonEmpty(
+        options.ProjectId,
+        builder.Configuration["OPENAI_PROJECT_ID"],
+        builder.Configuration["OpenAI:ProjectId"]);
+    options.OrganizationId = FirstNonEmpty(
+        options.OrganizationId,
+        builder.Configuration["OPENAI_ORGANIZATION_ID"],
+        builder.Configuration["OPENAI_ORG_ID"],
+        builder.Configuration["OpenAI:OrganizationId"]);
+});
+builder.Services.PostConfigure<WhisperOptions>(options =>
+{
+    options.ApiKey = FirstNonEmpty(
+        options.ApiKey,
+        builder.Configuration["OPENAI_SECRET_KEY"],
+        builder.Configuration["OpenAI:SecretKey"]) ?? options.ApiKey;
+    options.BaseUrl = FirstNonEmpty(
+        options.BaseUrl,
+        builder.Configuration["OPENAI_BASE_URL"]) ?? options.BaseUrl;
+});
+builder.Services.PostConfigure<TtsOptions>(options =>
+{
+    options.OpenAiKey = FirstNonEmpty(
+        options.OpenAiKey,
+        builder.Configuration["OPENAI_SECRET_KEY"],
+        builder.Configuration["OpenAI:SecretKey"]);
+});
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("DatabaseConnection")
@@ -229,3 +267,16 @@ app.MapFallback(async context =>
 });
 
 app.Run();
+
+static string? FirstNonEmpty(params string?[] values)
+{
+    foreach (var value in values)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+    }
+
+    return null;
+}

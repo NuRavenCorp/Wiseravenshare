@@ -15,6 +15,8 @@ public class OpenAiOptions
     public string BaseUrl { get; set; } = "https://api.openai.com/v1";
     public string ChatModel { get; set; } = "gpt-4o-mini";
     public string EmbeddingModel { get; set; } = "text-embedding-3-small";
+    public string? OrganizationId { get; set; }
+    public string? ProjectId { get; set; }
 }
 
 public class OpenAiClient
@@ -31,6 +33,16 @@ public class OpenAiClient
         _logger = logger;
         _http.BaseAddress = new Uri(NormalizeBaseUrl(_opts.BaseUrl));
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _opts.ApiKey);
+        if (!string.IsNullOrWhiteSpace(_opts.OrganizationId))
+        {
+            _http.DefaultRequestHeaders.Remove("OpenAI-Organization");
+            _http.DefaultRequestHeaders.Add("OpenAI-Organization", _opts.OrganizationId);
+        }
+        if (!string.IsNullOrWhiteSpace(_opts.ProjectId))
+        {
+            _http.DefaultRequestHeaders.Remove("OpenAI-Project");
+            _http.DefaultRequestHeaders.Add("OpenAI-Project", _opts.ProjectId);
+        }
     }
 
     public async Task<LlmResponse> ChatAsync(LlmRequest req, CancellationToken ct)
