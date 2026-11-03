@@ -2422,6 +2422,18 @@ if (enableHostedServices)
 }
 builder.Services.AddSingleton<IUploadMalwareScanner, UploadMalwareScanner>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.StreamBridge.IStreamTransferService, Wiseravenshare.Server.Services.StreamBridge.StreamTransferService>();
+
+// WiseRavenStream push bridge
+var streamBridgeOptions = builder.Configuration
+    .GetSection(Wiseravenshare.Server.Services.StreamBridge.StreamBridgeOptions.SectionName)
+    .Get<Wiseravenshare.Server.Services.StreamBridge.StreamBridgeOptions>()
+    ?? new Wiseravenshare.Server.Services.StreamBridge.StreamBridgeOptions();
+builder.Services.AddSingleton(streamBridgeOptions);
+builder.Services.AddHttpClient("WiseRavenStreamBridge");
+if (enableHostedServices && !string.IsNullOrWhiteSpace(streamBridgeOptions.WiseRavenStreamBaseUrl))
+{
+    builder.Services.AddHostedService<Wiseravenshare.Server.Services.StreamBridge.WiseRavenStreamPushService>();
+}
 builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
 builder.Services.AddHttpClient<ITikTokAggregatorService, TikTokAggregatorService>();
