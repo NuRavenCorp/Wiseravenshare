@@ -29,7 +29,7 @@ public class OpenAiClient
         _http = http;
         _opts = opts.Value;
         _logger = logger;
-        _http.BaseAddress = new Uri(_opts.BaseUrl);
+        _http.BaseAddress = new Uri(NormalizeBaseUrl(_opts.BaseUrl));
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _opts.ApiKey);
     }
 
@@ -46,7 +46,7 @@ public class OpenAiClient
 
         var json = JsonSerializer.Serialize(body);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
-        using var response = await _http.PostAsync("/chat/completions", content, ct);
+        using var response = await _http.PostAsync("chat/completions", content, ct);
         response.EnsureSuccessStatusCode();
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -80,7 +80,7 @@ public class OpenAiClient
         };
 
         var json = JsonSerializer.Serialize(body);
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/chat/completions")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "chat/completions")
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
@@ -134,7 +134,7 @@ public class OpenAiClient
         };
         var json = JsonSerializer.Serialize(body);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
-        using var response = await _http.PostAsync("/embeddings", content, ct);
+        using var response = await _http.PostAsync("embeddings", content, ct);
         response.EnsureSuccessStatusCode();
         using var doc = await JsonDocument.ParseAsync(
             await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
@@ -154,5 +154,28 @@ public class OpenAiClient
     {
         await foreach (var chunk in ChatStreamAsync(request, ct))
             yield return chunk;
+    }
+
+    private static string NormalizeBaseUrl(string? baseUrl)
+    {
+        var candidate = string.IsNullOrWhiteSpace(baseUrl) ? "https://api.openai.com/v1" : baseUrl.Trim();
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri))
+        {
+            return "https://api.openai.com/v1/";
+        }
+
+        var builder = new UriBuilder(uri);
+        var path = builder.Path ?? string.Empty;
+        if (path == "/") path = string.Empty;
+
+        if (builder.Host.Equals("api.openai.com", StringComparison.OrdinalIgnoreCase) &&
+            !path.StartsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            path = $"{path}/v1";
+        }
+
+        var normalizedPath = $"/{path.Trim('/')}";
+        builder.Path = $"{normalizedPath}/";
+        return builder.Uri.ToString();
     }
 }

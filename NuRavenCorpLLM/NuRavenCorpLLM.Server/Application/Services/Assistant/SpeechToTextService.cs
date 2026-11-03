@@ -29,7 +29,7 @@ public class SpeechToTextService : ISpeechToTextService
     public SpeechToTextService(HttpClient http, IOptions<WhisperOptions> opts, ILogger<SpeechToTextService> logger)
     {
         _http = http; _opts = opts.Value; _logger = logger;
-        _http.BaseAddress = new Uri(_opts.BaseUrl);
+        _http.BaseAddress = new Uri(NormalizeBaseUrl(_opts.BaseUrl));
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _opts.ApiKey);
     }
 
@@ -42,7 +42,7 @@ public class SpeechToTextService : ISpeechToTextService
         form.Add(new StringContent(_opts.Model), "model");
         form.Add(new StringContent("verbose_json"), "response_format");
 
-        using var response = await _http.PostAsync("/audio/transcriptions", form, ct);
+        using var response = await _http.PostAsync("audio/transcriptions", form, ct);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
@@ -51,5 +51,28 @@ public class SpeechToTextService : ISpeechToTextService
         var lang = root.TryGetProperty("language", out var l) ? l.GetString() : null;
         var dur = root.TryGetProperty("duration", out var d) ? (int)(d.GetDouble() * 1000) : 0;
         return new SttResult(text, lang, null, dur);
+    }
+
+    private static string NormalizeBaseUrl(string? baseUrl)
+    {
+        var candidate = string.IsNullOrWhiteSpace(baseUrl) ? "https://api.openai.com/v1" : baseUrl.Trim();
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri))
+        {
+            return "https://api.openai.com/v1/";
+        }
+
+        var builder = new UriBuilder(uri);
+        var path = builder.Path ?? string.Empty;
+        if (path == "/") path = string.Empty;
+
+        if (builder.Host.Equals("api.openai.com", StringComparison.OrdinalIgnoreCase) &&
+            !path.StartsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            path = $"{path}/v1";
+        }
+
+        var normalizedPath = $"/{path.Trim('/')}";
+        builder.Path = $"{normalizedPath}/";
+        return builder.Uri.ToString();
     }
 }
