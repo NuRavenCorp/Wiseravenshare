@@ -28,12 +28,14 @@ public partial class PgVectorStore : IPgVectorStore
         var vectorLiteral = "[" + string.Join(',', query.Select(f => f.ToString(System.Globalization.CultureInfo.InvariantCulture))) + "]";
 
         var sql = @"
-            SELECT id, title, content, source, source_url,
-                   1 - (embedding <=> @p0::vector) AS score
-            FROM assistant_knowledge
-            WHERE is_public = true AND is_approved = true
-              AND embedding IS NOT NULL
-            ORDER BY embedding <=> @p0::vector
+            SELECT ""Id"", ""Title"", ""Content"", ""Source"", ""SourceUrl"",
+                   1 - (""Embedding"" <=> @p0::vector) AS score
+            FROM ""AssistantKnowledge""
+            WHERE ""IsDeleted"" = false
+              AND ""IsPublic"" = true
+              AND ""IsApproved"" = true
+              AND ""Embedding"" IS NOT NULL
+            ORDER BY ""Embedding"" <=> @p0::vector
             LIMIT @p1;";
 
         var results = new List<RagHit>();
