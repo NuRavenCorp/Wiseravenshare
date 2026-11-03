@@ -87,6 +87,7 @@ builder.Services.AddScoped<IAssistantPersonaService, AssistantPersonaService>();
 builder.Services.AddScoped<PromptBuilder>();
 builder.Services.Configure<FolderKnowledgeOptions>(builder.Configuration.GetSection("FolderKnowledge"));
 builder.Services.Configure<OpenAiOptions>(builder.Configuration.GetSection("OpenAI"));
+builder.Services.Configure<ModelServingOptions>(builder.Configuration.GetSection("ModelServing"));
 builder.Services.Configure<AssistantOptions>(builder.Configuration.GetSection("Assistant"));
 builder.Services.Configure<WebGroundingOptions>(builder.Configuration.GetSection("WebGrounding"));
 builder.Services.Configure<WhisperOptions>(builder.Configuration.GetSection("Whisper"));
@@ -129,6 +130,19 @@ builder.Services.PostConfigure<TtsOptions>(options =>
         builder.Configuration["OPENAI_SECRET_KEY"],
         builder.Configuration["OpenAI:SecretKey"]);
 });
+builder.Services.PostConfigure<ModelServingOptions>(options =>
+{
+    options.BaseUrl = FirstNonEmpty(
+        options.BaseUrl,
+        builder.Configuration["MODEL_SERVE_URL"],
+        builder.Configuration["ModelServing:BaseUrl"]) ?? string.Empty;
+    options.GeneratePath = FirstNonEmpty(
+        options.GeneratePath,
+        builder.Configuration["MODEL_SERVE_GENERATE_PATH"],
+        builder.Configuration["ModelServing:GeneratePath"]) ?? "/generate";
+    options.Enabled = options.Enabled ||
+        string.Equals(builder.Configuration["MODEL_SERVE_ENABLED"], "true", StringComparison.OrdinalIgnoreCase);
+});
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("DatabaseConnection")
@@ -145,7 +159,8 @@ builder.Services.AddSingleton<IDataSourceRegistryRepository, InMemoryDataSourceR
 builder.Services.AddSingleton<IDataQueryTemplateRepository, InMemoryDataQueryTemplateRepository>();
 
 builder.Services.AddHttpClient<OpenAiClient>();
-builder.Services.AddScoped<ILlmGateway>(sp => sp.GetRequiredService<OpenAiClient>());
+builder.Services.AddHttpClient<HybridLlmGateway>();
+builder.Services.AddScoped<ILlmGateway>(sp => sp.GetRequiredService<HybridLlmGateway>());
 builder.Services.AddScoped<IPgVectorStore, PgVectorStore>();
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 builder.Services.AddScoped<IAssistantKnowledgeRepository, AssistantKnowledgeRepository>();

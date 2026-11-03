@@ -65,7 +65,6 @@ public class AssistantOrchestrator : IAssistantOrchestrator
     private readonly IChatterLearningService _learning;
     private readonly IAssistantSafetyService _safety;
     private readonly IAssistantPersonaService _persona;
-    private readonly OpenAiClient _openAi;
     private readonly PromptBuilder _promptBuilder;
     private readonly AssistantOptions _opts;
     private readonly ILogger<AssistantOrchestrator> _logger;
@@ -80,7 +79,6 @@ public class AssistantOrchestrator : IAssistantOrchestrator
         IChatterLearningService learning,
         IAssistantSafetyService safety,
         IAssistantPersonaService persona,
-        OpenAiClient openAi,
         PromptBuilder promptBuilder,
         IOptions<AssistantOptions> opts,
         ILogger<AssistantOrchestrator> logger)
@@ -94,7 +92,6 @@ public class AssistantOrchestrator : IAssistantOrchestrator
         _learning = learning;
         _safety = safety;
         _persona = persona;
-        _openAi = openAi;
         _promptBuilder = promptBuilder;
         _opts = opts.Value;
         _logger = logger;
@@ -265,7 +262,7 @@ public class AssistantOrchestrator : IAssistantOrchestrator
         var sw = Stopwatch.StartNew();
         int promptTokens = 0, completionTokens = 0;
 
-        await foreach (var chunk in _openAi.ChatStreamAsync(request, ct))
+        await foreach (var chunk in _llm.StreamAsync(request, ct))
         {
             if (chunk.Done)
             {
