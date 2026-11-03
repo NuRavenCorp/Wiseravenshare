@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using NuRavenCorpLLM.Application.Services.Craft;
 using NuRavenCorpLLM.Entities.Craft;
 using NuRavenCorpLLM.Infrastructure.Data;
@@ -19,8 +20,13 @@ public record CraftInsightHit(Guid Id, string Title, string Content, string Sour
 public partial class PgVectorStore : IPgVectorStore
 {
     private readonly ApplicationDbContext _db;
+    private readonly ILogger<PgVectorStore> _logger;
 
-    public PgVectorStore(ApplicationDbContext db) => _db = db;
+    public PgVectorStore(ApplicationDbContext db, ILogger<PgVectorStore> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
 
     public async Task<IEnumerable<RagHit>> SimilaritySearchAsync(
         float[] query, int topK, double minScore, CancellationToken ct = default)
@@ -46,18 +52,30 @@ public partial class PgVectorStore : IPgVectorStore
         var p1 = cmd.CreateParameter(); p1.ParameterName = "@p1"; p1.Value = topK; cmd.Parameters.Add(p1);
 
         await _db.Database.OpenConnectionAsync(ct);
-        using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        try
         {
-            var score = reader.GetDouble(5);
-            if (score < minScore) continue;
-            results.Add(new RagHit(
-                reader.GetGuid(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetString(4),
-                score));
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var score = reader.GetDouble(5);
+                if (score < minScore) continue;
+                results.Add(new RagHit(
+                    reader.GetGuid(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    score));
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedObject || ex.SqlState == PostgresErrorCodes.UndefinedTable)
+        {
+            _logger.LogWarning(ex, "Vector similarity search unavailable. Falling back to empty RAG context.");
+            return Array.Empty<RagHit>();
+        }
+        finally
+        {
+            await _db.Database.CloseConnectionAsync();
         }
 
         return results;
