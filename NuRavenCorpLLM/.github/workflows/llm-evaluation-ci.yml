@@ -1,0 +1,141 @@
+name: NuRavenCorp LLM Evaluation CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  evaluate-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install requests
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+
+      - name: Start model backend (TinyLlama, CPU)
+        env:
+          MODEL_ID: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+          FORCE_CPU: "1"
+        run: |
+          python -m uvicorn inference:app --host 127.0.0.1 --port 8006 > model.log 2>&1 &
+          echo $! > model.pid
+
+      - name: Wait for model backend health
+        run: |
+          echo "Waiting for model startup..."
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:8006/health | grep -q '"status":"ok"'; then
+              echo "Model backend is online."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Model backend failed to start."
+          cat model.log || true
+          exit 1
+
+      - name: Build proxy container
+        run: docker build -f docker/proxy/Dockerfile -t nuravencorp-llm-proxy:test .
+
+      - name: Run proxy container (vLLM-style upstream mode)
+        run: |
+          docker run -d --name llm-proxy \
+            --add-host=host.docker.internal:host-gateway \
+            -e VLLM_BASE_URL=http://host.docker.internal:8006/v1 \
+            -e VLLM_MODEL=TinyLlama/TinyLlama-1.1B-Chat-v1.0 \
+            -e GUIDED_DECODING_BACKEND=outlines \
+            -e TENANT_ID=wiseravenshare \
+            -p 8001:8000 \
+            nuravencorp-llm-proxy:test
+
+      - name: Wait for proxy health
+        run: |
+          echo "Waiting for proxy..."
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8001/health | grep -q '"status":"ok"'; then
+              echo "Proxy is online."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Proxy failed to start."
+          docker logs llm-proxy || true
+          exit 1
+
+      - name: Execute run_eval.py suite
+        run: |
+          python ./eval/run_eval.py \
+            --dataset ./eval/golden_set.jsonl \
+            --endpoint http://127.0.0.1:8001/v1/generate \
+            --max-new-tokens 96 \
+            --temperature 0.2 \
+            --top-p 0.9 \
+            --prompt-mode raw \
+            --label ci_tinyllama_proxy
+
+      - name: Enforce quality gates
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          reports = sorted(pathlib.Path("eval/reports").glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+          if not reports:
+              print("No evaluation report found.")
+              sys.exit(1)
+
+          latest = reports[0]
+          print(f"Analyzing report: {latest}")
+          data = json.loads(latest.read_text(encoding="utf-8"))
+          summary = data.get("summary", {})
+          json_pass = summary.get("json_schema_pass_rate")
+          keyword_recall = summary.get("avg_keyword_recall", 0.0)
+
+          print("=== EVALUATION METRICS SUMMARY ===")
+          print(f"JSON Schema Pass Rate: {json_pass}")
+          print(f"Average Keyword Recall: {keyword_recall}")
+
+          if json_pass is None or float(json_pass) < 1.0:
+              print("CRITICAL FAILURE: JSON Schema Pass Rate dropped below 1.0.")
+              sys.exit(1)
+
+          if float(keyword_recall) < 0.45:
+              print("WARNING: Keyword recall dropped below baseline threshold (0.45).")
+          else:
+              print("Keyword recall gate passed.")
+          PY
+
+      - name: Upload evaluation reports and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-evaluation-reports
+          path: |
+            eval/reports/
+            model.log
+          retention-days: 14
+
+      - name: Cleanup containers and processes
+        if: always()
+        run: |
+          docker rm -f llm-proxy || true
+          if [ -f model.pid ]; then
+            kill "$(cat model.pid)" || true
+          fi
