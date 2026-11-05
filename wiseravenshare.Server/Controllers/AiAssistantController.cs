@@ -211,17 +211,47 @@ public class AiAssistantController : ControllerBase
         {
             return BadRequest(new { message = "Message is required." });
         }
-
-        var enrichedRequest = await BuildCrawlerAwareRequestAsync(request, HttpContext.RequestAborted);
-        var result = await _defaultChatService.ChatAsync(enrichedRequest);
-
-        // If platform AI is not configured, fall back to the user's own connector.
-        if (!result.Success && TryGetUserConnector() is { Enabled: true, HasApiKey: true } connector)
+        var ct = HttpContext.RequestAborted;
+        var enrichedRequest = request;
+        try
         {
-            result = await UserConnectorChatAsync(connector, enrichedRequest, HttpContext.RequestAborted);
-        }
+            enrichedRequest = await BuildCrawlerAwareRequestAsync(request, ct);
+            var result = await _defaultChatService.ChatAsync(enrichedRequest);
 
-        return Ok(result);
+            // If platform AI is not configured, fall back to the user's own connector.
+            if (!result.Success && TryGetUserConnector() is { Enabled: true, HasApiKey: true } connector)
+            {
+                result = await UserConnectorChatAsync(connector, enrichedRequest, ct);
+            }
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "AI chat request failed.");
+
+            // Final fallback: attempt user connector even when platform path throws.
+            if (TryGetUserConnector() is { Enabled: true, HasApiKey: true } connector)
+            {
+                try
+                {
+                    var fallback = await UserConnectorChatAsync(connector, enrichedRequest, ct);
+                    return Ok(fallback);
+                }
+                catch (Exception connectorEx)
+                {
+                    _logger.LogWarning(connectorEx, "User connector fallback failed after platform chat exception.");
+                }
+            }
+
+            return Ok(new AiChatResponse
+            {
+                Success = false,
+                Reply = string.Empty,
+                Model = string.Empty,
+                Error = "The AI assistant is unavailable right now. Please try again in a moment."
+            });
+        }
     }
 
     /// <summary>
