@@ -15,6 +15,17 @@ const getApiBaseUrl = () => {
 
 const API_BASE_URL = getApiBaseUrl();
 const AUTH_ROUTE_PATHS = new Set(["/login", "/register"]);
+const NURAVEN_LLM_API_BASE = (import.meta.env.VITE_NURAVEN_LLM_API_URL || "https://wise-ravens.com/api").replace(/\/+$/, "");
+const KNOWLEDGE_SYNC_ENTITIES = new Set([
+  "Post",
+  "Comment",
+  "Profile",
+  "UserProfile",
+  "Podcast",
+  "LibraryItem",
+  "Article",
+  "MediaItem",
+]);
 
 let inMemoryToken = null;
 
@@ -24,6 +35,17 @@ const readStoredToken = () => {
   }
 
   return window.localStorage.getItem(ACCESS_TOKEN_KEY) || window.localStorage.getItem("token");
+};
+
+const readNuRavenToken = () => {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return inMemoryToken;
+  }
+  return (
+    window.localStorage.getItem("nr_token") ||
+    window.localStorage.getItem(ACCESS_TOKEN_KEY) ||
+    window.localStorage.getItem("token")
+  );
 };
 
 const writeStoredToken = (token) => {
@@ -128,6 +150,47 @@ const requestBlob = async (path, options = {}) => {
     throw error;
   }
   return response.blob();
+};
+
+const queueKnowledgeIngest = ({ entityName, action, record }) => {
+  if (!KNOWLEDGE_SYNC_ENTITIES.has(String(entityName))) {
+    return;
+  }
+
+  const token = readNuRavenToken();
+  if (!token || !record) {
+    return;
+  }
+
+  const id = record.id || record.Id || "unknown";
+  const title = `WiseRavenShare ${entityName} ${action} ${id}`;
+  const content = JSON.stringify(
+    {
+      entity: entityName,
+      action,
+      capturedAt: new Date().toISOString(),
+      payload: record,
+    },
+    null,
+    2
+  );
+
+  void fetch(`${NURAVEN_LLM_API_BASE}/assistant/knowledge/ingest`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      title,
+      content,
+      source: "wiseravenshare_entity_sync",
+      sourceUrl: typeof window !== "undefined" ? `${window.location.origin}` : null,
+      category: "wiseravenshare_data",
+      tags: ["wiseravenshare", "entity", String(entityName).toLowerCase(), String(action).toLowerCase()],
+      note: "Automatic knowledge sync from WiseRavenShare",
+    }),
+  }).catch(() => {});
 };
 
 const normalizeSameOriginPath = (candidateUrl, origin) => {
@@ -279,21 +342,27 @@ const entityClient = (entityName) => ({
   },
   async create(payload) {
     if (String(entityName || "").toLowerCase() === "post") {
-      return requestJson("/api/posts", {
+      const createdPost = await requestJson("/api/posts", {
         method: "POST",
         body: JSON.stringify(payload),
       });
+      queueKnowledgeIngest({ entityName: "Post", action: "create", record: createdPost });
+      return createdPost;
     }
-    return requestJson(`/api/entities/${encodeURIComponent(entityName)}`, {
+    const created = await requestJson(`/api/entities/${encodeURIComponent(entityName)}`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    queueKnowledgeIngest({ entityName, action: "create", record: created });
+    return created;
   },
   async update(id, payload) {
-    return requestJson(`/api/entities/${encodeURIComponent(entityName)}/${encodeURIComponent(id)}`, {
+    const updated = await requestJson(`/api/entities/${encodeURIComponent(entityName)}/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     });
+    queueKnowledgeIngest({ entityName, action: "update", record: updated });
+    return updated;
   },
   async updateMany(filter, update) {
     return requestJson(`/api/entities/${encodeURIComponent(entityName)}/bulk`, {
@@ -1268,5 +1337,4 @@ export const apiClient = {
     throw lastError;
   },
 };
-
 

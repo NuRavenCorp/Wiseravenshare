@@ -28,6 +28,7 @@ import KaraokePage from '@/pages/KaraokePage';
 import Library from '@/pages/Library';
 import Media from '@/pages/Media';
 import FMRadioPage from '@/pages/FMRadioPage';
+import RavenChat from '@/pages/RavenChat';
 import JoinFeed from '@/pages/JoinFeed';
 import Privacy from '@/pages/Privacy';
 import Terms from '@/pages/Terms';
@@ -81,6 +82,7 @@ const AuthenticatedApp = () => {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/media" element={<Media />} />
         <Route path="/fm-radio" element={<FMRadioPage />} />
+        <Route path="/ravenchat" element={<RavenChat />} />
         <Route path="/truthseeker" element={<TruthSeeker />} />
         <Route path="/journalism" element={<JournalismDashboard />} />
         <Route path="/ravensight" element={<Ravensight />} />

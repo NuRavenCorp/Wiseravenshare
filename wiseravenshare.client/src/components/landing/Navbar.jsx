@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Menu, X, MessageCircle, LogOut } from "lucide-react";
+import { Menu, X, MessageCircle, LogOut, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Image } from "@/components/ui/image";
 import { useAuth } from "@/lib/AuthContext";
@@ -98,6 +98,9 @@ export default function Navbar() {
               <Link to="/messages" className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5">
                 <MessageCircle className="w-4 h-4" /> Messages
               </Link>
+              <Link to="/ravenchat" className="text-sm text-accent hover:text-accent/80 transition-colors flex items-center gap-1.5">
+                <Bot className="w-4 h-4" /> RavenChat
+              </Link>
               <NotificationBell />
               <Button onClick={() => logout()} variant="outline" className="rounded-full px-6">
                 <LogOut className="w-4 h-4" /> Leave
@@ -156,6 +159,9 @@ export default function Navbar() {
               </Link>
               <Link to="/messages" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground flex items-center gap-1.5">
                 <MessageCircle className="w-4 h-4" /> Messages
+              </Link>
+              <Link to="/ravenchat" onClick={() => setOpen(false)} className="text-accent hover:text-accent/80 flex items-center gap-1.5">
+                <Bot className="w-4 h-4" /> RavenChat
               </Link>
               <Button onClick={() => logout()} variant="outline" className="rounded-full">
                 <LogOut className="w-4 h-4" /> Leave
