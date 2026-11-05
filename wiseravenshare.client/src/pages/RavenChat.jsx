@@ -188,9 +188,12 @@ export default function RavenChat() {
     } catch (err) {
       setMessages((prev) => prev.filter((m) => m.status !== "pending"));
       const message = err?.message || "Could not reach RavenChat.";
+      const status = Number(err?.status || 0);
       setError(
         message.includes("Failed to fetch")
           ? "Unable to reach NuRavenCorpLLM right now. Please try again in a moment."
+          : status >= 500
+            ? "RavenChat backend is still warming up. Please retry in a few moments."
           : message
       );
     } finally {

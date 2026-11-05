@@ -40,11 +40,19 @@ public class AssistantController : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateConversationDto dto)
     {
         var userId = User.GetUserId();
-        var conv = await _orchestrator.CreateConversationAsync(
-            userId,
-            dto.Title,
-            Enum.TryParse<AssistantPersona>(dto.Persona, true, out var p) ? p : AssistantPersona.Default);
-        return Ok(conv);
+        try
+        {
+            var conv = await _orchestrator.CreateConversationAsync(
+                userId,
+                dto.Title,
+                Enum.TryParse<AssistantPersona>(dto.Persona, true, out var p) ? p : AssistantPersona.Default);
+            return Ok(conv);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create conversation");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "Assistant conversation service is unavailable.");
+        }
     }
 
     [HttpGet("conversations")]
