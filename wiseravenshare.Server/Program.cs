@@ -2476,9 +2476,13 @@ else if (aiProvider is "deepseek")
 {
     builder.Services.AddScoped<IOllamaChatService, DeepSeekChatService>();
 }
-else if (aiProvider is "llamacpp" or "llama.cpp" or "llama-cpp" or "local" or "nuravencorp" or "nuravencorp-llm" or "nrc-llm")
+else if (aiProvider is "llamacpp" or "llama.cpp" or "llama-cpp" or "local")
 {
     builder.Services.AddHttpClient<IOllamaChatService, LocalChatService>();
+}
+else if (aiProvider is "nuravencorp" or "nuravencorp-llm" or "nrc-llm")
+{
+    builder.Services.AddHttpClient<IOllamaChatService, Wiseravenshare.Server.Services.AiAssistant.NuRavenCorpLlmChatService>();
 }
 else
 {

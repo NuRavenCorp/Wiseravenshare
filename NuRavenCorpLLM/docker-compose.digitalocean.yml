@@ -1,0 +1,48 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+    entrypoint: ["/bin/sh", "-c", "ollama pull ${OLLAMA_MODEL}"]
+    restart: "no"
+
+  nuravencorpllm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nuravencorpllm
+    restart: unless-stopped
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+    environment:
+      NURAVENCORP_LLM_BASE_URL: http://ollama:11434
+      NURAVENCORP_LLM_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      NURAVENCORP_PORT: 5011
+      NURAVENCORP_REQUIRE_LLM_READY_ON_STARTUP: "true"
+      NURAVENCORP_WAIT_FOR_LLM_TIMEOUT_SECONDS: "600"
+      NURAVENCORP_WAIT_FOR_LLM_INTERVAL_SECONDS: "5"
+    ports:
+      - "5011:5011"
+
+volumes:
+  ollama-data:
