@@ -4,15 +4,18 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Bot, Send, Plus, Loader2, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { resolveApiUrl } from "@/api/client";
 
 const configuredNuRavenApiBase = typeof import.meta.env.VITE_NURAVEN_LLM_API_URL === "string"
   ? import.meta.env.VITE_NURAVEN_LLM_API_URL.trim().replace(/\/+$/, "")
   : "";
+const localAssistantApiBase = resolveApiUrl("/api").replace(/\/+$/, "");
 
 const assistantBaseCandidates = Array.from(
   new Set(
     [
       configuredNuRavenApiBase,
+      localAssistantApiBase,
       "https://wise-ravens.com/api",
       "https://www.wise-ravens.com/api",
     ].filter(Boolean)
