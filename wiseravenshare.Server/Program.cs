@@ -2489,6 +2489,11 @@ else
     builder.Services.AddHttpClient<IOllamaChatService, GradientChatService>();
 }
 builder.Services.AddHttpClient<IUserAiConnectorChatService, UserAiConnectorChatService>();
+// RavenAssistant – named client for the voter-alliance-style NuRavenCorpLLM bridge.
+builder.Services.AddHttpClient("RavenAssistant", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(90);
+});
 // Background AI job queue (queue + poll + prompt cache) for bursty creator features.
 builder.Services.AddSingleton<IAiJobQueue, AiJobQueueService>();
 builder.Services.AddHostedService(sp => (AiJobQueueService)sp.GetRequiredService<IAiJobQueue>());

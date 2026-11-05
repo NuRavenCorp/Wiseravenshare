@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useState, useRef } from "react";
+import { useAuth } from "@/lib/AuthContext";
 import Navbar from "@/components/landing/Navbar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Bot, Send, Plus, Loader2, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { apiClient } from "@/api/client";
+
+const API_BASE = import.meta.env.DEV ? "/api" : (import.meta.env.VITE_API_URL || "/api");
 
 function MessageBubble({ message }) {
   const isUser = message.role === "user";
-  const isThinking = message.role === "assistant" && !message.content && message.status === "pending";
+  const isThinking = message.role === "assistant" && !message.content;
 
   return (
     <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
@@ -23,7 +25,11 @@ function MessageBubble({ message }) {
             <Loader2 className="w-4 h-4 animate-spin" /> Raven is thinking...
           </div>
         ) : message.content ? (
-          <div className={`rounded-2xl px-4 py-3 ${isUser ? "bg-primary text-primary-foreground" : "bg-card border border-border text-foreground"}`}>
+          <div className={`rounded-2xl px-4 py-3 ${
+            isUser
+              ? "bg-primary text-primary-foreground"
+              : "bg-card border border-border text-foreground"
+          }`}>
             {isUser ? (
               <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
             ) : (
@@ -39,93 +45,25 @@ function MessageBubble({ message }) {
 }
 
 export default function RavenChat() {
-  const [assistantApiMode, setAssistantApiMode] = useState("conversations");
-  const [conversation, setConversation] = useState(null);
+  const { user } = useAuth();
+  const [conversationId, setConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef(null);
 
-  const requestAssistant = async (path, init = {}) => {
-    return apiClient.requestJson(`/api${path}`, init);
-  };
-
-  const shouldFallbackToChat = (err) =>
-    [404, 405, 500, 502, 503, 504].includes(Number(err?.status));
-
-  const sendViaChatEndpoint = async (text, history) => {
-    try {
-      return await requestAssistant("/AiAssistant/chat", {
-        method: "POST",
-        body: JSON.stringify({ message: text, history, useCrawlerContext: false }),
-      });
-    } catch (err) {
-      if (Number(err?.status) < 500) {
-        throw err;
-      }
-
-      return requestAssistant("/AiAssistant/chat", {
-        method: "POST",
-        body: JSON.stringify({ message: text, useCrawlerContext: false }),
-      });
-    }
-  };
-
-  const buildHistory = (sourceMessages) =>
-    sourceMessages
-      .filter((msg) => (msg.role === "user" || msg.role === "assistant") && String(msg.content || "").trim())
-      .map((msg) => ({ role: msg.role, content: msg.content }));
-
-  const extractAssistantText = (payload) =>
-    payload?.content ||
-    payload?.Content ||
-    payload?.reply ||
-    payload?.Reply ||
-    payload?.response ||
-    payload?.Response ||
+  const getAuthToken = () =>
+    localStorage.getItem("wiseravenshare_access_token") ||
+    localStorage.getItem("token") ||
     "";
 
-  const startNewConversation = async () => {
+  const resetConversation = () => {
+    setConversationId(null);
+    setMessages([]);
     setError("");
-    if (assistantApiMode === "chat") {
-      const localConversation = { id: `local-${Date.now()}` };
-      setConversation(localConversation);
-      setMessages([]);
-      return localConversation;
-    }
-
-    try {
-      const conv = await requestAssistant("/assistant/conversations", {
-        method: "POST",
-        body: JSON.stringify({ title: "RavenChat", persona: "Default" }),
-      });
-      const normalizedConversation = {
-        ...conv,
-        id: conv?.id || conv?.Id,
-      };
-      setConversation(normalizedConversation);
-      setMessages([]);
-      return normalizedConversation;
-    } catch (err) {
-      if (shouldFallbackToChat(err)) {
-        setAssistantApiMode("chat");
-        const localConversation = { id: `local-${Date.now()}` };
-        setConversation(localConversation);
-        setMessages([]);
-        return localConversation;
-      }
-      throw err;
-    }
+    setInput("");
   };
-
-  useEffect(() => {
-    startNewConversation().catch((err) => setError(err?.message || "Unable to connect to RavenChat."));
-  }, []);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
 
   const sendMessage = async (forcedText) => {
     if (sending) return;
@@ -136,79 +74,101 @@ export default function RavenChat() {
     setSending(true);
     setError("");
 
+    const userMsg = { id: `u-${Date.now()}`, role: "user", content: text };
+    const pendingMsg = { id: `p-${Date.now()}`, role: "assistant", content: "" };
+    setMessages((prev) => [...prev, userMsg, pendingMsg]);
+
+    const history = messages
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .slice(-12)
+      .map((m) => ({ Role: m.role, Content: m.content }));
+
     try {
-      let conv = conversation;
-      if (!conv) conv = await startNewConversation();
+      const token = getAuthToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const userMessage = { id: `u-${Date.now()}`, role: "user", content: text };
-      const pendingMessage = { id: `p-${Date.now()}`, role: "assistant", content: "", status: "pending" };
-      setMessages((prev) => [...prev, userMessage, pendingMessage]);
+      const abortController = new AbortController();
+      const abortTimer = setTimeout(() => abortController.abort(), 70000);
 
-      const history = buildHistory(messages);
-      let reply;
-      let role = "assistant";
-      let content = "";
-
-      if (assistantApiMode === "chat") {
-        reply = await sendViaChatEndpoint(text, history);
-        content = extractAssistantText(reply);
-      } else {
-        try {
-          reply = await requestAssistant(`/assistant/conversations/${conv.id}/messages`, {
-            method: "POST",
-            body: JSON.stringify({ text, isVoice: false }),
-          });
-          role = String(reply?.role || reply?.Role || "assistant").toLowerCase();
-          content = extractAssistantText(reply);
-        } catch (err) {
-          if (shouldFallbackToChat(err)) {
-            setAssistantApiMode("chat");
-            reply = await sendViaChatEndpoint(text, history);
-            role = "assistant";
-            content = extractAssistantText(reply);
-          } else {
-            throw err;
-          }
-        }
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/raven-assistant/chat`, {
+          method: "POST",
+          headers,
+          signal: abortController.signal,
+          body: JSON.stringify({
+            Message: text,
+            ConversationId: conversationId || undefined,
+            History: history,
+          }),
+        });
+      } finally {
+        clearTimeout(abortTimer);
       }
 
-      if (!String(content || "").trim()) {
-        content = "I couldn't generate a response right now.";
+      const contentType = (res.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("application/json")) {
+        throw new Error("RavenChat API is unavailable on this domain.");
       }
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.message || `Request failed (${res.status})`);
+      }
+
+      if (!payload || (payload.Answer == null && payload.answer == null)) {
+        throw new Error("RavenChat did not return a valid response.");
+      }
+
+      const newConvId = payload?.ConversationId ?? payload?.conversationId;
+      if (newConvId) setConversationId(newConvId);
+
+      const answer = payload?.Answer ?? payload?.answer ?? "No response received.";
 
       setMessages((prev) =>
         prev
-          .filter((m) => m.id !== pendingMessage.id)
-          .concat({
-            id: reply?.id || reply?.Id || `a-${Date.now()}`,
-            role,
-            content,
-          })
+          .filter((m) => m.id !== pendingMsg.id)
+          .concat({ id: `a-${Date.now()}`, role: "assistant", content: answer })
       );
     } catch (err) {
-      setMessages((prev) => prev.filter((m) => m.status !== "pending"));
-      const message = err?.message || "Could not reach RavenChat.";
-      const status = Number(err?.status || 0);
-      setError(
-        message.includes("Failed to fetch")
-          ? "Unable to reach NuRavenCorpLLM right now. Please try again in a moment."
-          : status >= 500
-            ? "RavenChat backend is still warming up. Please retry in a few moments."
-          : message
+      setMessages((prev) => prev.filter((m) => m.id !== pendingMsg.id));
+
+      if (err?.name === "AbortError") {
+        setMessages((prev) =>
+          prev.concat({
+            id: `a-timeout-${Date.now()}`,
+            role: "assistant",
+            content: "I am taking too long to respond. Please try again or ask a shorter question.",
+          })
+        );
+        setError("RavenChat request timed out. Please try again.");
+        return;
+      }
+
+      setMessages((prev) =>
+        prev.concat({
+          id: `a-err-${Date.now()}`,
+          role: "assistant",
+          content:
+            "I could not reach the assistant service right now. You can still navigate the platform directly.",
+        })
       );
+      setError(err?.message || "Unable to reach RavenChat. Please try again.");
     } finally {
       setSending(false);
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
     }
   };
 
-  const handleKeyDown = (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
       sendMessage();
     }
   };
 
-  const starters = [
+  const STARTERS = [
     "Summarize top platform updates from my activity.",
     "Help me draft a post for the Wiseraven feed.",
     "What should I research next to improve my content?",
@@ -229,12 +189,11 @@ export default function RavenChat() {
                 RavenChat <Sparkles className="w-4 h-4 text-violet-500" />
               </h1>
               <p className="text-xs text-muted-foreground">
-                Robotic raven assistant powered by NuRavenCorpLLM
-                {" · using login auth"}
+                Powered by NuRavenCorpLLM · Ask me anything about the platform
               </p>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={startNewConversation} className="gap-1.5">
+          <Button variant="outline" size="sm" onClick={resetConversation} className="gap-1.5">
             <Plus className="w-4 h-4" /> New Chat
           </Button>
         </div>
@@ -246,33 +205,37 @@ export default function RavenChat() {
             </div>
           )}
 
-          {messages.length === 0 && (
+          {messages.length === 0 && !error && (
             <div className="flex flex-col items-center justify-center h-full gap-5 py-10 text-center">
               <div className="w-16 h-16 rounded-full bg-violet-100 flex items-center justify-center">
                 <Bot className="w-8 h-8 text-violet-600" />
               </div>
               <div>
                 <p className="font-semibold text-foreground text-lg">RavenChat is ready</p>
-                <p className="text-muted-foreground text-sm mt-1">Ask about strategy, content, research, or your next move.</p>
+                <p className="text-muted-foreground text-sm mt-1">
+                  Ask about strategy, content, research, or your next move.
+                </p>
               </div>
               <div className="grid md:grid-cols-2 gap-2 w-full max-w-lg">
-                {starters.map((starter) => (
+                {STARTERS.map((s) => (
                   <button
-                    key={starter}
-                    onClick={() => sendMessage(starter)}
+                    key={s}
+                    onClick={() => sendMessage(s)}
                     className="text-xs text-left bg-background hover:bg-violet-50 border border-border hover:border-violet-300 text-muted-foreground hover:text-violet-700 rounded-xl px-3 py-2 transition-colors"
                     disabled={sending}
                   >
-                    {starter}
+                    {s}
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+          {messages
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .map((msg, i) => (
+              <MessageBubble key={i} message={msg} />
+            ))}
 
           <div ref={bottomRef} />
         </div>
@@ -280,17 +243,24 @@ export default function RavenChat() {
         <div className="flex gap-2 items-end">
           <Textarea
             value={input}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Talk to RavenChat..."
             rows={2}
             className="resize-none flex-1"
             disabled={sending}
           />
-          <Button onClick={sendMessage} disabled={!input.trim() || sending} className="h-10 px-4">
+          <Button
+            onClick={() => sendMessage()}
+            disabled={!input.trim() || sending}
+            className="h-10 px-4"
+          >
             {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </Button>
         </div>
+        <p className="text-center text-xs text-muted-foreground mt-2">
+          AI responses are for guidance only. Always verify important information.
+        </p>
       </div>
     </div>
   );
