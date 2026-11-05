@@ -64,6 +64,9 @@ services:
       Gradient__BaseUrl: ${GRADIENT_BASE_URL:-https://ingress.do-ai.run/v1}
       Gradient__DefaultModel: ${GRADIENT_DEFAULT_MODEL:-gpt-4o-mini}
       Gradient__InferenceKey: ${GRADIENT_INFERENCE_KEY:-}
+      RavenAssistant__Llm__BaseUrl: ${RAVEN_ASSISTANT_LLM_BASE_URL:-http://nuravencorpllm:5011}
+      RavenAssistant__Llm__ChatCompletionsPath: ${RAVEN_ASSISTANT_LLM_PATH:-/v1/generate}
+      RavenAssistant__Llm__ApiKey: ${RAVEN_ASSISTANT_LLM_API_KEY:-}
       Stripe__PublishableKey: ${STRIPE_PUBLISHABLE_KEY:-}
       Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
@@ -334,6 +337,29 @@ services:
     networks:
       - wiseravenshare-net
     profiles: ["with-ai"]
+
+  # ── NuRavenCorpLLM — RavenChat AI bridge ─────────────────────────────────
+  nuravencorpllm:
+    build:
+      context: ../NuRavenCorpLLM
+      dockerfile: Dockerfile
+    container_name: ${WS_CONTAINER_PREFIX:-wiseravenshare}-nuravencorpllm
+    restart: unless-stopped
+    environment:
+      NURAVENCORP_PORT: 5011
+      NURAVENCORP_LLM_BASE_URL: ${NURAVENCORP_LLM_BASE_URL:-http://ollama:11434}
+      NURAVENCORP_LLM_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3.2}
+      NURAVENCORP_REQUIRE_LLM_READY_ON_STARTUP: "false"
+    ports:
+      - "${NURAVENCORP_PORT:-5011}:5011"
+    networks:
+      - wiseravenshare-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:5011/health', timeout=4).read()"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
 
   redis:
     image: redis:7-alpine

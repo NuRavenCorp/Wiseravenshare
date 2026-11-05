@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Bot, Send, Plus, Loader2, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-
-const API_BASE = import.meta.env.DEV ? "/api" : (import.meta.env.VITE_API_URL || "/api");
+import { apiClient, resolveApiUrl } from "@/api/client";
 
 function MessageBubble({ message }) {
   const isUser = message.role === "user";
@@ -53,11 +52,6 @@ export default function RavenChat() {
   const [error, setError] = useState("");
   const bottomRef = useRef(null);
 
-  const getAuthToken = () =>
-    localStorage.getItem("wiseravenshare_access_token") ||
-    localStorage.getItem("token") ||
-    "";
-
   const resetConversation = () => {
     setConversationId(null);
     setMessages([]);
@@ -84,42 +78,15 @@ export default function RavenChat() {
       .map((m) => ({ Role: m.role, Content: m.content }));
 
     try {
-      const token = getAuthToken();
-      const headers = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      const abortController = new AbortController();
-      const abortTimer = setTimeout(() => abortController.abort(), 70000);
-
-      let res;
-      try {
-        res = await fetch(`${API_BASE}/raven-assistant/chat`, {
-          method: "POST",
-          headers,
-          signal: abortController.signal,
-          body: JSON.stringify({
-            Message: text,
-            ConversationId: conversationId || undefined,
-            History: history,
-          }),
-        });
-      } finally {
-        clearTimeout(abortTimer);
-      }
-
-      const contentType = (res.headers.get("content-type") || "").toLowerCase();
-      if (!contentType.includes("application/json")) {
-        throw new Error("RavenChat API is unavailable on this domain.");
-      }
-
-      const payload = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(payload?.message || `Request failed (${res.status})`);
-      }
-
-      if (!payload || (payload.Answer == null && payload.answer == null)) {
-        throw new Error("RavenChat did not return a valid response.");
-      }
+      // Use apiClient.requestJson — identical auth + base-URL path as the rest of the app.
+      const payload = await apiClient.requestJson("/api/raven-assistant/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          Message: text,
+          ConversationId: conversationId || undefined,
+          History: history,
+        }),
+      });
 
       const newConvId = payload?.ConversationId ?? payload?.conversationId;
       if (newConvId) setConversationId(newConvId);
@@ -134,27 +101,18 @@ export default function RavenChat() {
     } catch (err) {
       setMessages((prev) => prev.filter((m) => m.id !== pendingMsg.id));
 
-      if (err?.name === "AbortError") {
-        setMessages((prev) =>
-          prev.concat({
-            id: `a-timeout-${Date.now()}`,
-            role: "assistant",
-            content: "I am taking too long to respond. Please try again or ask a shorter question.",
-          })
-        );
-        setError("RavenChat request timed out. Please try again.");
-        return;
-      }
+      const msg = err?.message || "Unable to reach RavenChat.";
 
       setMessages((prev) =>
         prev.concat({
           id: `a-err-${Date.now()}`,
           role: "assistant",
-          content:
-            "I could not reach the assistant service right now. You can still navigate the platform directly.",
+          content: "I could not reach the assistant right now. Please try again in a moment.",
         })
       );
-      setError(err?.message || "Unable to reach RavenChat. Please try again.");
+      setError(msg.includes("Failed to fetch")
+        ? "Unable to reach NuRavenCorpLLM. Make sure the server is running."
+        : msg);
     } finally {
       setSending(false);
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
