@@ -34,6 +34,19 @@ function getAssistantTokenCandidates() {
   );
 }
 
+function isLikelySameOrigin(candidateBase) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const absolute = new URL(candidateBase, window.location.origin);
+    return absolute.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 function MessageBubble({ message }) {
   const isUser = message.role === "user";
   const isThinking = message.role === "assistant" && !message.content && message.status === "pending";
@@ -77,20 +90,21 @@ export default function RavenChat() {
 
   const requestAssistant = async (path, init = {}) => {
     const tokenCandidates = getAssistantTokenCandidates();
-    if (tokenCandidates.length === 0) {
-      throw new Error("You need to sign in first.");
-    }
+    const authCandidates = [...tokenCandidates, null];
 
     let lastError = null;
 
     for (const base of assistantBaseCandidates) {
-      for (const token of tokenCandidates) {
+      const useCookieSession = isLikelySameOrigin(base);
+
+      for (const token of authCandidates) {
         try {
           const response = await fetch(`${base}${path}`, {
             ...init,
+            credentials: useCookieSession ? "include" : "omit",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
               ...(init.headers || {}),
             },
           });
