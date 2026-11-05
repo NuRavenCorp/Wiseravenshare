@@ -4,45 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Bot, Send, Plus, Loader2, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { resolveApiUrl } from "@/api/client";
-
-const configuredNuRavenApiBase = typeof import.meta.env.VITE_NURAVEN_LLM_API_URL === "string"
-  ? import.meta.env.VITE_NURAVEN_LLM_API_URL.trim().replace(/\/+$/, "")
-  : "";
-const localAssistantApiBase = resolveApiUrl("/api").replace(/\/+$/, "");
-
-const assistantBaseCandidates = Array.from(
-  new Set(
-    [
-      localAssistantApiBase,
-      configuredNuRavenApiBase,
-    ].filter(Boolean)
-  )
-);
-
-function getLoginTokenCandidates() {
-  return Array.from(
-    new Set(
-      [
-        localStorage.getItem("wiseravenshare_access_token"),
-        localStorage.getItem("token"),
-      ].filter(Boolean)
-    )
-  );
-}
-
-function isLikelySameOrigin(candidateBase) {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  try {
-    const absolute = new URL(candidateBase, window.location.origin);
-    return absolute.origin === window.location.origin;
-  } catch {
-    return false;
-  }
-}
+import { apiClient } from "@/api/client";
 
 function MessageBubble({ message }) {
   const isUser = message.role === "user";
@@ -82,53 +44,10 @@ export default function RavenChat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const [connectedBaseUrl, setConnectedBaseUrl] = useState("");
   const bottomRef = useRef(null);
 
   const requestAssistant = async (path, init = {}) => {
-    const tokenCandidates = getLoginTokenCandidates();
-    const authCandidates = [...tokenCandidates, null];
-
-    let lastError = null;
-
-    for (const base of assistantBaseCandidates) {
-      const useCookieSession = isLikelySameOrigin(base);
-      if (!useCookieSession && tokenCandidates.length === 0) {
-        continue;
-      }
-
-      for (const token of authCandidates) {
-        try {
-          const response = await fetch(`${base}${path}`, {
-            ...init,
-            credentials: useCookieSession ? "include" : "omit",
-            headers: {
-              "Content-Type": "application/json",
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              ...(init.headers || {}),
-            },
-          });
-
-          const payload = await response.json().catch(() => null);
-          if (!response.ok) {
-            const message = payload?.message || `Assistant request failed (${response.status})`;
-            if (response.status === 401 || response.status === 403 || response.status === 404 || response.status >= 500) {
-              lastError = new Error(message);
-              continue;
-            }
-
-            throw new Error(message);
-          }
-
-          setConnectedBaseUrl(base);
-          return payload;
-        } catch (err) {
-          lastError = err;
-        }
-      }
-    }
-
-    throw lastError || new Error("Unable to reach NuRavenCorpLLM assistant.");
+    return apiClient.requestJson(`/api${path}`, init);
   };
 
   const startNewConversation = async () => {
@@ -230,7 +149,7 @@ export default function RavenChat() {
               </h1>
               <p className="text-xs text-muted-foreground">
                 Robotic raven assistant powered by NuRavenCorpLLM
-                {connectedBaseUrl ? ` · connected to ${connectedBaseUrl}` : ""}
+                {" · using login auth"}
               </p>
             </div>
           </div>
