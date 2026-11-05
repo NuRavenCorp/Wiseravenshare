@@ -2686,7 +2686,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var path = context.HttpContext.Request.Path;
 
                 if (!string.IsNullOrWhiteSpace(accessToken)
-                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/api/hubs/collaboration") || path.StartsWithSegments("/api/hubs/communique") || path.StartsWithSegments("/hubs") || path.StartsWithSegments("/api/hubs/social")))
+                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/api/hubs/collaboration") || path.StartsWithSegments("/api/hubs/communique") || path.StartsWithSegments("/hubs") || path.StartsWithSegments("/api/hubs/social") || path.StartsWithSegments("/api/hubs/assistant")))
                 {
                     context.Token = accessToken;
                 }
@@ -3308,6 +3308,7 @@ app.MapHub<Wiseravenshare.Server.Hubs.CallHub>("/api/hubs/communique");
 app.MapHub<WebRtcSignalingHub>("/api/hubs/webrtc");
 app.MapHub<LiveChatHub>("/api/hubs/live-chat");
 app.MapHub<SocialHub>("/api/hubs/social");
+app.MapHub<WiseRavenShare.Server.API.Hubs.AssistantHub>("/api/hubs/assistant");
 
 if (frontendDistExists)
 {
