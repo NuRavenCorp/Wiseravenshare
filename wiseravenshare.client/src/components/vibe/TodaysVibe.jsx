@@ -25,8 +25,7 @@ const startOfToday = () => {
 };
 
 export default function TodaysVibe() {
-  const { isAuthenticated } = useAuth();
-  const [user, setUser] = useState(null);
+  const { isAuthenticated, user } = useAuth();
   const [distribution, setDistribution] = useState([]);
   const [total, setTotal] = useState(0);
   const [recent, setRecent] = useState([]);
@@ -36,10 +35,16 @@ export default function TodaysVibe() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  const resolveUserId = useCallback((authUser) => {
+    const candidate = authUser?.id ?? authUser?.user_id ?? authUser?.userId ?? authUser?.sub;
+    return candidate ? String(candidate) : "";
+  }, []);
+
   const load = useCallback(async () => {
     const since = startOfToday();
     try {
-      const [agg, feedPage] = await Promise.all([
+      const userId = resolveUserId(user);
+      const [agg, feedPage, myVibePage] = await Promise.all([
         apiClient.entities.Vibe.aggregate({
           query: { created_date: { $gte: since } },
           groupBy: "mood",
@@ -49,37 +54,39 @@ export default function TodaysVibe() {
           { created_date: { $gte: since } },
           { sort: "-created_date", limit: 50 }
         ),
+        isAuthenticated && userId
+          ? apiClient.entities.Vibe.filter(
+              { created_by_id: userId },
+              { sort: "-updated_date", limit: 1 }
+            )
+          : Promise.resolve({ items: [] }),
       ]);
       const rows = (agg.rows || []).sort((a, b) => b.count - a.count);
       setDistribution(rows);
       setTotal(rows.reduce((s, r) => s + r.count, 0));
       const items = feedPage.items || [];
       setRecent(items.slice(0, 8));
-      if (isAuthenticated) {
-        const me = await apiClient.auth.me().catch(() => null);
-        if (me) {
-          setUser(me);
-          const mine = items.find((v) => v.created_by_id === me.id);
-          if (mine) {
-            setMyVibe(mine);
-            setSelectedMood(mine.mood);
-            setNote(mine.note || "");
-          }
-        }
+      const mine = (myVibePage?.items || [])[0] || null;
+      if (mine) {
+        setMyVibe(mine);
+        setSelectedMood(mine.mood || "");
+        setNote(mine.note || "");
+      } else {
+        setMyVibe(null);
       }
     } catch {
       // soft fail — widget degrades to empty state
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, resolveUserId, user]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const submit = async () => {
-    if (!selectedMood || !user) return;
+    if (!selectedMood || !resolveUserId(user)) return;
     setSubmitting(true);
     try {
       if (myVibe) {

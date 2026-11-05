@@ -13,7 +13,7 @@ const startOfToday = () => {
 };
 
 export default function VibeSidebarWidget() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [myVibe, setMyVibe] = useState(null);
   const [flockTop, setFlockTop] = useState(null);
   const [flockCount, setFlockCount] = useState(0);
@@ -21,37 +21,39 @@ export default function VibeSidebarWidget() {
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const resolveUserId = useCallback((authUser) => {
+    const candidate = authUser?.id ?? authUser?.user_id ?? authUser?.userId ?? authUser?.sub;
+    return candidate ? String(candidate) : "";
+  }, []);
+
   const load = useCallback(async () => {
     const since = startOfToday();
     try {
-      const [agg, feedPage] = await Promise.all([
+      const userId = resolveUserId(user);
+      const [agg, myVibePage] = await Promise.all([
         apiClient.entities.Vibe.aggregate({
           query: { created_date: { $gte: since } },
           groupBy: "mood",
           count: true,
         }),
-        apiClient.entities.Vibe.filter(
-          { created_date: { $gte: since } },
-          { sort: "-created_date", limit: 50 }
-        ),
+        isAuthenticated && userId
+          ? apiClient.entities.Vibe.filter(
+              { created_by_id: userId },
+              { sort: "-updated_date", limit: 1 }
+            )
+          : Promise.resolve({ items: [] }),
       ]);
       const rows = (agg.rows || []).sort((a, b) => b.count - a.count);
       setFlockCount(rows.reduce((s, r) => s + r.count, 0));
-      if (rows[0]) setFlockTop(MOOD_MAP[rows[0].mood]);
-      const items = feedPage.items || [];
-      if (isAuthenticated) {
-        const me = await apiClient.auth.me().catch(() => null);
-        if (me) {
-          const mine = items.find((v) => v.created_by_id === me.id);
-          if (mine) setMyVibe(mine);
-        }
-      }
+      setFlockTop(rows[0] ? MOOD_MAP[rows[0].mood] : null);
+      const mine = (myVibePage?.items || [])[0] || null;
+      setMyVibe(mine);
     } catch {
       // soft fail
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, resolveUserId, user]);
 
   useEffect(() => {
     load();
