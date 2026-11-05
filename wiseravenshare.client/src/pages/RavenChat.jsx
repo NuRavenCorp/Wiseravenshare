@@ -39,6 +39,7 @@ function MessageBubble({ message }) {
 }
 
 export default function RavenChat() {
+  const [assistantApiMode, setAssistantApiMode] = useState("conversations");
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -50,19 +51,51 @@ export default function RavenChat() {
     return apiClient.requestJson(`/api${path}`, init);
   };
 
+  const buildHistory = (sourceMessages) =>
+    sourceMessages
+      .filter((msg) => (msg.role === "user" || msg.role === "assistant") && String(msg.content || "").trim())
+      .map((msg) => ({ role: msg.role, content: msg.content }));
+
+  const extractAssistantText = (payload) =>
+    payload?.content ||
+    payload?.Content ||
+    payload?.reply ||
+    payload?.Reply ||
+    payload?.response ||
+    payload?.Response ||
+    "";
+
   const startNewConversation = async () => {
     setError("");
-    const conv = await requestAssistant("/assistant/conversations", {
-      method: "POST",
-      body: JSON.stringify({ title: "RavenChat", persona: "Default" }),
-    });
-    const normalizedConversation = {
-      ...conv,
-      id: conv?.id || conv?.Id,
-    };
-    setConversation(normalizedConversation);
-    setMessages([]);
-    return normalizedConversation;
+    if (assistantApiMode === "chat") {
+      const localConversation = { id: `local-${Date.now()}` };
+      setConversation(localConversation);
+      setMessages([]);
+      return localConversation;
+    }
+
+    try {
+      const conv = await requestAssistant("/assistant/conversations", {
+        method: "POST",
+        body: JSON.stringify({ title: "RavenChat", persona: "Default" }),
+      });
+      const normalizedConversation = {
+        ...conv,
+        id: conv?.id || conv?.Id,
+      };
+      setConversation(normalizedConversation);
+      setMessages([]);
+      return normalizedConversation;
+    } catch (err) {
+      if (err?.status === 404 || err?.status === 405) {
+        setAssistantApiMode("chat");
+        const localConversation = { id: `local-${Date.now()}` };
+        setConversation(localConversation);
+        setMessages([]);
+        return localConversation;
+      }
+      throw err;
+    }
   };
 
   useEffect(() => {
@@ -90,13 +123,43 @@ export default function RavenChat() {
       const pendingMessage = { id: `p-${Date.now()}`, role: "assistant", content: "", status: "pending" };
       setMessages((prev) => [...prev, userMessage, pendingMessage]);
 
-      const reply = await requestAssistant(`/assistant/conversations/${conv.id}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ text, isVoice: false }),
-      });
+      const history = buildHistory(messages);
+      let reply;
+      let role = "assistant";
+      let content = "";
 
-      const role = String(reply?.role || reply?.Role || "assistant").toLowerCase();
-      const content = reply?.content || reply?.Content || "";
+      if (assistantApiMode === "chat") {
+        reply = await requestAssistant("/AiAssistant/chat", {
+          method: "POST",
+          body: JSON.stringify({ message: text, history }),
+        });
+        content = extractAssistantText(reply);
+      } else {
+        try {
+          reply = await requestAssistant(`/assistant/conversations/${conv.id}/messages`, {
+            method: "POST",
+            body: JSON.stringify({ text, isVoice: false }),
+          });
+          role = String(reply?.role || reply?.Role || "assistant").toLowerCase();
+          content = extractAssistantText(reply);
+        } catch (err) {
+          if (err?.status === 404 || err?.status === 405) {
+            setAssistantApiMode("chat");
+            reply = await requestAssistant("/AiAssistant/chat", {
+              method: "POST",
+              body: JSON.stringify({ message: text, history }),
+            });
+            role = "assistant";
+            content = extractAssistantText(reply);
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      if (!String(content || "").trim()) {
+        content = "I couldn't generate a response right now.";
+      }
 
       setMessages((prev) =>
         prev
