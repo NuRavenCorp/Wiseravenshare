@@ -14,19 +14,16 @@ const localAssistantApiBase = resolveApiUrl("/api").replace(/\/+$/, "");
 const assistantBaseCandidates = Array.from(
   new Set(
     [
-      configuredNuRavenApiBase,
       localAssistantApiBase,
-      "https://wise-ravens.com/api",
-      "https://www.wise-ravens.com/api",
+      configuredNuRavenApiBase,
     ].filter(Boolean)
   )
 );
 
-function getAssistantTokenCandidates() {
+function getLoginTokenCandidates() {
   return Array.from(
     new Set(
       [
-        localStorage.getItem("nr_token"),
         localStorage.getItem("wiseravenshare_access_token"),
         localStorage.getItem("token"),
       ].filter(Boolean)
@@ -89,13 +86,16 @@ export default function RavenChat() {
   const bottomRef = useRef(null);
 
   const requestAssistant = async (path, init = {}) => {
-    const tokenCandidates = getAssistantTokenCandidates();
+    const tokenCandidates = getLoginTokenCandidates();
     const authCandidates = [...tokenCandidates, null];
 
     let lastError = null;
 
     for (const base of assistantBaseCandidates) {
       const useCookieSession = isLikelySameOrigin(base);
+      if (!useCookieSession && tokenCandidates.length === 0) {
+        continue;
+      }
 
       for (const token of authCandidates) {
         try {
