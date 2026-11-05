@@ -51,6 +51,9 @@ export default function RavenChat() {
     return apiClient.requestJson(`/api${path}`, init);
   };
 
+  const shouldFallbackToChat = (err) =>
+    [404, 405, 500, 502, 503, 504].includes(Number(err?.status));
+
   const buildHistory = (sourceMessages) =>
     sourceMessages
       .filter((msg) => (msg.role === "user" || msg.role === "assistant") && String(msg.content || "").trim())
@@ -87,7 +90,7 @@ export default function RavenChat() {
       setMessages([]);
       return normalizedConversation;
     } catch (err) {
-      if (err?.status === 404 || err?.status === 405) {
+      if (shouldFallbackToChat(err)) {
         setAssistantApiMode("chat");
         const localConversation = { id: `local-${Date.now()}` };
         setConversation(localConversation);
@@ -131,7 +134,7 @@ export default function RavenChat() {
       if (assistantApiMode === "chat") {
         reply = await requestAssistant("/AiAssistant/chat", {
           method: "POST",
-          body: JSON.stringify({ message: text, history }),
+          body: JSON.stringify({ message: text, history, useCrawlerContext: false }),
         });
         content = extractAssistantText(reply);
       } else {
@@ -143,11 +146,11 @@ export default function RavenChat() {
           role = String(reply?.role || reply?.Role || "assistant").toLowerCase();
           content = extractAssistantText(reply);
         } catch (err) {
-          if (err?.status === 404 || err?.status === 405) {
+          if (shouldFallbackToChat(err)) {
             setAssistantApiMode("chat");
             reply = await requestAssistant("/AiAssistant/chat", {
               method: "POST",
-              body: JSON.stringify({ message: text, history }),
+              body: JSON.stringify({ message: text, history, useCrawlerContext: false }),
             });
             role = "assistant";
             content = extractAssistantText(reply);
