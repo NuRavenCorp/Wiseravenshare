@@ -5,14 +5,28 @@ import { Textarea } from "@/components/ui/textarea";
 import { Bot, Send, Plus, Loader2, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
-const assistantBaseUrl = (import.meta.env.VITE_NURAVEN_LLM_API_URL || "https://wise-ravens.com/api").replace(/\/+$/, "");
+const configuredNuRavenApiBase = typeof import.meta.env.VITE_NURAVEN_LLM_API_URL === "string"
+  ? import.meta.env.VITE_NURAVEN_LLM_API_URL.trim().replace(/\/+$/, "")
+  : "";
+const ASSISTANT_BASE_CANDIDATES = Array.from(
+  new Set(
+    [
+      configuredNuRavenApiBase,
+      "https://wise-ravens.com/api",
+      "https://www.wise-ravens.com/api",
+    ].filter(Boolean)
+  )
+);
 
-function getAssistantToken() {
-  return (
-    localStorage.getItem("nr_token") ||
-    localStorage.getItem("wiseravenshare_access_token") ||
-    localStorage.getItem("token") ||
-    ""
+function getAssistantTokenCandidates() {
+  return Array.from(
+    new Set(
+      [
+        localStorage.getItem("nr_token"),
+        localStorage.getItem("wiseravenshare_access_token"),
+        localStorage.getItem("token"),
+      ].filter(Boolean)
+    )
   );
 }
 
@@ -54,28 +68,49 @@ export default function RavenChat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [connectedBaseUrl, setConnectedBaseUrl] = useState("");
   const bottomRef = useRef(null);
 
   const request = async (path, init = {}) => {
-    const token = getAssistantToken();
-    if (!token) {
+    const tokenCandidates = getAssistantTokenCandidates();
+    if (tokenCandidates.length === 0) {
       throw new Error("You need to sign in first.");
     }
 
-    const response = await fetch(`${assistantBaseUrl}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        ...(init.headers || {}),
-      },
-    });
+    let lastError = null;
 
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new Error(payload?.message || `Assistant request failed (${response.status})`);
+    for (const base of ASSISTANT_BASE_CANDIDATES) {
+      for (const token of tokenCandidates) {
+        try {
+          const response = await fetch(`${base}${path}`, {
+            ...init,
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+              ...(init.headers || {}),
+            },
+          });
+
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            const message = payload?.message || `Assistant request failed (${response.status})`;
+            if (response.status === 401 || response.status === 403 || response.status >= 500 || response.status === 404) {
+              lastError = new Error(message);
+              continue;
+            }
+
+            throw new Error(message);
+          }
+
+          setConnectedBaseUrl(base);
+          return payload;
+        } catch (err) {
+          lastError = err;
+        }
+      }
     }
-    return payload;
+
+    throw lastError || new Error("Unable to reach NuRavenCorpLLM assistant.");
   };
 
   const startNewConversation = async () => {
@@ -84,9 +119,13 @@ export default function RavenChat() {
       method: "POST",
       body: JSON.stringify({ title: "RavenChat", persona: "Default" }),
     });
-    setConversation(conv);
+    const normalizedConversation = {
+      ...conv,
+      id: conv?.id || conv?.Id,
+    };
+    setConversation(normalizedConversation);
     setMessages([]);
-    return conv;
+    return normalizedConversation;
   };
 
   useEffect(() => {
@@ -118,14 +157,19 @@ export default function RavenChat() {
         body: JSON.stringify({ text, isVoice: false }),
       });
 
+      const role = String(reply?.role || reply?.Role || "assistant").toLowerCase();
+      const content = reply?.content || reply?.Content || "";
       setMessages((prev) => prev.filter((m) => m.id !== pending.id).concat({
-        id: reply.id || `a-${Date.now()}`,
-        role: String(reply.role || "assistant").toLowerCase(),
-        content: reply.content || "",
+        id: reply?.id || reply?.Id || `a-${Date.now()}`,
+        role,
+        content,
       }));
     } catch (err) {
       setMessages((prev) => prev.filter((m) => m.status !== "pending"));
-      setError(err?.message || "Could not reach RavenChat.");
+      const message = err?.message || "Could not reach RavenChat.";
+      setError(message.includes("Failed to fetch")
+        ? "Unable to reach NuRavenCorpLLM right now. Please try again in a moment."
+        : message);
     } finally {
       setSending(false);
     }
@@ -158,7 +202,10 @@ export default function RavenChat() {
               <h1 className="font-heading text-2xl text-foreground flex items-center gap-2">
                 RavenChat <Sparkles className="w-4 h-4 text-violet-500" />
               </h1>
-              <p className="text-xs text-muted-foreground">Robotic raven assistant powered by NuRavenCorpLLM</p>
+              <p className="text-xs text-muted-foreground">
+                Robotic raven assistant powered by NuRavenCorpLLM
+                {connectedBaseUrl ? ` · connected to ${connectedBaseUrl}` : ""}
+              </p>
             </div>
           </div>
           <Button variant="outline" size="sm" onClick={startNewConversation} className="gap-1.5">
@@ -221,4 +268,3 @@ export default function RavenChat() {
     </div>
   );
 }
-
