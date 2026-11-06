@@ -3318,6 +3318,7 @@ app.MapHub<WebRtcSignalingHub>("/api/hubs/webrtc");
 app.MapHub<LiveChatHub>("/api/hubs/live-chat");
 app.MapHub<SocialHub>("/api/hubs/social");
 app.MapHub<WiseRavenShare.Server.API.Hubs.AssistantHub>("/api/hubs/assistant");
+app.MapHub<GoLiveHub>("/api/hubs/go-live");
 
 if (frontendDistExists)
 {

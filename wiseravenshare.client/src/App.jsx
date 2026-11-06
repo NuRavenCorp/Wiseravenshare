@@ -31,6 +31,7 @@ import Library from '@/pages/Library';
 import Media from '@/pages/Media';
 import FMRadioPage from '@/pages/FMRadioPage';
 import RavenChat from '@/pages/RavenChat';
+import GoLivePage from '@/pages/GoLivePage';
 import JoinFeed from '@/pages/JoinFeed';
 import Privacy from '@/pages/Privacy';
 import Terms from '@/pages/Terms';
@@ -99,6 +100,8 @@ const AuthenticatedApp = () => {
         <Route path="/performance" element={<Performance />} />
         <Route path="/karaoke" element={<KaraokePage />} />
         <Route path="/library" element={<Library />} />
+        <Route path="/go-live" element={<GoLivePage />} />
+        <Route path="/go-live/:roomId" element={<GoLivePage />} />
         <Route path="/python-features" element={<Navigate to="/" replace />} />
         <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
       </Route>
