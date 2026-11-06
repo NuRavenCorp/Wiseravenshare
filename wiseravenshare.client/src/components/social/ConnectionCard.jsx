@@ -132,8 +132,13 @@ export default function ConnectionCard({ platform }) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const justConnected = params.get("social_connected");
+    const socialConnectStatus = params.get("socialConnectStatus");
+    const socialConnectProvider = params.get("socialConnectProvider");
     const authError = params.get("socialAuthError");
     const authProvider = params.get("authProvider");
+    const isConnectedFromCallback =
+      socialConnectStatus === "connected" &&
+      (!socialConnectProvider || socialConnectProvider === platform);
     if (authError && (!authProvider || authProvider === platform)) {
       setError(authError);
       const cleanUrl = new URL(window.location.href);
@@ -141,13 +146,13 @@ export default function ConnectionCard({ platform }) {
       cleanUrl.searchParams.delete("authProvider");
       window.history.replaceState({}, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
     }
-    if (justConnected === platform) {
+    if (justConnected === platform || isConnectedFromCallback) {
       fetchStatus();
-      // Clean up the query param without a reload
-      const clean = window.location.pathname + window.location.search
-        .replace(/[?&]social_connected=[^&]*/g, "")
-        .replace(/^&/, "?");
-      window.history.replaceState({}, "", clean || window.location.pathname);
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("social_connected");
+      cleanUrl.searchParams.delete("socialConnectStatus");
+      cleanUrl.searchParams.delete("socialConnectProvider");
+      window.history.replaceState({}, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
     }
   }, [platform, fetchStatus]);
 
@@ -155,7 +160,9 @@ export default function ConnectionCard({ platform }) {
     setConnecting(true);
     setError("");
     try {
-      const returnUrl = `${window.location.origin}${window.location.pathname}?social_connected=${platform}`;
+      const returnTarget = new URL(window.location.href);
+      returnTarget.searchParams.set("social_connected", platform);
+      const returnUrl = returnTarget.toString();
       const data = await apiClient.social.getSocialConnectUrl(platform, userId || "", returnUrl);
       if (data?.authorize_url) {
         window.location.href = data.authorize_url;
