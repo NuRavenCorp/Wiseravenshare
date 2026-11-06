@@ -35,6 +35,8 @@ export default function TodaysVibe() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  const [submitError, setSubmitError] = useState("");
+
   const resolveUserId = useCallback((authUser) => {
     const candidate = authUser?.id ?? authUser?.user_id ?? authUser?.userId ?? authUser?.sub;
     return candidate ? String(candidate) : "";
@@ -71,9 +73,9 @@ export default function TodaysVibe() {
         setMyVibe(mine);
         setSelectedMood(mine.mood || "");
         setNote(mine.note || "");
-      } else {
-        setMyVibe(null);
       }
+      // Do NOT clear myVibe when mine is null — a freshly submitted vibe may
+      // not yet appear in the user's filtered query on the first reload.
     } catch {
       // soft fail — widget degrades to empty state
     } finally {
@@ -88,6 +90,7 @@ export default function TodaysVibe() {
   const submit = async () => {
     if (!selectedMood || !resolveUserId(user)) return;
     setSubmitting(true);
+    setSubmitError("");
     try {
       if (myVibe) {
         const updated = await apiClient.entities.Vibe.update(myVibe.id, {
@@ -103,7 +106,9 @@ export default function TodaysVibe() {
         setMyVibe(created);
       }
       setNote("");
-      load();
+      await load();
+    } catch (err) {
+      setSubmitError(err?.message || "Could not save your vibe. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -225,6 +230,9 @@ export default function TodaysVibe() {
             )}
             {myVibe ? "Update Vibe" : "Share Vibe"}
           </Button>
+          {submitError && (
+            <p className="text-xs text-destructive mt-2 text-center">{submitError}</p>
+          )}
         </div>
       ) : (
         <div className="rounded-2xl border border-border bg-card/60 p-5 text-center">

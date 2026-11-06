@@ -777,7 +777,23 @@ public sealed partial class EntityCompatController : ControllerBase
     private static DateTime? TryReadDateTime(JsonElement body, string dotPath)
     {
         var raw = ReadString(body, dotPath);
-        return DateTime.TryParse(raw, out var parsed) ? parsed : null;
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        // Always parse as UTC so Npgsql can bind to TIMESTAMPTZ without throwing.
+        if (DateTimeOffset.TryParse(raw,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal |
+                System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var dto))
+        {
+            return DateTime.SpecifyKind(dto.UtcDateTime, DateTimeKind.Utc);
+        }
+        if (DateTime.TryParse(raw, out var fallback))
+        {
+            return fallback.Kind == DateTimeKind.Utc
+                ? fallback
+                : DateTime.SpecifyKind(fallback.ToUniversalTime(), DateTimeKind.Utc);
+        }
+        return null;
     }
 
 private async Task EnsureVibeStorageAsync(CancellationToken cancellationToken = default)
