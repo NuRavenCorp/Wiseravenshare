@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useEffect, useRef, useCallback, useState } from "react";
 import Navbar from "@/components/landing/Navbar";
 import LibraryCard from "@/components/library/LibraryCard";
 import CameraCapture from "@/components/library/CameraCapture";
@@ -7,6 +7,9 @@ import { apiClient } from "@/api/client";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 import { Image as ImageIcon, Music, Video, Upload, Loader2, Trash2, Search, Library as LibraryIcon, ListMusic, Play, Clapperboard, Database } from "lucide-react";
 import { useMediaExperience } from "@/components/media/MediaExperience";
 import { getPlayableUrl } from "@/lib/mediaUtils";
@@ -126,6 +129,7 @@ export default function Library() {
   const [view, setView] = useState("grid");
   const [dragging, setDragging] = useState(false);
   const [playlistName, setPlaylistName] = useState("");
+  const [showPlaylistDialog, setShowPlaylistDialog] = useState(false);
   const [playlists, setPlaylists] = useState(() => {
     try { return JSON.parse(localStorage.getItem("wiseravenshare.library.playlists") || "[]"); } catch { return []; }
   });
@@ -155,6 +159,11 @@ export default function Library() {
         ...(musicResult || []).map((item) => normalizeLibraryItem("music", item)),
         ...(videosResult || []).map((item) => normalizeLibraryItem("video", item)),
       ];
+
+      // Keep a full map so selected items survive filter/search changes
+      for (const item of allItems) {
+        allLoadedItemsRef.current[item.id] = item;
+      }
 
       const filtered = allItems
         .filter((item) => filter === "all" || item.asset_type === filter)
@@ -295,21 +304,43 @@ export default function Library() {
     }
   };
 
+  // Collect ALL music items the user has selected.
+  // We keep a map of every item we've ever loaded so selection survives filter changes.
+  const allLoadedItemsRef = useRef({});
+
   const playAll = () => {
     const queue = items.filter((item) => item.asset_type === "music");
     if (!queue.length) return;
     openMedia({ ...queue[0], queue, type: "music" });
   };
 
-  const createPlaylist = () => {
-    const selected = items.filter((item) => selectedIds.has(item.id) && item.asset_type === "music");
-    if (!playlistName.trim() || selected.length === 0) {
-      toast({ title: "Select tracks for your playlist", description: "Choose one or more music tracks and enter a playlist name." });
+  // Count of selected items that are music (used in button labels)
+  const selectedMusicCount = [...selectedIds].filter((id) => {
+    const item = allLoadedItemsRef.current[id];
+    return item?.asset_type === "music";
+  }).length;
+
+  const openPlaylistDialog = () => {
+    if (selectedMusicCount === 0) {
+      toast({ title: "No music tracks selected", description: "Check the boxes on music tracks first, then click Create Playlist." });
       return;
     }
-    setPlaylists((current) => [...current, { id: crypto.randomUUID(), name: playlistName.trim(), tracks: selected }]);
     setPlaylistName("");
-    toast({ title: "Playlist created", description: `${selected.length} track(s) added.` });
+    setShowPlaylistDialog(true);
+  };
+
+  const confirmCreatePlaylist = () => {
+    if (!playlistName.trim()) return;
+    const selected = [...selectedIds]
+      .map((id) => allLoadedItemsRef.current[id])
+      .filter((item) => item?.asset_type === "music");
+    setPlaylists((current) => [
+      ...current,
+      { id: crypto.randomUUID(), name: playlistName.trim(), tracks: selected },
+    ]);
+    setPlaylistName("");
+    setShowPlaylistDialog(false);
+    toast({ title: "Playlist created", description: `"${playlistName.trim()}" — ${selected.length} track(s) added.` });
   };
 
   const startPlaylist = (playlist) => {
@@ -487,13 +518,26 @@ export default function Library() {
 
         {dragging && <div className="mb-4 rounded-xl border-2 border-dashed border-primary bg-primary/10 p-8 text-center text-sm font-medium text-primary">Drop photos, music, or videos here to upload</div>}
 
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
-          <ListMusic className="h-4 w-4 text-primary" />
-          <Input aria-label="Playlist name" placeholder="New playlist name" value={playlistName} onChange={(e) => setPlaylistName(e.target.value)} className="w-48" />
-          <Button size="sm" variant="outline" onClick={createPlaylist}><ListMusic className="h-4 w-4" /> Create from selected music</Button>
-          <span className="text-xs text-muted-foreground">{playlists.length} saved playlist(s)</span>
-          {playlists.map((playlist) => <Button key={playlist.id} variant="ghost" size="sm" onClick={() => startPlaylist(playlist)} title={playlist.tracks?.map((track) => track.title).join(", ")}><Play className="h-3 w-3" /> {playlist.name}</Button>)}
-        </div>
+        {/* Saved playlists row */}
+        {playlists.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card/60 px-3 py-2">
+            <ListMusic className="h-4 w-4 text-primary shrink-0" />
+            <span className="text-xs text-muted-foreground shrink-0">Playlists:</span>
+            {playlists.map((playlist) => (
+              <Button
+                key={playlist.id}
+                variant="ghost"
+                size="sm"
+                onClick={() => startPlaylist(playlist)}
+                title={playlist.tracks?.map((t) => t.title).join(", ")}
+                className="gap-1 text-xs h-7"
+              >
+                <Play className="h-3 w-3" /> {playlist.name}
+                <span className="text-muted-foreground">({playlist.tracks?.length ?? 0})</span>
+              </Button>
+            ))}
+          </div>
+        )}
 
         <TeamConnections />
 
@@ -505,7 +549,7 @@ export default function Library() {
               return (
                 <button
                   key={f.id}
-                  onClick={() => { setFilter(f.id); setSelectedIds(new Set()); }}
+                  onClick={() => setFilter(f.id)}
                   className={`flex items-center gap-2 px-4 py-2.5 text-sm transition-colors border-b-2 -mb-px ${
                     filter === f.id
                       ? "border-primary text-primary"
@@ -540,19 +584,26 @@ export default function Library() {
 
         {/* Bulk action bar */}
         {selectedIds.size > 0 && (
-          <div className="flex items-center justify-between rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 mb-4">
-            <span className="text-xs text-foreground">{selectedIds.size} selected</span>
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 mb-4">
+            <span className="text-xs text-foreground font-medium">{selectedIds.size} selected</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              {selectedMusicCount > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={openPlaylistDialog}
+                  className="gap-1.5 text-primary border-primary/40 hover:bg-primary/5"
+                >
+                  <ListMusic className="w-3.5 h-3.5" />
+                  Create Playlist ({selectedMusicCount} track{selectedMusicCount !== 1 ? "s" : ""})
+                </Button>
+              )}
               <Button variant="ghost" size="sm" onClick={() => { setSelectedIds(new Set()); setConfirmingBulk(false); }}>
                 Clear
               </Button>
               <Button variant="destructive" size="sm" onClick={handleBulkDelete} disabled={bulkDeleting}>
-                {bulkDeleting ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Trash2 className="w-3.5 h-3.5" />
-                )}
-                {confirmingBulk ? "Click again to confirm" : `Delete Selected (${selectedIds.size})`}
+                {bulkDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                {confirmingBulk ? "Click again to confirm" : `Delete (${selectedIds.size})`}
               </Button>
             </div>
           </div>
@@ -612,6 +663,48 @@ export default function Library() {
           onSaved={() => { fetchItems(); fetchCounts(); }}
         />
       )}
+
+      {/* Create Playlist Dialog */}
+      <Dialog open={showPlaylistDialog} onOpenChange={setShowPlaylistDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ListMusic className="w-5 h-5 text-primary" />
+              Create Playlist
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {selectedMusicCount} music track{selectedMusicCount !== 1 ? "s" : ""} will be added to this playlist.
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" htmlFor="playlist-name-input">
+                Playlist name <span className="text-destructive">*</span>
+              </label>
+              <Input
+                id="playlist-name-input"
+                autoFocus
+                placeholder="e.g. Morning Vibes, Road Trip…"
+                value={playlistName}
+                onChange={(e) => setPlaylistName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && playlistName.trim()) confirmCreatePlaylist(); }}
+                maxLength={80}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setShowPlaylistDialog(false)}>Cancel</Button>
+            <Button
+              onClick={confirmCreatePlaylist}
+              disabled={!playlistName.trim()}
+              className="gap-1.5"
+            >
+              <ListMusic className="w-4 h-4" />
+              Create Playlist
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
