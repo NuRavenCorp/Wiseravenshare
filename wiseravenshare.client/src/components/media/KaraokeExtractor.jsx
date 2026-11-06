@@ -77,6 +77,28 @@ function isHtml503(err) {
   return msg.includes("<!DOCTYPE") || msg.includes("<html") || msg.includes("via_upstream");
 }
 
+// If async submit fails for infra reasons (503/504, connection refused, gateway HTML),
+// continue into sync + legacy fallback paths instead of aborting extraction.
+function shouldFallbackFromAsync(err) {
+  if (isHtml503(err)) return true;
+  const status = Number(err?.status || 0);
+  if ([404, 405, 429, 500, 502, 503, 504].includes(status)) return true;
+  const msg = String(err?.message || "").toLowerCase();
+  return msg.includes("connection refused") || msg.includes("econnrefused") || msg.includes("timeout");
+}
+
+function normalizeExtractionError(err, fallback = "Word extraction failed.") {
+  const msg = String(err?.message || fallback);
+  const lower = msg.toLowerCase();
+  if (isHtml503(err) || msg.includes("<!DOCTYPE") || msg.includes("<html")) {
+    return "Word extraction timed out at the network gateway. Please try a shorter clip or retry in a few minutes.";
+  }
+  if (lower.includes("connection refused") || lower.includes("econnrefused") || lower.includes("localhost:8001")) {
+    return "Transcription backend is currently offline (audio service not running). Please retry shortly.";
+  }
+  return msg;
+}
+
 // Poll an async transcription job until completion.
 async function pollTranscribeJob(jobId, { intervalMs = 3000, maxMs = 600_000 } = {}) {
   const start = Date.now();
@@ -113,8 +135,7 @@ async function transcribeFile(file) {
       if (hasContent) return result;
     }
   } catch (asyncErr) {
-    // If the async job endpoint itself is missing, fall through to sync fallbacks
-    if (!isHtml503(asyncErr) && ![404, 405].includes(asyncErr?.status)) throw asyncErr;
+    if (!shouldFallbackFromAsync(asyncErr)) throw asyncErr;
   }
 
   // Sync fallback (only if async endpoint unavailable)
@@ -215,7 +236,7 @@ async function transcribeUrl(url, fileName) {
       if (hasContent) return result;
     }
   } catch (asyncErr) {
-    if (!isHtml503(asyncErr) && ![404, 405].includes(asyncErr?.status)) throw asyncErr;
+    if (!shouldFallbackFromAsync(asyncErr)) throw asyncErr;
   }
 
   // Sync fallback
@@ -522,10 +543,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
       setWordCount(normalized.word_count);
       setVocalsIsolated(normalized.vocals_isolated);
     } catch (extractError) {
-      const msg = String(extractError?.message || "Word extraction failed.");
-      setError(isHtml503(extractError) || msg.includes("<!DOCTYPE") || msg.includes("<html")
-        ? "Word extraction timed out at the network gateway. Please try a shorter clip or retry in a few minutes."
-        : msg);
+      setError(normalizeExtractionError(extractError));
     } finally {
       setExtracting(false);
     }
@@ -544,10 +562,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
       setWordCount(normalized.word_count);
       setVocalsIsolated(normalized.vocals_isolated);
     } catch (extractError) {
-      const msg = String(extractError?.message || "Word extraction failed.");
-      setError(isHtml503(extractError) || msg.includes("<!DOCTYPE") || msg.includes("<html")
-        ? "Word extraction timed out at the network gateway. Please try a shorter clip or retry in a few minutes."
-        : msg);
+      setError(normalizeExtractionError(extractError));
     } finally {
       setExtracting(false);
     }
