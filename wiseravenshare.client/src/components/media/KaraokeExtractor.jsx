@@ -138,6 +138,8 @@ async function transcribeFile(file) {
     if (!shouldFallbackFromAsync(asyncErr)) throw asyncErr;
   }
 
+  let asyncGatewayError = null;
+
   // Sync fallback (only if async endpoint unavailable)
   try {
     const result = await apiClient.podcastAudio.transcribeFile(file, {
@@ -148,14 +150,13 @@ async function transcribeFile(file) {
     if (hasContent) return result;
   } catch (primaryError) {
     if (isHtml503(primaryError)) {
-      throw new Error(
-        "Word extraction is taking longer than expected due to platform limits. " +
-        "Try a shorter clip (under 3 minutes), or the extraction will complete in the background — " +
-        "refresh the page in a few minutes."
+      asyncGatewayError = new Error(
+        "Word extraction is taking longer than expected due to platform limits."
       );
+    } else {
+      const status = primaryError?.status;
+      if (![404, 405, 429, 502, 503].includes(status)) throw primaryError;
     }
-    const status = primaryError?.status;
-    if (![404, 405, 429, 502, 503].includes(status)) throw primaryError;
   }
 
   // Fallback: karaoke-speech microservice endpoints
@@ -208,7 +209,7 @@ async function transcribeFile(file) {
     }
   }
 
-  const err = preferredError || rateLimitError || lastError;
+  const err = preferredError || rateLimitError || lastError || asyncGatewayError;
   if (err) {
     if (err?.status === 429 && !preferredError) {
       err.message = "Transcription providers are temporarily rate limited. Please retry in 20-30 seconds.";
@@ -249,13 +250,12 @@ async function transcribeUrl(url, fileName) {
     if (hasContent) return result;
   } catch (primaryError) {
     if (isHtml503(primaryError)) {
-      throw new Error(
-        "Word extraction timed out at the network gateway. " +
-        "Try a shorter clip or check back after refreshing — the job may still complete in the background."
-      );
+      // Continue to file-download fallback path instead of failing immediately.
     }
-    const status = primaryError?.status;
-    if (![404, 405, 429, 502, 503].includes(status)) throw primaryError;
+    else {
+      const status = primaryError?.status;
+      if (![404, 405, 429, 502, 503].includes(status)) throw primaryError;
+    }
   }
 
   // Fallback: download the file locally and send to old endpoints
