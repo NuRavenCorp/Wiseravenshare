@@ -1015,6 +1015,108 @@ SELECT EXISTS (
         });
     }
 
+    // ── Direct recording upload (fallback for when blob storage is unavailable) ──
+
+    /// <summary>
+    /// Accepts the full browser-recorded video (webm/mp4) and stores it in the
+    /// local bucket.  Used as a fallback when DigitalOcean Spaces / S3 presigning
+    /// is not configured, so recordings are always retained server-side.
+    /// </summary>
+    [HttpPost("{streamId}/recording")]
+    [Authorize]
+    [RequestSizeLimit(2_147_483_648)]   // 2 GB
+    [RequestFormLimits(MultipartBodyLengthLimit = 2_147_483_648)]
+    public async Task<IActionResult> UploadRecording(
+        [FromRoute] string streamId,
+        IFormFile? file,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(streamId))
+            return BadRequest(new { message = "streamId is required." });
+
+        if (!TryResolveUserId(out var userId))
+            return Unauthorized(new { message = "Invalid user session." });
+
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "No recording file provided." });
+
+        // Create stream record if it doesn't already exist (broadcaster may not have called /start)
+        if (!_liveStreamStateStore.TryGet(streamId, out var stream))
+        {
+            stream = _liveStreamStateStore.Create(new LiveStreamState
+            {
+                id              = streamId,
+                created_by_id   = userId,
+                streamer_id     = userId,
+                title           = $"Recording {streamId}",
+                status          = "ended",
+                started_at      = DateTime.UtcNow,
+                ended_at        = DateTime.UtcNow,
+                created_date    = DateTime.UtcNow,
+                updated_date    = DateTime.UtcNow,
+                kept_permanently = true,
+                kept_at         = DateTime.UtcNow,
+            });
+        }
+
+        if (!IsOwner(stream, userId))
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Not your stream." });
+
+        var bucketsRoot = _configuration["Persistence:BucketsRoot"] ?? "/app/Buckets";
+        var ext = Path.GetExtension(file.FileName ?? "recording.webm").ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(ext)) ext = ".webm";
+        var relKey  = Path.Combine("live", streamId, $"recording{ext}").Replace('\\', '/');
+        var fullPath = Path.Combine(bucketsRoot, relKey);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        await using (var dest = System.IO.File.Create(fullPath))
+        await using (var src  = file.OpenReadStream())
+            await src.CopyToAsync(dest, cancellationToken);
+
+        _liveStreamStateStore.Update(streamId, s =>
+        {
+            s.final_recording_uri = $"/api/live/{streamId}/playback";
+            s.kept_permanently    = true;
+            s.kept_at             = DateTime.UtcNow;
+            s.ended_at          ??= DateTime.UtcNow;
+            s.status              = "ended";
+        });
+
+        _logger.LogInformation("Recording saved for stream {StreamId}: {Bytes} bytes", streamId, file.Length);
+        return Ok(new
+        {
+            stream_id     = streamId,
+            recording_key = relKey,
+            playback_url  = $"/api/live/{streamId}/playback",
+            size_bytes    = file.Length,
+        });
+    }
+
+    /// <summary>Serve the locally stored recording with range support.</summary>
+    [HttpGet("{streamId}/playback")]
+    [AllowAnonymous]
+    public IActionResult Playback([FromRoute] string streamId)
+    {
+        if (string.IsNullOrWhiteSpace(streamId))
+            return BadRequest(new { message = "streamId is required." });
+
+        var bucketsRoot = _configuration["Persistence:BucketsRoot"] ?? "/app/Buckets";
+        foreach (var ext in new[] { ".webm", ".mp4", ".mov", ".ogg" })
+        {
+            var fullPath = Path.Combine(bucketsRoot, "live", streamId, $"recording{ext}");
+            if (!System.IO.File.Exists(fullPath)) continue;
+            var mime = ext switch
+            {
+                ".mp4" => "video/mp4",
+                ".mov" => "video/quicktime",
+                ".ogg" => "video/ogg",
+                _      => "video/webm",
+            };
+            return File(System.IO.File.OpenRead(fullPath), mime, enableRangeProcessing: true);
+        }
+        return NotFound(new { message = "Recording file not found." });
+    }
+
     [HttpGet("{streamId}/expiry")]
     [Authorize]
     public IActionResult GetExpiry([FromRoute] string streamId, [FromQuery] string? user_id = null)

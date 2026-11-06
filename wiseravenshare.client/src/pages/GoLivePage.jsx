@@ -4,10 +4,12 @@ import Hls from "hls.js";
 import * as signalR from "@microsoft/signalr";
 import Navbar from "@/components/landing/Navbar";
 import { useAuth } from "@/lib/AuthContext";
+import { apiClient } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import {
   Radio, Users, Send, Loader2, Video, VideoOff,
   Mic, MicOff, Copy, Check, AlertCircle, Wifi, WifiOff,
+  Save, ExternalLink, Clock,
 } from "lucide-react";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -93,13 +95,18 @@ export default function GoLivePage() {
 
   // Broadcaster
   const previewRef = useRef(null);
-  const streamRef = useRef(null);
+  const mediaStreamRef = useRef(null);      // getUserMedia stream
   const recorderRef = useRef(null);
+  const chunksRef = useRef([]);             // accumulated blobs for upload
+  const currentStreamIdRef = useRef(null);  // server stream ID
   const [camOn, setCamOn] = useState(false);
-  const [recording, setRecording] = useState(false);
+  const [recPhase, setRecPhase] = useState("idle"); // idle|starting|recording|uploading|done|error
   const [recSeconds, setRecSeconds] = useState(0);
   const recTimerRef = useRef(null);
   const [copied, setCopied] = useState(false);
+  const [savedStreamId, setSavedStreamId] = useState(null);  // after upload succeeds
+  const [uploadErr, setUploadErr] = useState("");
+  const [keptPermanent, setKeptPermanent] = useState(false);
 
   // Chat
   const chatHubRef = useRef(null);
@@ -200,7 +207,7 @@ export default function GoLivePage() {
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      streamRef.current = stream;
+      mediaStreamRef.current = stream;
       if (previewRef.current) {
         previewRef.current.srcObject = stream;
         previewRef.current.play().catch(() => {});
@@ -212,45 +219,91 @@ export default function GoLivePage() {
   }, []);
 
   const stopCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    mediaStreamRef.current = null;
     if (previewRef.current) previewRef.current.srcObject = null;
     setCamOn(false);
-    setRecording(false);
     clearInterval(recTimerRef.current);
   }, []);
 
-  const startRecording = useCallback(() => {
-    if (!streamRef.current) return;
-    const chunks = [];
-    const rec = new MediaRecorder(streamRef.current, {
-      mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
-        ? "video/webm;codecs=vp9,opus"
-        : "video/webm",
-    });
+  // ── Broadcaster: start recording + stream ─────────────────────────────────
+  const startRecording = useCallback(async () => {
+    if (!mediaStreamRef.current) return;
+
+    const sId = `wrs-${roomId.toLowerCase()}-${Date.now()}`;
+    currentStreamIdRef.current = sId;
+    chunksRef.current = [];
+    setUploadErr("");
+    setSavedStreamId(null);
+    setKeptPermanent(false);
+    setRecPhase("starting");
+
+    try {
+      await apiClient.live.start(sId, { title: `Go Live — ${roomId}`, is_audio_only: false });
+    } catch { /* non-fatal; recording still works */ }
+
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+      ? "video/webm;codecs=vp9,opus"
+      : "video/webm";
+
+    const rec = new MediaRecorder(mediaStreamRef.current, { mimeType });
     recorderRef.current = rec;
-    rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-    rec.onstop = () => {
-      const blob = new Blob(chunks, { type: "video/webm" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `golive-${roomId}-${Date.now()}.webm`;
-      a.click();
-      URL.revokeObjectURL(url);
+
+    rec.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+
+    rec.onstop = async () => {
+      setRecPhase("uploading");
+      const sId = currentStreamIdRef.current;
+      const mimeUsed = rec.mimeType || mimeType;
+
+      // Upload full recording to server
+      const blob = new Blob(chunksRef.current, { type: mimeUsed });
+      const form = new FormData();
+      form.append("file", blob, `recording-${sId}.webm`);
+
+      try {
+        await apiClient.requestJson(`/api/live/${encodeURIComponent(sId)}/recording`, {
+          method: "POST",
+          body: form,
+        });
+        setSavedStreamId(sId);
+        setUploadErr("");
+      } catch (err) {
+        setUploadErr(err?.message || "Upload failed — recording saved locally as fallback.");
+        // Fallback: trigger browser download so the recording is not lost
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `golive-${sId}.webm`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }
+
+      // Always end the stream on server
+      try { await apiClient.live.end(sId); } catch { /* ignore */ }
+
+      setRecPhase("done");
     };
-    rec.start(1000);
-    setRecording(true);
+
+    rec.start(5000); // collect 5-second chunks
+    setRecPhase("recording");
     setRecSeconds(0);
     recTimerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000);
   }, [roomId]);
 
   const stopRecording = useCallback(() => {
+    clearInterval(recTimerRef.current);
     recorderRef.current?.stop();
     recorderRef.current = null;
-    setRecording(false);
-    clearInterval(recTimerRef.current);
   }, []);
+
+  const keepRecording = useCallback(async () => {
+    if (!savedStreamId) return;
+    try {
+      await apiClient.live.keep(savedStreamId);
+      setKeptPermanent(true);
+    } catch { /* ignore */ }
+  }, [savedStreamId]);
 
   useEffect(() => () => {
     clearInterval(recTimerRef.current);
@@ -358,53 +411,117 @@ export default function GoLivePage() {
                 /* Broadcaster */
                 <div className="space-y-3">
                   <div className="relative aspect-video bg-black rounded-lg border border-border overflow-hidden">
-                    <video
-                      ref={previewRef}
-                      muted
-                      playsInline
-                      className="w-full h-full object-cover"
-                    />
+                    <video ref={previewRef} muted playsInline className="w-full h-full object-cover" />
                     {!camOn && (
                       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
                         <VideoOff className="w-10 h-10 text-muted-foreground/40" />
                         <p className="text-sm text-muted-foreground">Camera off</p>
                       </div>
                     )}
-                    {recording && (
+                    {recPhase === "recording" && (
                       <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-red-600 text-white text-xs px-2 py-1 rounded-full">
                         <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                        {recFmt(recSeconds)}
+                        REC {recFmt(recSeconds)}
+                      </div>
+                    )}
+                    {recPhase === "uploading" && (
+                      <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2">
+                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                        <p className="text-sm text-white">Saving recording to server…</p>
                       </div>
                     )}
                     <FlyingReactions reactions={flyingReactions} />
                   </div>
 
+                  {/* Controls */}
                   <div className="flex flex-wrap gap-2">
                     {!camOn ? (
-                      <Button onClick={startCamera} className="gap-1.5"><Video className="w-4 h-4" /> Start Camera</Button>
+                      <Button onClick={startCamera} className="gap-1.5" disabled={recPhase === "uploading"}>
+                        <Video className="w-4 h-4" /> Start Camera
+                      </Button>
                     ) : (
-                      <Button variant="outline" onClick={stopCamera} className="gap-1.5"><VideoOff className="w-4 h-4" /> Stop Camera</Button>
+                      <Button variant="outline" onClick={stopCamera} disabled={recPhase === "recording" || recPhase === "uploading"} className="gap-1.5">
+                        <VideoOff className="w-4 h-4" /> Stop Camera
+                      </Button>
                     )}
-                    {camOn && !recording && (
-                      <Button onClick={startRecording} variant="destructive" className="gap-1.5"><Mic className="w-4 h-4" /> Record</Button>
+                    {camOn && (recPhase === "idle" || recPhase === "done" || recPhase === "error") && (
+                      <Button onClick={startRecording} variant="destructive" className="gap-1.5">
+                        <Mic className="w-4 h-4" /> Start Recording
+                      </Button>
                     )}
-                    {recording && (
-                      <Button onClick={stopRecording} variant="outline" className="gap-1.5"><MicOff className="w-4 h-4" /> Stop &amp; Save</Button>
+                    {recPhase === "recording" && (
+                      <Button onClick={stopRecording} variant="outline" className="gap-1.5 border-red-500 text-red-500 hover:bg-red-500/10">
+                        <MicOff className="w-4 h-4" /> Stop &amp; Save
+                      </Button>
+                    )}
+                    {recPhase === "starting" && (
+                      <Button disabled className="gap-1.5"><Loader2 className="w-4 h-4 animate-spin" /> Starting…</Button>
                     )}
                   </div>
 
-                  {/* RTMP info */}
-                  <div className="rounded-lg border border-border bg-card/60 p-4 space-y-3">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <AlertCircle className="w-4 h-4 text-amber-400" />
-                      Stream with OBS or any RTMP client
+                  {/* Upload error */}
+                  {uploadErr && (
+                    <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                      <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                      <span>{uploadErr}</span>
                     </div>
-                    <div className="space-y-2 text-sm">
+                  )}
+
+                  {/* Post-recording: saved recording info */}
+                  {recPhase === "done" && savedStreamId && (
+                    <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4 space-y-3">
+                      <div className="flex items-center gap-2 text-sm font-medium text-green-400">
+                        <Check className="w-4 h-4" /> Recording saved to server
+                      </div>
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <p className="text-muted-foreground mb-1">Playback URL</p>
+                          <div className="flex gap-2">
+                            <code className="flex-1 bg-secondary/50 px-2 py-1.5 rounded font-mono truncate">
+                              /api/live/{savedStreamId}/playback
+                            </code>
+                            <a
+                              href={`/api/live/${savedStreamId}/playback`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="shrink-0"
+                            >
+                              <Button size="sm" variant="outline" className="gap-1">
+                                <ExternalLink className="w-3.5 h-3.5" /> Watch
+                              </Button>
+                            </a>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          {!keptPermanent ? (
+                            <Button size="sm" onClick={keepRecording} className="gap-1.5">
+                              <Save className="w-3.5 h-3.5" /> Keep Permanently
+                            </Button>
+                          ) : (
+                            <span className="flex items-center gap-1.5 text-green-400 text-xs">
+                              <Check className="w-3.5 h-3.5" /> Kept permanently
+                            </span>
+                          )}
+                          {!keptPermanent && (
+                            <span className="flex items-center gap-1 text-muted-foreground text-xs">
+                              <Clock className="w-3 h-3" /> Expires in 72 h if not kept
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* RTMP info */}
+                  <details className="rounded-lg border border-border bg-card/60 p-4">
+                    <summary className="flex items-center gap-2 text-sm font-medium cursor-pointer select-none">
+                      <AlertCircle className="w-4 h-4 text-amber-400" />
+                      Stream via OBS / RTMP (advanced)
+                    </summary>
+                    <div className="mt-3 space-y-2 text-sm">
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">RTMP Server URL</p>
-                        <code className="block bg-secondary/50 px-3 py-2 rounded text-xs font-mono">
-                          rtmp://your-server:1935/live/
-                        </code>
+                        <code className="block bg-secondary/50 px-3 py-2 rounded text-xs font-mono">rtmp://your-server:1935/live/</code>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">Stream Key</p>
@@ -418,14 +535,8 @@ export default function GoLivePage() {
                           </Button>
                         </div>
                       </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">Your HLS Playback URL (share with viewers)</p>
-                        <code className="block bg-secondary/50 px-3 py-2 rounded text-xs font-mono">
-                          https://your-server/hls/wrs-{roomId.toLowerCase()}-{(user?.id || "live").slice(0, 8)}/output.m3u8
-                        </code>
-                      </div>
                     </div>
-                  </div>
+                  </details>
                 </div>
               )}
 
