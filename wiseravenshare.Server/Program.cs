@@ -2526,6 +2526,13 @@ builder.Services.AddHttpClient("AudioService", client =>
         builder.Configuration["AudioService:BaseUrl"] ?? "http://localhost:8001");
     client.Timeout = TimeSpan.FromMinutes(5);
 });
+// Long-timeout client for async transcription jobs (runs in background, up to 12 min)
+builder.Services.AddHttpClient("AudioServiceLong", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["AudioService:BaseUrl"] ?? "http://localhost:8001");
+    client.Timeout = TimeSpan.FromMinutes(13);
+});
 builder.Services.AddHttpClient("KaraokeService", client =>
 {
     client.BaseAddress = new Uri(

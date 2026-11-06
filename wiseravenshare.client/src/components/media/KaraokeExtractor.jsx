@@ -71,10 +71,53 @@ function normalizeTranscriptResult(result) {
   };
 }
 
+// Detect a DigitalOcean/nginx HTML gateway error page instead of JSON.
+function isHtml503(err) {
+  const msg = String(err?.message || err?.data || "");
+  return msg.includes("<!DOCTYPE") || msg.includes("<html") || msg.includes("via_upstream");
+}
+
+// Poll an async transcription job until completion.
+async function pollTranscribeJob(jobId, { intervalMs = 3000, maxMs = 600_000 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    await wait(intervalMs);
+    const resp = await apiClient.requestJson(
+      `/api/podcast-audio/assemblyai/transcribe/jobs/${encodeURIComponent(jobId)}`,
+      { method: "GET" }
+    );
+    if (resp?.status === "completed") return resp.result;
+    if (resp?.status === "failed") {
+      throw new Error(resp.error || "Transcription job failed.");
+    }
+    // still queued/processing — keep polling
+  }
+  throw new Error("Transcription timed out after 10 minutes. Please try a shorter clip.");
+}
+
 async function transcribeFile(file) {
-  // Primary: AssemblyAI Sync API via /api/podcast-audio/assemblyai/transcribe
-  // No 120s cap, handles songs up to 20 minutes. extractAudioFirst=true runs
-  // ffmpeg vocal extraction on the server before sending to AssemblyAI.
+  // Primary path: submit async job → poll (avoids DO App Platform 30s timeout)
+  try {
+    const form = new FormData();
+    form.append("audioFile", file);
+    form.append("speechModel", "universal-3-5-pro");
+    form.append("wordTimestamps", "true");
+    form.append("extractAudioFirst", "true");
+    const submission = await apiClient.requestJson(
+      "/api/podcast-audio/assemblyai/transcribe/jobs",
+      { method: "POST", body: form }
+    );
+    if (submission?.job_id) {
+      const result = await pollTranscribeJob(submission.job_id);
+      const hasContent = (result?.text || "").trim().length > 0 || (result?.words?.length || 0) > 0;
+      if (hasContent) return result;
+    }
+  } catch (asyncErr) {
+    // If the async job endpoint itself is missing, fall through to sync fallbacks
+    if (!isHtml503(asyncErr) && ![404, 405].includes(asyncErr?.status)) throw asyncErr;
+  }
+
+  // Sync fallback (only if async endpoint unavailable)
   try {
     const result = await apiClient.podcastAudio.transcribeFile(file, {
       extractAudioFirst: true,
@@ -83,8 +126,14 @@ async function transcribeFile(file) {
     const hasContent = (result?.text || "").trim().length > 0 || (result?.words?.length || 0) > 0;
     if (hasContent) return result;
   } catch (primaryError) {
+    if (isHtml503(primaryError)) {
+      throw new Error(
+        "Word extraction is taking longer than expected due to platform limits. " +
+        "Try a shorter clip (under 3 minutes), or the extraction will complete in the background — " +
+        "refresh the page in a few minutes."
+      );
+    }
     const status = primaryError?.status;
-    // If audio service is unavailable/misconfigured/rate-limited, fall through.
     if (![404, 405, 429, 502, 503].includes(status)) throw primaryError;
   }
 
@@ -117,6 +166,7 @@ async function transcribeFile(file) {
         break;
       } catch (error) {
         const status = error?.status;
+        if (isHtml503(error)) { attempts.push(`${endpoint} -> html503`); break; }
         if (status === 429 && retry429 < 3) {
           retry429 += 1;
           attempts.push(`${endpoint} -> 429 (retry ${retry429})`);
@@ -150,6 +200,25 @@ async function transcribeFile(file) {
 }
 
 async function transcribeUrl(url, fileName) {
+  // Primary path: async job → poll (avoids DO App Platform 30s timeout)
+  try {
+    const submission = await apiClient.requestJson(
+      "/api/podcast-audio/assemblyai/transcribe-url/jobs",
+      {
+        method: "POST",
+        body: JSON.stringify({ audioUrl: url, speechModel: "universal-3-5-pro", wordTimestamps: true }),
+      }
+    );
+    if (submission?.job_id) {
+      const result = await pollTranscribeJob(submission.job_id);
+      const hasContent = (result?.text || "").trim().length > 0 || (result?.words?.length || 0) > 0;
+      if (hasContent) return result;
+    }
+  } catch (asyncErr) {
+    if (!isHtml503(asyncErr) && ![404, 405].includes(asyncErr?.status)) throw asyncErr;
+  }
+
+  // Sync fallback
   // Primary: AssemblyAI Sync API via /api/podcast-audio/assemblyai/transcribe-url
   try {
     const result = await apiClient.podcastAudio.transcribeUrl(url, {
@@ -158,6 +227,12 @@ async function transcribeUrl(url, fileName) {
     const hasContent = (result?.text || "").trim().length > 0 || (result?.words?.length || 0) > 0;
     if (hasContent) return result;
   } catch (primaryError) {
+    if (isHtml503(primaryError)) {
+      throw new Error(
+        "Word extraction timed out at the network gateway. " +
+        "Try a shorter clip or check back after refreshing — the job may still complete in the background."
+      );
+    }
     const status = primaryError?.status;
     if (![404, 405, 429, 502, 503].includes(status)) throw primaryError;
   }
@@ -447,7 +522,10 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
       setWordCount(normalized.word_count);
       setVocalsIsolated(normalized.vocals_isolated);
     } catch (extractError) {
-      setError(extractError?.message || "Word extraction failed.");
+      const msg = String(extractError?.message || "Word extraction failed.");
+      setError(isHtml503(extractError) || msg.includes("<!DOCTYPE") || msg.includes("<html")
+        ? "Word extraction timed out at the network gateway. Please try a shorter clip or retry in a few minutes."
+        : msg);
     } finally {
       setExtracting(false);
     }
@@ -466,7 +544,10 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
       setWordCount(normalized.word_count);
       setVocalsIsolated(normalized.vocals_isolated);
     } catch (extractError) {
-      setError(extractError?.message || "Word extraction failed.");
+      const msg = String(extractError?.message || "Word extraction failed.");
+      setError(isHtml503(extractError) || msg.includes("<!DOCTYPE") || msg.includes("<html")
+        ? "Word extraction timed out at the network gateway. Please try a shorter clip or retry in a few minutes."
+        : msg);
     } finally {
       setExtracting(false);
     }
@@ -815,7 +896,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
           </select>
           <Button onClick={handleExtractSelected} disabled={!selectedSource || extracting}>
             {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-            {extracting ? "Extracting words..." : "Extract Words"}
+            {extracting ? "Extracting… (may take 1-3 min)" : "Extract Words"}
           </Button>
         </div>
           </>
@@ -840,10 +921,17 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
             />
             <Button onClick={handleTranscribeLocal} disabled={!localFile || extracting}>
               {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-              {extracting ? "Transcribing..." : "Transcribe Local File"}
+              {extracting ? "Transcribing… (may take 1-3 min)" : "Transcribe Local File"}
             </Button>
           </div>
         </div>
+        )}
+
+        {extracting && (
+          <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
+            <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+            Submitted to background transcription. This takes 1–3 minutes — please keep the page open.
+          </div>
         )}
 
         {error && <p className="text-sm text-destructive">{error}</p>}

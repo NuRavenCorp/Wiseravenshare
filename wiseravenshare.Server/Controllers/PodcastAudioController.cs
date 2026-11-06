@@ -361,6 +361,174 @@ public sealed class PodcastAudioController : ControllerBase
             return File(converted, "audio/mpeg", "browser-compatible.mp3");
         }
     }
+
+    // ── Async transcription jobs ──────────────────────────────────────────────
+    // Transcription with ffmpeg extraction can take 2-5 minutes — far beyond the
+    // DigitalOcean App Platform's 30-second gateway timeout. This submit/poll
+    // pattern keeps every HTTP leg under 5 seconds.
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, TranscribeJob> _transcribeJobs = new();
+
+    private sealed class TranscribeJob
+    {
+        public string Status { get; set; } = "queued"; // queued|processing|completed|failed
+        public string? Error { get; set; }
+        public string? ResultJson { get; set; }
+        public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Submit an audio file for async transcription. Returns a job ID immediately;
+    /// use GET .../jobs/{jobId} to poll until status == "completed".
+    /// </summary>
+    [HttpPost("assemblyai/transcribe/jobs")]
+    [RequestSizeLimit(524_288_000)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 524_288_000)]
+    public async Task<IActionResult> SubmitTranscribeJob(
+        IFormFile audioFile,
+        [FromForm] string speechModel = "universal-3-5-pro",
+        [FromForm] bool wordTimestamps = true,
+        [FromForm] bool extractAudioFirst = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (audioFile is null || audioFile.Length == 0)
+            return BadRequest(new { message = "Please attach an audio file." });
+
+        var contentType = audioFile.ContentType ?? "application/octet-stream";
+        if (!AllowedContentTypes.Contains(contentType))
+            return BadRequest(new { message = $"Unsupported content type '{contentType}'." });
+
+        // Buffer file to memory so it survives the request lifetime
+        using var ms = new System.IO.MemoryStream();
+        await audioFile.OpenReadStream().CopyToAsync(ms, cancellationToken);
+        var fileBytes = ms.ToArray();
+        var fileName  = audioFile.FileName ?? "upload.wav";
+
+        var jobId = Guid.NewGuid().ToString("N");
+        var job   = new TranscribeJob();
+        _transcribeJobs[jobId] = job;
+
+        // Prune old jobs (>15 min) — best-effort, non-blocking
+        var pruneTime = DateTime.UtcNow.AddMinutes(-15);
+        foreach (var kvp in _transcribeJobs)
+        {
+            if (kvp.Value.CreatedAt < pruneTime)
+                _transcribeJobs.TryRemove(kvp.Key, out _);
+        }
+
+        // Fire-and-forget background work
+        _ = Task.Run(async () =>
+        {
+            job.Status = "processing";
+            try
+            {
+                using var client = _httpClientFactory.CreateClient("AudioServiceLong");
+                using var multipart = new MultipartFormDataContent();
+                var fc = new ByteArrayContent(fileBytes);
+                fc.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+                multipart.Add(fc, "file", fileName);
+                multipart.Add(new StringContent(speechModel),                      "speech_model");
+                multipart.Add(new StringContent(wordTimestamps ? "true" : "false"), "word_timestamps");
+                multipart.Add(new StringContent(extractAudioFirst ? "true" : "false"), "extract_audio_first");
+
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(12));
+                var upstream = await client.PostAsync("/assemblyai/transcribe-file", multipart, cts.Token);
+                var body = await upstream.Content.ReadAsStringAsync(cts.Token);
+
+                if (!upstream.IsSuccessStatusCode)
+                {
+                    job.Error  = $"Transcription service returned {(int)upstream.StatusCode}.";
+                    job.Status = "failed";
+                }
+                else
+                {
+                    job.ResultJson = body;
+                    job.Status     = "completed";
+                }
+            }
+            catch (Exception ex)
+            {
+                job.Error  = ex.Message;
+                job.Status = "failed";
+                _logger.LogWarning(ex, "Async transcription job {JobId} failed.", jobId);
+            }
+        });
+
+        return Accepted(new { job_id = jobId, status = "queued" });
+    }
+
+    [HttpGet("assemblyai/transcribe/jobs/{jobId}")]
+    [AllowAnonymous]
+    public IActionResult GetTranscribeJobStatus(string jobId)
+    {
+        if (!_transcribeJobs.TryGetValue(jobId, out var job))
+            return NotFound(new { message = "Job not found or expired." });
+
+        if (job.Status == "completed" && job.ResultJson is not null)
+        {
+            _transcribeJobs.TryRemove(jobId, out _);
+            return Content($"{{\"status\":\"completed\",\"result\":{job.ResultJson}}}", "application/json");
+        }
+
+        return Ok(new { status = job.Status, error = job.Error });
+    }
+
+    /// <summary>
+    /// Submit a URL for async transcription. Returns a job ID immediately.
+    /// </summary>
+    [HttpPost("assemblyai/transcribe-url/jobs")]
+    public async Task<IActionResult> SubmitTranscribeUrlJob(
+        [FromBody] AssemblyAiUrlRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.AudioUrl))
+            return BadRequest(new { message = "audioUrl is required." });
+
+        var jobId = Guid.NewGuid().ToString("N");
+        var job   = new TranscribeJob();
+        _transcribeJobs[jobId] = job;
+
+        var audioUrl   = request.AudioUrl;
+        var speechModel = request.SpeechModel ?? "universal-3-5-pro";
+
+        _ = Task.Run(async () =>
+        {
+            job.Status = "processing";
+            try
+            {
+                using var client = _httpClientFactory.CreateClient("AudioServiceLong");
+                using var payload = new StringContent(JsonSerializer.Serialize(new
+                {
+                    audio_url       = audioUrl,
+                    speech_model    = speechModel,
+                    word_timestamps = true,
+                }), Encoding.UTF8, "application/json");
+
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(12));
+                var upstream = await client.PostAsync("/assemblyai/transcribe-url", payload, cts.Token);
+                var body = await upstream.Content.ReadAsStringAsync(cts.Token);
+
+                if (!upstream.IsSuccessStatusCode)
+                {
+                    job.Error  = $"Transcription service returned {(int)upstream.StatusCode}.";
+                    job.Status = "failed";
+                }
+                else
+                {
+                    job.ResultJson = body;
+                    job.Status     = "completed";
+                }
+            }
+            catch (Exception ex)
+            {
+                job.Error  = ex.Message;
+                job.Status = "failed";
+                _logger.LogWarning(ex, "Async URL transcription job {JobId} failed.", jobId);
+            }
+        });
+
+        return Accepted(new { job_id = jobId, status = "queued" });
+    }
 }
 
 
