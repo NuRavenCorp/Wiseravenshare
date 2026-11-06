@@ -3,12 +3,14 @@ import ReactPlayer from "react-player";
 import { X } from "lucide-react";
 import { getPlayableUrl } from "@/lib/mediaUtils";
 import ZoomableImage from "@/components/media/ZoomableImage";
-import MusicPlayer from "@/components/media/MusicPlayer";
+import { usePlayer } from "@/lib/PlayerContext";
 
 const MediaExperienceContext = createContext(null);
 
 export function MediaExperienceProvider({ children }) {
   const [request, setRequest] = useState(null);
+  const player = usePlayer();
+
   const openMedia = useCallback((media) => {
     const kind = String(media?.type || media?.asset_type || "").toLowerCase();
     const type = kind === "audio" || kind === "music" ? "music"
@@ -17,8 +19,19 @@ export function MediaExperienceProvider({ children }) {
     const mediaId = media?.id ?? media?.trackId ?? media?.TrackId ?? media?.assetId ?? media?.AssetId ?? null;
     const url = media?.url || media?.file_uri || media?.mediaUrl || media?.videoUrl || media?.imageUrl || "";
     if (!type || (!url && !(type === "music" && mediaId))) return;
-    setRequest({ ...media, id: mediaId ?? media?.id, type, url, title: media.title || media.fileName || "Untitled media" });
-  }, []);
+
+    const normalized = { ...media, id: mediaId ?? media?.id, type, url, title: media.title || media.fileName || "Untitled media" };
+
+    if (type === "music") {
+      // Route music to the persistent player — no modal needed
+      const queue = Array.isArray(media.queue) && media.queue.length > 0 ? media.queue : null;
+      player.loadTrack(normalized, queue, true);
+      return;
+    }
+
+    setRequest(normalized);
+  }, [player]);
+
   const closeMedia = useCallback(() => setRequest(null), []);
 
   return (
@@ -62,8 +75,7 @@ function MediaExperienceModal({ request, onClose }) {
           <h2 className="truncate text-sm font-semibold">{request.title}</h2>
           <button type="button" onClick={onClose} aria-label="Close media player" className="rounded p-1 text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
         </header>
-        {request.type === "music" ? <MusicPlayer initialTrack={request} initialQueue={request.queue} />
-          : mediaError ? <p role="alert" className="py-16 text-center text-sm text-destructive">{mediaError}</p>
+        {mediaError ? <p role="alert" className="py-16 text-center text-sm text-destructive">{mediaError}</p>
           : !url ? <div className="py-16 text-center text-sm text-muted-foreground">Loading media…</div>
           : request.type === "photo" ? <ZoomableImage src={url} alt={request.title} className="mx-auto h-[78vh] w-full rounded-lg" fittingType="fill" />
           : (

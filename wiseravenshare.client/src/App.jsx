@@ -4,9 +4,11 @@ import { queryClientInstance } from '@/lib/query-client'
 import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
+import { PlayerProvider, usePlayer } from '@/lib/PlayerContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ScrollToTop from './components/ScrollToTop';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import MiniPlayerBar from '@/components/media/MiniPlayerBar';
 // Add page imports here
 import Home from '@/pages/Home';
 import Login from '@/pages/Login';
@@ -37,6 +39,12 @@ import AdminRoute from '@/components/AdminRoute';
 import CreatePostButton from '@/components/feed/CreatePostButton';
 import { MediaExperienceProvider } from '@/components/media/MediaExperience';
 
+// Adds bottom padding when the mini player is visible so content isn't hidden
+function PlayerBarSpacer() {
+  const { currentTrack } = usePlayer();
+  return currentTrack ? <div className="h-16" aria-hidden="true" /> : null;
+}
+
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
 
@@ -63,6 +71,7 @@ const AuthenticatedApp = () => {
   // Render the main app
   return (
     <MediaExperienceProvider>
+    <PlayerBarSpacer />
     <Routes>
       {/* Add your page Route elements here */}
       <Route path="/" element={<Home />} />
@@ -107,8 +116,11 @@ function App() {
     <AuthProvider>
       <QueryClientProvider client={queryClientInstance}>
         <Router>
-          <ScrollToTop />
-          <AuthenticatedApp />
+          <PlayerProvider>
+            <ScrollToTop />
+            <AuthenticatedApp />
+            <MiniPlayerBar />
+          </PlayerProvider>
         </Router>
         <Toaster />
       </QueryClientProvider>
