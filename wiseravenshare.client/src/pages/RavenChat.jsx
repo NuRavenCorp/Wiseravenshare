@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Bot, Send, Plus, Loader2, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { apiClient, resolveApiUrl } from "@/api/client";
+import { apiClient } from "@/api/client";
 
 function MessageBubble({ message }) {
   const isUser = message.role === "user";
