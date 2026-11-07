@@ -81,11 +81,8 @@ export default function PostsFeed() {
   const fetchPosts = useCallback(async () => {
     setLoading(true);
     try {
-      const authenticated = await apiClient.auth.isAuthenticated();
       let user = null;
-      if (authenticated) {
-        try { user = await apiClient.auth.me(); } catch { /* use public trending feed */ }
-      }
+      try { user = await apiClient.auth.me(); } catch { /* proceed with non-ranked following feed */ }
       setCurrentUser(user);
       if (user) {
         const blocks = await apiClient.social.myBlocks().catch(() => []);
@@ -100,17 +97,21 @@ export default function PostsFeed() {
         setBlockedIds([]);
       }
       let feedResult;
-      if (mode === "following" && user) {
+      if (mode === "following") {
         let rankedFeed = null;
-        try {
-          rankedFeed = await apiClient.posts.rankedFeed(user.id, 40, 30);
-        } catch {
-          rankedFeed = null;
+        if (user?.id) {
+          try {
+            rankedFeed = await apiClient.posts.rankedFeed(user.id, 40, 30);
+          } catch {
+            rankedFeed = null;
+          }
         }
 
         feedResult = await apiClient.posts.feed(1, 40);
         let feedItems = Array.isArray(feedResult) ? feedResult : (feedResult?.items || []);
-        feedItems = applyRankedOrder(feedItems, rankedFeed);
+        if (rankedFeed) {
+          feedItems = applyRankedOrder(feedItems, rankedFeed);
+        }
         if (feedItems.length === 0) {
           feedResult = await apiClient.posts.trending(40);
           feedItems = Array.isArray(feedResult) ? feedResult : (feedResult?.items || []);
