@@ -742,8 +742,28 @@ public class PostService : IPostService
     {
         try
         {
-            var posts = await _postFeedRankingService.GenerateFeedAsync(userId, page, pageSize);
-            return await MapToPostDtosAsync(posts, userId);
+            var rankedPosts = await _postFeedRankingService.GenerateFeedAsync(userId, page, pageSize);
+            if (rankedPosts.Count > 0)
+            {
+                return await MapToPostDtosAsync(rankedPosts, userId);
+            }
+
+            _logger.LogInformation("Ranked feed returned no items for user {UserId}; falling back to repository feed.", userId);
+            var repositoryFeed = (await _postRepository.GetFeedAsync(userId, page, pageSize)).ToList();
+            if (repositoryFeed.Count > 0)
+            {
+                return await MapToPostDtosAsync(repositoryFeed, userId);
+            }
+
+            var ownPosts = await _postRepository.FindAsync(p => !p.IsDeleted && p.UserId == userId);
+            var ownOrdered = ownPosts.OrderByDescending(p => p.CreatedAt).Take(pageSize).ToList();
+            if (ownOrdered.Count > 0)
+            {
+                return await MapToPostDtosAsync(ownOrdered, userId);
+            }
+
+            var trendingFallback = await _postRepository.GetTrendingPostsAsync(Math.Max(pageSize, 10));
+            return await MapToPostDtosAsync(trendingFallback, userId);
         }
         catch (Exception ex)
         {

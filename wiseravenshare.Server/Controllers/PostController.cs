@@ -52,31 +52,23 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> CreatePost([FromBody] CreatePostDto dto)
         {
+            if (User.Identity?.IsAuthenticated != true)
+            {
+                return Unauthorized(new { message = "Sign in to publish posts to your feed." });
+            }
+
             try
             {
-                if (User.Identity?.IsAuthenticated == true)
-                {
-                    var userId = await ResolveEffectiveUserIdAsync();
-                    var post = await _postService.CreatePostAsync(userId, dto);
-                    await TryTrackPostCreationAsync(userId, post);
-                    await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-                    return CreatedAtAction(nameof(GetPost), new { id = post.Id }, post);
-                }
-
-                var fallbackUserId = Guid.NewGuid();
-                var fallbackPost = await _postService.CreatePostAsync(fallbackUserId, dto);
-                await TryTrackPostCreationAsync(fallbackUserId, fallbackPost);
+                var userId = await ResolveEffectiveUserIdAsync();
+                var post = await _postService.CreatePostAsync(userId, dto);
+                await TryTrackPostCreationAsync(userId, post);
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-                return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
+                return CreatedAtAction(nameof(GetPost), new { id = post.Id }, post);
             }
             catch (UnauthorizedAccessException ex)
             {
-                _logger.LogWarning(ex, "Authenticated identity could not be resolved for post create; falling back to anonymous publisher.");
-                var fallbackUserId = Guid.NewGuid();
-                var fallbackPost = await _postService.CreatePostAsync(fallbackUserId, dto);
-                await TryTrackPostCreationAsync(fallbackUserId, fallbackPost);
-                await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
-                return CreatedAtAction(nameof(GetPost), new { id = fallbackPost.Id }, fallbackPost);
+                _logger.LogWarning(ex, "Authenticated identity could not be resolved for post create.");
+                return Unauthorized(new { message = "Your session could not be verified. Please sign in again and retry." });
             }
             catch (InvalidOperationException ex)
             {
@@ -122,9 +114,12 @@ namespace Wiseravenshare.Server.Controllers
                 return BadRequest(new { message = "At least one post is required to create a thread." });
             }
 
-            var userId = User.Identity?.IsAuthenticated == true
-                ? await ResolveEffectiveUserIdAsync()
-                : Guid.NewGuid();
+            if (User.Identity?.IsAuthenticated != true)
+            {
+                return Unauthorized(new { message = "Sign in to publish threads to your feed." });
+            }
+
+            var userId = await ResolveEffectiveUserIdAsync();
 
             var created = new List<PostDto>(dto.Posts.Count);
             Guid? nextReplyToId = dto.ReplyToId;
