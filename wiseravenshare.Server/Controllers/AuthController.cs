@@ -857,6 +857,10 @@ public class AuthController : ControllerBase
                   <ul>
                     <li>https://wise-ravens.com/api/auth/oauth/google/callback</li>
                     <li>https://wiseravenshare.com/api/auth/oauth/google/callback</li>
+                    <li>https://wise-ravens.com/api/auth/oauth/facebook/callback</li>
+                    <li>https://wiseravenshare.com/api/auth/oauth/facebook/callback</li>
+                    <li>https://wise-ravens.com/api/auth/oauth/instagram/callback</li>
+                    <li>https://wiseravenshare.com/api/auth/oauth/instagram/callback</li>
                     <li>https://wise-ravens.com/api/auth/oauth/youtube/callback</li>
                     <li>https://wiseravenshare.com/api/auth/oauth/youtube/callback</li>
                   </ul>
@@ -2538,6 +2542,18 @@ public class AuthController : ControllerBase
         }
 
         var origin = ResolvePublicAppOrigin();
+        if (string.Equals(provider, "facebook", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(provider, "instagram", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
+            {
+                if (string.Equals(originUri.Host, "wise-ravens.com", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(originUri.Host, "www.wise-ravens.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    origin = "https://wiseravenshare.com";
+                }
+            }
+        }
         return $"{origin}{callbackPath}";
     }
 
@@ -2591,7 +2607,11 @@ public class AuthController : ControllerBase
 
         var allowedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            fallbackUri.Host
+            fallbackUri.Host,
+            "wiseravenshare.com",
+            "www.wiseravenshare.com",
+            "wise-ravens.com",
+            "www.wise-ravens.com"
         };
 
         if (Request.Host.HasValue && !string.IsNullOrWhiteSpace(Request.Host.Host))

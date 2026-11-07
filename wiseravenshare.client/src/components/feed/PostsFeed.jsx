@@ -44,6 +44,9 @@ export default function PostsFeed() {
   const [mode, setMode] = useState("following");
   const [tag, setTag] = useState("");
 
+  // Track optimistically-added posts so they survive server re-fetches.
+  const optimisticPostsRef = React.useRef(new Map());
+
   const applyRankedOrder = useCallback((feedItems, rankedPayload) => {
     const items = Array.isArray(feedItems) ? [...feedItems] : [];
     const rankedRows = Array.isArray(rankedPayload?.posts) ? rankedPayload.posts : [];
@@ -130,9 +133,14 @@ export default function PostsFeed() {
         feedResult = await apiClient.posts.trending(40);
       }
       const normalized = (Array.isArray(feedResult) ? feedResult : feedResult?.items || []).map(normalizePost);
-      setPosts((current) => (preserveExistingOnEmpty && normalized.length === 0 && current.length > 0 ? current : normalized));
+      // Merge optimistic posts (created this session) that the server hasn't returned yet.
+      const optimisticIds = new Set(normalized.map((p) => String(p.id)));
+      const survivingOptimistic = Array.from(optimisticPostsRef.current.values())
+        .filter((p) => !optimisticIds.has(String(p.id)));
+      const merged = [...survivingOptimistic, ...normalized];
+      setPosts((current) => (preserveExistingOnEmpty && merged.length === 0 && current.length > 0 ? current : merged));
       setShowComposer(Boolean(user));
-      return normalized;
+      return merged;
     } catch (error) {
       console.error("Could not load social feed", error);
       setPosts([]);
@@ -218,9 +226,13 @@ export default function PostsFeed() {
   const handlePosted = async (createdPost) => {
     if (createdPost) {
       const normalizedCreatedPost = normalizePost(createdPost);
+      // Register in optimistic store so it survives server re-fetches.
+      optimisticPostsRef.current.set(String(normalizedCreatedPost.id), normalizedCreatedPost);
       setPosts((current) => [normalizedCreatedPost, ...current.filter((post) => post.id !== normalizedCreatedPost.id)]);
       setView("feed");
-      setMode("following");
+      // Only switch mode if not already in "following" — avoids rebuilding fetchPosts and
+      // firing the useEffect a second time while the explicit fetch below is in flight.
+      if (mode !== "following") setMode("following");
       await fetchPosts({ preserveExistingOnEmpty: true });
       return;
     }

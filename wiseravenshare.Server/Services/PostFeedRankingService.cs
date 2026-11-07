@@ -43,9 +43,22 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
         var nowUtc = DateTime.UtcNow;
         var ctx = await BuildViewerContextAsync(userId, nowUtc, cancellationToken);
         var candidates = await GatherCandidatesAsync(userId, ctx, nowUtc, cancellationToken);
+
+        // Always guarantee the author's own most-recent posts appear on page 1, independent of
+        // scoring — this prevents new/low-engagement posts from being invisible to their author.
+        var guaranteedOwnPosts = new List<Post>();
+        if (safePage == 1)
+        {
+            guaranteedOwnPosts = candidates.NewPosts
+                .Where(p => p.UserId == userId)
+                .OrderByDescending(p => p.CreatedAt)
+                .Take(10)
+                .ToList();
+        }
+
         if (candidates.NewPosts.Count == 0 && candidates.OldPosts.Count == 0)
         {
-            return Array.Empty<Post>();
+            return guaranteedOwnPosts;
         }
 
         var allCandidates = candidates.NewPosts
@@ -76,9 +89,13 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
 
         var scoredNew = new List<ScoredPost>();
         var scoredOld = new List<ScoredPost>();
+        var guaranteedIds = new HashSet<Guid>(guaranteedOwnPosts.Select(p => p.Id));
 
         foreach (var post in allCandidates)
         {
+            // Own posts are pinned at top — skip re-scoring them to avoid double-entries.
+            if (guaranteedIds.Contains(post.Id)) continue;
+
             var postTopics = ExtractTopics(post);
             var postVector = ToUnitVector(postTopics);
 
@@ -115,7 +132,14 @@ public sealed class PostFeedRankingService : IPostFeedRankingService
             .Select(item => item.Post)
             .ToList();
 
-        if (safePage == 1)
+        // Prepend guaranteed own posts (already ordered by recency) before ranking/diversity.
+        if (safePage == 1 && guaranteedOwnPosts.Count > 0)
+        {
+            rankedNew = guaranteedOwnPosts
+                .Concat(rankedNew.Where(p => !guaranteedIds.Contains(p.Id)))
+                .ToList();
+        }
+        else if (safePage == 1)
         {
             rankedNew = EnsureRecentAuthorVisibility(rankedNew, userId, nowUtc);
         }
