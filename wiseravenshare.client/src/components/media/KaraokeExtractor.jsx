@@ -90,6 +90,12 @@ function shouldFallbackFromAsync(err) {
 function normalizeExtractionError(err, fallback = "Word extraction failed.") {
   const msg = String(err?.message || fallback);
   const lower = msg.toLowerCase();
+  if (lower.includes("failed to load media")) {
+    return "Selected track media could not be loaded. The file may be missing or unavailable; try another track or re-upload it.";
+  }
+  if (lower.includes("timed out at the network gateway") || lower.includes("job may still complete in the background")) {
+    return "Word extraction is still processing on the server. Refresh shortly to load completed lyrics.";
+  }
   if (isHtml503(err) || msg.includes("<!DOCTYPE") || msg.includes("<html")) {
     return "Word extraction timed out at the network gateway. Please try a shorter clip or retry in a few minutes.";
   }
