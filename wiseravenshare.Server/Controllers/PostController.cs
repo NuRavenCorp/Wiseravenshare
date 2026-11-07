@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Interfaces.Repositories;
@@ -193,9 +195,16 @@ namespace Wiseravenshare.Server.Controllers
         {
             if (User.Identity?.IsAuthenticated == true)
             {
-                var userId = await ResolveEffectiveUserIdAsync();
-                var posts = await _postService.GetFeedAsync(userId, page, pageSize);
-                return Ok(posts);
+                try
+                {
+                    var userId = await ResolveEffectiveUserIdAsync();
+                    var posts = await _postService.GetFeedAsync(userId, page, pageSize);
+                    return Ok(posts);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Authenticated feed lookup failed; returning trending fallback.");
+                }
             }
 
             var fallbackPosts = await _postService.GetTrendingPostsAsync(Math.Max(pageSize, 10));
@@ -677,6 +686,13 @@ namespace Wiseravenshare.Server.Controllers
                 ?? User.FindFirstValue("preferred_username")
                 ?? string.Empty).Trim();
 
+            var stableIdentitySeed = !string.IsNullOrWhiteSpace(rawClaimId)
+                ? rawClaimId.Trim()
+                : (!string.IsNullOrWhiteSpace(username) ? username : "authenticated-user");
+            var deterministicUserId = hasGuidClaim
+                ? claimUserId
+                : CreateDeterministicGuid($"wiseravenshare-posts:{stableIdentitySeed}");
+
             if (!string.IsNullOrWhiteSpace(username))
             {
                 try
@@ -704,7 +720,7 @@ namespace Wiseravenshare.Server.Controllers
             {
                 email = hasGuidClaim
                     ? $"local-{claimUserId:N}@local"
-                    : $"local-{Guid.NewGuid():N}@local";
+                    : $"local-{deterministicUserId:N}@local";
             }
 
             try
@@ -732,12 +748,12 @@ namespace Wiseravenshare.Server.Controllers
             var sanitizedUsername = new string(usernameSeed.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(sanitizedUsername))
             {
-                sanitizedUsername = $"localuser-{claimUserId.ToString("N")[..6]}";
+                sanitizedUsername = $"localuser-{deterministicUserId.ToString("N")[..6]}";
             }
 
             try
             {
-                var resolvedUserId = hasGuidClaim ? claimUserId : Guid.NewGuid();
+                var resolvedUserId = deterministicUserId;
                 var created = await _userRepository.AddAsync(new Wiseravenshare.Server.Entities.User
                 {
                     Id = resolvedUserId,
@@ -757,10 +773,19 @@ namespace Wiseravenshare.Server.Controllers
                 _logger.LogWarning(ex, "Failed to auto-provision missing domain user {UserId} for {Email}.", claimUserId, email);
                 try
                 {
-                    var fallbackById = await _userRepository.GetByIdAsync(claimUserId);
-                    if (fallbackById is not null)
+                    if (claimUserId != Guid.Empty)
                     {
-                        return fallbackById.Id;
+                        var fallbackById = await _userRepository.GetByIdAsync(claimUserId);
+                        if (fallbackById is not null)
+                        {
+                            return fallbackById.Id;
+                        }
+                    }
+
+                    var fallbackByDeterministicId = await _userRepository.GetByIdAsync(deterministicUserId);
+                    if (fallbackByDeterministicId is not null)
+                    {
+                        return fallbackByDeterministicId.Id;
                     }
 
                     var fallbackByEmail = await _userRepository.GetByEmailAsync(email);
@@ -781,7 +806,18 @@ namespace Wiseravenshare.Server.Controllers
                 return claimUserId;
             }
 
-            throw new UnauthorizedAccessException("Authenticated identity could not be mapped to a domain user.");
+            _logger.LogWarning("Falling back to deterministic identity {UserId} after unresolved domain mapping.", deterministicUserId);
+            return deterministicUserId;
+        }
+
+        private static Guid CreateDeterministicGuid(string seed)
+        {
+            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(seed ?? string.Empty));
+            Span<byte> guidBytes = stackalloc byte[16];
+            bytes.AsSpan(0, 16).CopyTo(guidBytes);
+            guidBytes[6] = (byte)((guidBytes[6] & 0x0F) | 0x40); // version 4-style layout
+            guidBytes[8] = (byte)((guidBytes[8] & 0x3F) | 0x80); // RFC 4122 variant
+            return new Guid(guidBytes);
         }
     }
 }

@@ -78,7 +78,7 @@ export default function PostsFeed() {
     return ordered;
   }, []);
 
-  const fetchPosts = useCallback(async () => {
+  const fetchPosts = useCallback(async ({ preserveExistingOnEmpty = false } = {}) => {
     setLoading(true);
     try {
       let user = null;
@@ -113,6 +113,15 @@ export default function PostsFeed() {
           feedItems = applyRankedOrder(feedItems, rankedFeed);
         }
         if (feedItems.length === 0) {
+          if (user?.id) {
+            const ownPostsResult = await apiClient.posts.userPosts(user.id, 1, 40).catch(() => []);
+            const ownPosts = Array.isArray(ownPostsResult) ? ownPostsResult : (ownPostsResult?.items || []);
+            if (ownPosts.length > 0) {
+              feedItems = ownPosts;
+            }
+          }
+        }
+        if (feedItems.length === 0) {
           feedResult = await apiClient.posts.trending(40);
           feedItems = Array.isArray(feedResult) ? feedResult : (feedResult?.items || []);
         }
@@ -121,11 +130,13 @@ export default function PostsFeed() {
         feedResult = await apiClient.posts.trending(40);
       }
       const normalized = (Array.isArray(feedResult) ? feedResult : feedResult?.items || []).map(normalizePost);
-      setPosts(normalized);
+      setPosts((current) => (preserveExistingOnEmpty && normalized.length === 0 && current.length > 0 ? current : normalized));
       setShowComposer(Boolean(user));
+      return normalized;
     } catch (error) {
       console.error("Could not load social feed", error);
       setPosts([]);
+      return [];
     } finally {
       setLoading(false);
     }
@@ -210,6 +221,8 @@ export default function PostsFeed() {
       setPosts((current) => [normalizedCreatedPost, ...current.filter((post) => post.id !== normalizedCreatedPost.id)]);
       setView("feed");
       setMode("following");
+      await fetchPosts({ preserveExistingOnEmpty: true });
+      return;
     }
     await fetchPosts();
   };
