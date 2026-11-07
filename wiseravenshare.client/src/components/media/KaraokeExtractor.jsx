@@ -90,6 +90,9 @@ function shouldFallbackFromAsync(err) {
 function normalizeExtractionError(err, fallback = "Word extraction failed.") {
   const msg = String(err?.message || fallback);
   const lower = msg.toLowerCase();
+  if (lower.includes("could not be found (404)") || lower.includes("source file may have been removed")) {
+    return "Selected track is no longer available in media storage. Re-upload the track, then retry extraction.";
+  }
   if (lower.includes("failed to load media")) {
     return "Selected track media could not be loaded. The file may be missing or unavailable; try another track or re-upload it.";
   }
@@ -306,7 +309,15 @@ async function transcribeUrl(url, fileName) {
   }
 
   const response = await fetch(url, { credentials, headers });
-  if (!response.ok) throw new Error(`Failed to load media (${response.status})`);
+  if (!response.ok) {
+    const mediaError = new Error(
+      response.status === 404
+        ? "Selected track media could not be found (404). The source file may have been removed."
+        : `Selected track media could not be loaded (${response.status}).`
+    );
+    mediaError.status = response.status;
+    throw mediaError;
+  }
   const blob = await response.blob();
   const normalizedName = normalizeFileName(fileName || "karaoke-media", url, blob.type);
   const file = new File([blob], normalizedName, { type: blob.type || "application/octet-stream" });
