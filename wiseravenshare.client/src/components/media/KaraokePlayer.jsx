@@ -161,10 +161,49 @@ export default function KaraokePlayer({ song, onClose, onSaved, karaokeLines: ka
     setExtractingAi(true);
     setExtractError("");
     try {
-      // Use URL transcription endpoint
-      const result = await apiClient.podcastAudio.transcribeUrl(audioUrl, {
-        wordTimestamps: true,
-      });
+      const normalizedAudioUrl = String(audioUrl).startsWith("/") && typeof window !== "undefined"
+        ? `${window.location.origin}${audioUrl}`
+        : String(audioUrl);
+
+      let result = null;
+
+      // Primary path: async job + polling (avoids reverse proxy timeouts)
+      try {
+        const submission = await apiClient.requestJson(
+          "/api/podcast-audio/assemblyai/transcribe-url/jobs",
+          {
+            method: "POST",
+            body: JSON.stringify({ audioUrl: normalizedAudioUrl, speechModel: "universal-3-5-pro", wordTimestamps: true }),
+          }
+        );
+        if (submission?.job_id) {
+          const maxMs = 600_000;
+          const start = Date.now();
+          while (Date.now() - start < maxMs) {
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            const statusResp = await apiClient.requestJson(
+              `/api/podcast-audio/assemblyai/transcribe/jobs/${encodeURIComponent(submission.job_id)}`,
+              { method: "GET" }
+            );
+            if (statusResp?.status === "completed") {
+              result = statusResp.result;
+              break;
+            }
+            if (statusResp?.status === "failed") {
+              throw new Error(statusResp.error || "Transcription job failed.");
+            }
+          }
+        }
+      } catch (jobErr) {
+        console.warn("Async transcribe job failed or unavailable, falling back to sync endpoint", jobErr);
+      }
+
+      // Sync fallback
+      if (!result) {
+        result = await apiClient.podcastAudio.transcribeUrl(normalizedAudioUrl, {
+          wordTimestamps: true,
+        });
+      }
 
       const lrc = result?.lrc || "";
       const text = result?.text || result?.lyrics || "";

@@ -89,7 +89,12 @@ function shouldFallbackFromAsync(err) {
   const status = Number(err?.status || 0);
   if ([400, 401, 403, 404, 405, 429, 500, 502, 503, 504].includes(status)) return true;
   const msg = String(err?.message || "").toLowerCase();
-  return msg.includes("connection refused") || msg.includes("econnrefused") || msg.includes("timeout");
+  return msg.includes("connection refused")
+    || msg.includes("econnrefused")
+    || msg.includes("timeout")
+    || msg.includes("audio_url is invalid")
+    || msg.includes("disallowed address")
+    || msg.includes("assemblyai submit failed (400)");
 }
 
 function normalizeExtractionError(err, fallback = "Word extraction failed.") {
@@ -110,6 +115,9 @@ function normalizeExtractionError(err, fallback = "Word extraction failed.") {
   if (lower.includes("connection refused") || lower.includes("econnrefused") || lower.includes("localhost:8001")) {
     return "Transcription backend is currently offline (audio service not running). Please retry shortly.";
   }
+  if (lower.includes("audio_url is invalid") || lower.includes("disallowed address")) {
+    return "The audio source address could not be reached by the AI transcription service. Please try re-uploading the track.";
+  }
   return msg;
 }
 
@@ -124,7 +132,13 @@ async function pollTranscribeJob(jobId, { intervalMs = 3000, maxMs = 600_000 } =
     );
     if (resp?.status === "completed") return resp.result;
     if (resp?.status === "failed") {
-      throw new Error(resp.error || "Transcription job failed.");
+      const failureMessage = String(resp.error || "Transcription job failed.");
+      const failure = new Error(failureMessage);
+      const statusMatch = failureMessage.match(/\((\d{3})\)/);
+      if (statusMatch) {
+        failure.status = Number(statusMatch[1]);
+      }
+      throw failure;
     }
     // still queued/processing — keep polling
   }

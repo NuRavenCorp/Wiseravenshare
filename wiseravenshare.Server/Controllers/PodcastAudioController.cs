@@ -5,6 +5,9 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+using Wiseravenshare.Server.Infrastructure.Data;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -29,6 +32,7 @@ public sealed class PodcastAudioController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<PodcastAudioController> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     private static readonly HashSet<string> AllowedContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -44,14 +48,18 @@ public sealed class PodcastAudioController : ControllerBase
     // Karaoke context prompt sent to AssemblyAI U3.5 Pro for improved accuracy.
     private const string KaraokePrompt = "Music lyrics being sung. Transcribe each word accurately including all repetitions and filler words.";
 
+    private string BucketsRoot => _configuration["Persistence:BucketsRoot"] ?? "/app/Buckets";
+
     public PodcastAudioController(
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        ILogger<PodcastAudioController> logger)
+        ILogger<PodcastAudioController> logger,
+        IServiceScopeFactory scopeFactory)
     {
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
+        _scopeFactory = scopeFactory;
     }
 
     // ── DTOs ──────────────────────────────────────────────────────────────────
@@ -119,6 +127,134 @@ public sealed class PodcastAudioController : ControllerBase
         return url;
     }
 
+    private static bool IsLocalOrPrivateAddress(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return true;
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return true;
+        var host = uri.Host;
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(host, "::1", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (System.Net.IPAddress.TryParse(host, out var ip))
+        {
+            if (System.Net.IPAddress.IsLoopback(ip)) return true;
+            var bytes = ip.GetAddressBytes();
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            {
+                if (bytes[0] == 10) return true;
+                if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
+                if (bytes[0] == 192 && bytes[1] == 168) return true;
+                if (bytes[0] == 169 && bytes[1] == 254) return true;
+            }
+        }
+        return false;
+    }
+
+    private async Task<(byte[] Bytes, string ContentType)> DownloadAudioBytesAsync(
+        string url,
+        string? authHeader,
+        CancellationToken ct)
+    {
+        using var client = _httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromMinutes(3);
+        if (!string.IsNullOrWhiteSpace(authHeader))
+        {
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", authHeader);
+        }
+        using var resp = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Failed to download audio from {url}: {(int)resp.StatusCode} {resp.ReasonPhrase}");
+        }
+        var contentType = resp.Content.Headers.ContentType?.MediaType ?? "audio/mpeg";
+        var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+        if (bytes.Length == 0)
+        {
+            throw new InvalidOperationException($"Downloaded audio from {url} was empty.");
+        }
+        return (bytes, contentType);
+    }
+
+    /// <summary>
+    /// Resolves audioUrl so AssemblyAI can access it.
+    /// If audioUrl points to a local karaoke song, reads directly from disk and uploads to /v2/upload.
+    /// If audioUrl is local/private/relative, downloads and uploads to /v2/upload.
+    /// </summary>
+    private async Task<string> PrepareAudioUrlForAssemblyAiAsync(
+        string audioUrl,
+        string? authHeader,
+        string? requestBaseUrl,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(audioUrl))
+            throw new ArgumentException("Audio URL cannot be empty.", nameof(audioUrl));
+
+        var trimmed = audioUrl.Trim();
+
+        // Already hosted on AssemblyAI CDN
+        if (trimmed.StartsWith("https://cdn.assemblyai.com/", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+
+        // Check if this points to a local KaraokeSongFile (e.g. /api/karaoke/songs/{id}/stream)
+        var songMatch = Regex.Match(trimmed, @"/api/karaoke/songs/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})", RegexOptions.IgnoreCase);
+        if (songMatch.Success && Guid.TryParse(songMatch.Groups[1].Value, out var songId))
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var song = await db.KaraokeSongFiles.AsNoTracking().FirstOrDefaultAsync(s => s.Id == songId && !s.IsDeleted, ct);
+            if (song != null)
+            {
+                if (song.IsMigratedToCloud && !string.IsNullOrWhiteSpace(song.CloudPublicUrl))
+                {
+                    trimmed = song.CloudPublicUrl;
+                }
+                else if (!string.IsNullOrWhiteSpace(song.LocalBucketKey))
+                {
+                    var fullPath = Path.Combine(BucketsRoot, song.LocalBucketKey);
+                    if (System.IO.File.Exists(fullPath))
+                    {
+                        var bytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct);
+                        var contentType = song.ContentType ?? "audio/mpeg";
+                        _logger.LogInformation("Uploading local karaoke song {SongId} ({Bytes} bytes) to AssemblyAI /v2/upload.", songId, bytes.Length);
+                        return await UploadFileAsync(bytes, contentType, ct);
+                    }
+                }
+            }
+        }
+
+        // Check if this is a direct path to a file on local disk
+        if (System.IO.File.Exists(trimmed))
+        {
+            var bytes = await System.IO.File.ReadAllBytesAsync(trimmed, ct);
+            return await UploadFileAsync(bytes, "audio/mpeg", ct);
+        }
+
+        // Resolve relative URL
+        var downloadUrl = trimmed;
+        if (downloadUrl.StartsWith("/", StringComparison.Ordinal))
+        {
+            var baseUri = !string.IsNullOrWhiteSpace(requestBaseUrl)
+                ? requestBaseUrl.TrimEnd('/')
+                : (_configuration["App:BaseUrl"] ?? "http://localhost:5000").TrimEnd('/');
+            downloadUrl = $"{baseUri}{downloadUrl}";
+        }
+
+        // If it's local / private address, AssemblyAI won't be able to reach it. Download and upload directly.
+        if (IsLocalOrPrivateAddress(downloadUrl))
+        {
+            _logger.LogInformation("Audio URL {Url} is local/private. Downloading and uploading to AssemblyAI /v2/upload.", downloadUrl);
+            var (bytes, contentType) = await DownloadAudioBytesAsync(downloadUrl, authHeader, ct);
+            return await UploadFileAsync(bytes, contentType, ct);
+        }
+
+        return downloadUrl;
+    }
+
     /// <summary>Submit a transcript job. Returns AssemblyAI transcript id.</summary>
     private async Task<string> SubmitTranscriptAsync(string audioUrl, CancellationToken ct)
     {
@@ -131,7 +267,7 @@ public sealed class PodcastAudioController : ControllerBase
             word_timestamps = true,
             punctuate = true,
             format_text = true,
-            prompt = "A commercially recorded song with sung lyrics.",
+            prompt = KaraokePrompt,
         }), Encoding.UTF8, "application/json");
 
         var resp = await client.PostAsync("/v2/transcript", payload, ct);
@@ -433,8 +569,35 @@ public sealed class PodcastAudioController : ControllerBase
 
         try
         {
-            var transcriptId = await SubmitTranscriptAsync(request.AudioUrl, cancellationToken);
-            var result       = await PollTranscriptAsync(transcriptId, cancellationToken);
+            var authHeader = Request.Headers.Authorization.ToString();
+            var baseUrl    = $"{Request.Scheme}://{Request.Host}";
+
+            string resolvedAudioUrl;
+            try
+            {
+                resolvedAudioUrl = await PrepareAudioUrlForAssemblyAiAsync(request.AudioUrl, authHeader, baseUrl, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Pre-resolving audio URL failed; attempting direct submission for {Url}.", request.AudioUrl);
+                resolvedAudioUrl = request.AudioUrl;
+            }
+
+            string transcriptId;
+            try
+            {
+                transcriptId = await SubmitTranscriptAsync(resolvedAudioUrl, cancellationToken);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("audio_url is invalid", StringComparison.OrdinalIgnoreCase)
+                                                    || ex.Message.Contains("disallowed address", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("AssemblyAI rejected URL ({Msg}). Downloading and uploading bytes to /v2/upload.", ex.Message);
+                var (bytes, contentType) = await DownloadAudioBytesAsync(resolvedAudioUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? resolvedAudioUrl : request.AudioUrl, authHeader, cancellationToken);
+                var uploadUrl = await UploadFileAsync(bytes, contentType, cancellationToken);
+                transcriptId  = await SubmitTranscriptAsync(uploadUrl, cancellationToken);
+            }
+
+            var result = await PollTranscriptAsync(transcriptId, cancellationToken);
             return Content(NormaliseToJson(result), "application/json");
         }
         catch (Exception ex)
@@ -533,12 +696,14 @@ public sealed class PodcastAudioController : ControllerBase
         if (string.IsNullOrWhiteSpace(key))
             return StatusCode(503, new { message = "AssemblyAI API key is not configured on the server." });
 
-        var userId = User.GetUserId();
-        var jobId  = Guid.NewGuid().ToString("N");
-        var job    = new TranscribeJob { UserId = userId != Guid.Empty ? userId : null };
+        var userId     = User.GetUserId();
+        var jobId      = Guid.NewGuid().ToString("N");
+        var job        = new TranscribeJob { UserId = userId != Guid.Empty ? userId : null };
         _transcribeJobs[jobId] = job;
 
-        var audioUrl = request.AudioUrl;
+        var audioUrl   = request.AudioUrl;
+        var authHeader = Request.Headers.Authorization.ToString();
+        var baseUrl    = $"{Request.Scheme}://{Request.Host}";
 
         _ = Task.Run(async () =>
         {
@@ -546,7 +711,31 @@ public sealed class PodcastAudioController : ControllerBase
             try
             {
                 using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(25));
-                var aaiId      = await SubmitTranscriptAsync(audioUrl, cts.Token);
+                string resolvedAudioUrl;
+                try
+                {
+                    resolvedAudioUrl = await PrepareAudioUrlForAssemblyAiAsync(audioUrl, authHeader, baseUrl, cts.Token);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Pre-resolving audio URL failed in job {JobId}; attempting direct submission for {Url}.", jobId, audioUrl);
+                    resolvedAudioUrl = audioUrl;
+                }
+
+                string aaiId;
+                try
+                {
+                    aaiId = await SubmitTranscriptAsync(resolvedAudioUrl, cts.Token);
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("audio_url is invalid", StringComparison.OrdinalIgnoreCase)
+                                                        || ex.Message.Contains("disallowed address", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("AssemblyAI rejected URL ({Msg}) in job {JobId}. Downloading and uploading bytes to /v2/upload.", ex.Message, jobId);
+                    var (bytes, contentType) = await DownloadAudioBytesAsync(resolvedAudioUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? resolvedAudioUrl : audioUrl, authHeader, cts.Token);
+                    var uploadUrl = await UploadFileAsync(bytes, contentType, cts.Token);
+                    aaiId = await SubmitTranscriptAsync(uploadUrl, cts.Token);
+                }
+
                 job.AaiTranscriptId = aaiId;
                 var result     = await PollTranscriptAsync(aaiId, cts.Token, TimeSpan.FromMinutes(22));
                 job.ResultJson = NormaliseToJson(result);
