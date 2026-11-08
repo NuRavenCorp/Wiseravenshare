@@ -1,6 +1,12 @@
 import React, { useMemo, useRef, useState } from "react";
 import { StreamingTranscriber } from "assemblyai";
 import { apiClient } from "@/api/client";
+import { appParams } from "@/lib/app-params";
+import {
+  createPerformance,
+  saveTurns,
+  completePerformance as completePerformanceApi,
+} from "@/api/KaraokeApi";
 import { Button } from "@/components/ui/button";
 import { Mic, Square, Loader2, Upload, RotateCcw } from "lucide-react";
 
@@ -49,9 +55,7 @@ export default function KaraokeTranscriber({
   const sourceNodeRef = useRef(null);
   const recordingChunksRef = useRef([]);
   const recordingMimeRef = useRef("audio/ogg;codecs=opus");
-  const pendingTurnWritesRef = useRef(new Set());
   const finalizedTurnsRef = useRef(new Map());
-  const failedTurnOrdersRef = useRef(new Set());
 
   const [status, setStatus] = useState("idle");
   const [liveText, setLiveText] = useState("");
@@ -128,25 +132,6 @@ export default function KaraokeTranscriber({
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
-  async function persistFinalizedTurnWithRetry(turnPayload, maxAttempts = 3) {
-    let lastError;
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        await apiClient.karaoke.persistFinalizedTurn(turnPayload);
-        failedTurnOrdersRef.current.delete(Number(turnPayload.turnOrder || 0));
-        return;
-      } catch (error) {
-        lastError = error;
-        if (attempt < maxAttempts) {
-          await waitMs(250 * attempt);
-        }
-      }
-    }
-
-    failedTurnOrdersRef.current.add(Number(turnPayload.turnOrder || 0));
-    throw lastError || new Error("Failed to persist finalized transcript turn.");
-  }
-
   async function uploadRecording(performanceId, recordingBlob) {
     setUploadStatus("requesting");
     setUploadProgress(0);
@@ -193,16 +178,13 @@ export default function KaraokeTranscriber({
     setRetainedRecording(null);
     recordingChunksRef.current = [];
     finalizedTurnsRef.current = new Map();
-    failedTurnOrdersRef.current = new Set();
 
     sessionTokenRef.current = `${effectiveSessionId}-${createUuid()}`;
-    performanceIdRef.current = createUuid();
+    performanceIdRef.current = "";
 
     if (isGuid(String(songMetadata?.trackId || ""))) {
-      await apiClient.karaoke.startPerformance(performanceIdRef.current, {
-        songId: songMetadata.trackId,
-        startedAtUtc: new Date().toISOString(),
-      });
+      const { id } = await createPerformance(songMetadata.trackId, appParams.token);
+      performanceIdRef.current = id;
     }
 
     const tokenPayload = {
@@ -242,26 +224,13 @@ export default function KaraokeTranscriber({
       setFinalLines((prev) => [...prev, turn.transcript]);
       setLiveText("");
 
-      const turnPayload = {
-        sessionId: sessionTokenRef.current,
+      const finalTurn = {
         turnOrder: Number(turn.turn_order || 0),
         transcript: turn.transcript,
-        endOfTurn: true,
-        words: (turn.words || []).map((w) => ({
-          word: w.word,
-          start: Number(w.start || 0),
-          end: Number(w.end || 0),
-        })),
+        startMilliseconds: Number(turn.words?.[0]?.start) || undefined,
+        endMilliseconds: Number(turn.words?.at(-1)?.end) || undefined,
       };
-      finalizedTurnsRef.current.set(turnPayload.turnOrder, turnPayload);
-
-      const pendingWrite = persistFinalizedTurnWithRetry(turnPayload).catch((error) => {
-        setTranscriptionError(
-          error?.message || "Some transcript turns failed to save. We'll retry before scoring."
-        );
-      });
-      pendingTurnWritesRef.current.add(pendingWrite);
-      pendingWrite.finally(() => pendingTurnWritesRef.current.delete(pendingWrite));
+      finalizedTurnsRef.current.set(finalTurn.turnOrder, finalTurn);
     });
 
     await transcriber.connect();
@@ -300,21 +269,6 @@ export default function KaraokeTranscriber({
     // Close stream first — billing stops here.
     await transcriberRef.current?.close();
     transcriberRef.current = null;
-    await Promise.allSettled(Array.from(pendingTurnWritesRef.current));
-
-    if (failedTurnOrdersRef.current.size > 0) {
-      for (const turnOrder of Array.from(failedTurnOrdersRef.current).sort((a, b) => a - b)) {
-        const payload = finalizedTurnsRef.current.get(turnOrder);
-        if (!payload) continue;
-        try {
-          await persistFinalizedTurnWithRetry(payload, 2);
-        } catch (error) {
-          setTranscriptionError(
-            error?.message || "Some transcript turns could not be saved."
-          );
-        }
-      }
-    }
 
     // Build recording blob from captured chunks.
     const chunks = recordingChunksRef.current;
@@ -324,19 +278,14 @@ export default function KaraokeTranscriber({
         ? new Blob(chunks, { type: recordingMimeRef.current })
         : null;
 
-    // Score if we have a valid performance.
+    // Save turns then score via /api/performances.
     let scoreResult = null;
-    if (
-      performanceIdRef.current &&
-      isGuid(String(songMetadata?.trackId || "")) &&
-      sessionTokenRef.current &&
-      finalLines.length > 0
-    ) {
+    if (isGuid(performanceIdRef.current) && finalizedTurnsRef.current.size > 0) {
       try {
-        scoreResult = await apiClient.karaoke.completePerformance(performanceIdRef.current, {
-          sessionId: sessionTokenRef.current,
-          songId: songMetadata.trackId,
-        });
+        const turns = Array.from(finalizedTurnsRef.current.values())
+          .sort((a, b) => a.turnOrder - b.turnOrder);
+        await saveTurns(performanceIdRef.current, turns, appParams.token);
+        scoreResult = await completePerformanceApi(performanceIdRef.current, appParams.token);
         if (typeof scoreResult?.score === "number") {
           setLyricScore(scoreResult.score);
           onScored?.(scoreResult);
