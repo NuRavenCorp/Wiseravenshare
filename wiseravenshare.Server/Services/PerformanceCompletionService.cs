@@ -61,18 +61,30 @@ public sealed class PerformanceCompletionService
     {
         var track = await _db.KaraokeTracks
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == songId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Song not found: {songId}");
+            .FirstOrDefaultAsync(x => x.Id == songId, cancellationToken);
 
-        var lyrics = string.IsNullOrWhiteSpace(track.PlainLyrics)
-            ? track.LrcContent
-            : track.PlainLyrics;
-
-        if (string.IsNullOrWhiteSpace(lyrics))
+        if (track is not null)
         {
-            throw new InvalidOperationException($"No licensed lyrics are configured for song {songId}.");
+            var trackLyrics = string.IsNullOrWhiteSpace(track.PlainLyrics)
+                ? track.LrcContent
+                : track.PlainLyrics;
+            if (!string.IsNullOrWhiteSpace(trackLyrics))
+                return trackLyrics;
         }
 
-        return lyrics;
+        var songFile = await _db.KaraokeSongFiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == songId, cancellationToken);
+
+        if (songFile is not null)
+        {
+            var fileLyrics = string.IsNullOrWhiteSpace(songFile.PlainLyrics)
+                ? songFile.LrcContent
+                : songFile.PlainLyrics;
+            if (!string.IsNullOrWhiteSpace(fileLyrics))
+                return fileLyrics;
+        }
+
+        return string.Empty;
     }
 }

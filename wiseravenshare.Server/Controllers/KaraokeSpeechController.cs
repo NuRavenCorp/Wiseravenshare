@@ -86,6 +86,19 @@ public sealed class KaraokeSpeechController : ControllerBase
             request?.TokenTtlSeconds ?? _configuration.GetValue("KaraokeSpeech:TokenTtlSeconds", 3600),
             300,
             3600);
+
+        var apiKey = _configuration["ASSEMBLYAI_API_KEY"]
+            ?? _configuration["AssemblyAi:ApiKey"]
+            ?? _configuration["AssemblyAI:ApiKey"]
+            ?? _configuration["Authentication:AssemblyAiApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "AssemblyAI streaming requires an API key. Please configure ASSEMBLYAI_API_KEY."
+            });
+        }
+
         using var client = _httpClientFactory.CreateClient("assemblyai");
         using var response = await client.GetAsync(
             $"/v3/token?expires_in_seconds=60&max_session_duration_seconds={maxSessionDurationSeconds}",

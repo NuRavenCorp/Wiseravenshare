@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { ArrowLeft, Mic, Loader2 } from "lucide-react";
+import { ArrowLeft, Mic, Loader2, Sliders } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import KaraokeTranscriber from "@/components/media/KaraokeTranscriber";
 
@@ -18,9 +18,12 @@ export default function KaraokeSingView({
   track,
   playbackUrl,
   timedLyrics = [],
+  karaokeLines = null,
+  vtt = "",
   lyrics = "",
   onBack,
   currentUser = null,
+  onOpenStudioPlayer = null,
 }) {
   const audioRef      = useRef(null);
   const lyricsRef     = useRef(null);
@@ -37,6 +40,55 @@ export default function KaraokeSingView({
   const [transcribeMode,   setTranscribeMode]    = useState(false);
   const [relayPlaybackUrl, setRelayPlaybackUrl]  = useState("");
   const [relayLines,       setRelayLines]        = useState([]);
+  const [vttUrl,           setVttUrl]            = useState(null);
+
+  const fillRefsRef = useRef({});
+  const rafRef      = useRef(null);
+
+  // Convert incoming karaokeLines (with word-level timestamps in ms) into unified timed lines
+  const linesFromKaraokeLines = useMemo(() => {
+    const raw = karaokeLines || (Array.isArray(track?.karaokeLines) && track.karaokeLines.length > 0 ? track.karaokeLines : null);
+    if (!Array.isArray(raw) || raw.length === 0) return null;
+    return raw.map((kl) => {
+      const startSec = (kl.start || 0) / 1000;
+      const endSec = (kl.end || 0) / 1000;
+      const rawWords = Array.isArray(kl.words) ? kl.words : [];
+      const tokens = rawWords.map((w, idx) => {
+        const wStart = (w.start || 0) / 1000;
+        let wEnd = (w.end || 0) / 1000;
+        if (wEnd <= wStart) {
+          const nextW = rawWords[idx + 1];
+          wEnd = nextW ? (nextW.start || 0) / 1000 : wStart + 0.35;
+        }
+        return {
+          text: String(w.text || w.word || "").trim(),
+          start: wStart,
+          end: Math.max(wStart + 0.05, wEnd),
+        };
+      }).filter((t) => t.text.length > 0);
+
+      const text = kl.text || tokens.map((t) => t.text).join(" ");
+      return {
+        timeSeconds: startSec,
+        endSeconds: endSec,
+        text,
+        tokens,
+      };
+    });
+  }, [karaokeLines, track?.karaokeLines]);
+
+  // VTT Blob URL for browser native caption track
+  const vttContent = vtt || track?.vtt || "";
+  useEffect(() => {
+    if (!vttContent) {
+      setVttUrl(null);
+      return;
+    }
+    const blob = new Blob([vttContent], { type: "text/vtt" });
+    const url = URL.createObjectURL(blob);
+    setVttUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [vttContent]);
 
   const channel = useMemo(() => String(track?.id || "default"), [track?.id]);
   const relayUrl = useMemo(() => {
@@ -191,7 +243,39 @@ export default function KaraokeSingView({
     }
   }, [activeIndex]);
 
-  const activeLines = relayLines.length > 0 ? relayLines : timedLyrics;
+  const activeLines = useMemo(() => {
+    if (linesFromKaraokeLines && linesFromKaraokeLines.length > 0) return linesFromKaraokeLines;
+    if (relayLines.length > 0) return relayLines;
+    return timedLyrics;
+  }, [linesFromKaraokeLines, relayLines, timedLyrics]);
+
+  // Real-time word-fill animation loop using requestAnimationFrame (60/120fps)
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !activeLines || activeLines.length === 0) return;
+
+    function frame() {
+      const nowSec = audio.currentTime;
+      for (let li = 0; li < activeLines.length; li++) {
+        const line = activeLines[li];
+        const tokens = line.tokens || [];
+        for (let wi = 0; wi < tokens.length; wi++) {
+          const tok = tokens[wi];
+          const dur = Math.max(0.05, tok.end - tok.start);
+          const rawPct = (nowSec - tok.start) / dur;
+          const pct = Math.min(100, Math.max(0, rawPct * 100));
+          const el = fillRefsRef.current?.[li]?.[wi];
+          if (el) el.style.setProperty("--fill", `${pct.toFixed(1)}%`);
+        }
+      }
+      rafRef.current = requestAnimationFrame(frame);
+    }
+
+    rafRef.current = requestAnimationFrame(frame);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [activeLines]);
   const activePlaybackUrl = relayPlaybackUrl || playbackUrl;
 
   const handleTimeUpdate = useCallback((e) => {
@@ -341,19 +425,41 @@ export default function KaraokeSingView({
           <p className="text-xs text-white/50 truncate">{track?.artist}</p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setTranscribeMode((p) => !p)}
-          title={transcribeMode ? "Hide mic scoring" : "Enable mic scoring"}
-          className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition-colors ${
-            transcribeMode
-              ? "border-primary bg-primary/20 text-primary"
-              : "border-white/20 text-white/50 hover:text-white"
-          }`}
-        >
-          <Mic className="w-3 h-3" />
-          {transcribeMode ? "Scoring on" : "Score me"}
-        </button>
+        <div className="flex items-center gap-2">
+          {onOpenStudioPlayer && (
+            <button
+              type="button"
+              onClick={() => {
+                onOpenStudioPlayer({
+                  ...track,
+                  audioUrl: activePlaybackUrl,
+                  karaokeLines: karaokeLines || track?.karaokeLines,
+                  vtt: vtt || track?.vtt,
+                  lrcContent: track?.lrcContent || "",
+                  plainLyrics: lyrics || track?.plainLyrics || "",
+                });
+              }}
+              title="Open with Studio Player (Equalizer & Waveform)"
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border border-white/20 text-white/70 hover:text-white hover:border-white/40 transition-colors"
+            >
+              <Sliders className="w-3 h-3" />
+              Studio Player
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setTranscribeMode((p) => !p)}
+            title={transcribeMode ? "Hide mic scoring" : "Enable mic scoring"}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition-colors ${
+              transcribeMode
+                ? "border-primary bg-primary/20 text-primary"
+                : "border-white/20 text-white/50 hover:text-white"
+            }`}
+          >
+            <Mic className="w-3 h-3" />
+            {transcribeMode ? "Scoring on" : "Score me"}
+          </button>
+        </div>
       </div>
 
       {/* ── Lyrics display ──────────────────────────────────────────── */}
@@ -387,19 +493,34 @@ export default function KaraokeSingView({
                   }}
                 >
                   {isCurrent && Array.isArray(line.tokens) && line.tokens.length > 0 ? (
-                    line.tokens.map((token, tokenIndex) => (
-                      <span
-                        key={`${absIdx}-${tokenIndex}-${token.text}`}
-                        className={tokenIndex === activeTokenIndex ? "text-primary" : ""}
-                        style={{
-                          color: tokenIndex === activeTokenIndex ? "hsl(var(--primary))" : undefined,
-                          textShadow: tokenIndex === activeTokenIndex ? "0 0 16px hsl(var(--primary)/60%)" : "none",
-                        }}
-                      >
-                        {token.text}
-                        {tokenIndex < line.tokens.length - 1 ? " " : ""}
-                      </span>
-                    ))
+                    line.tokens.map((token, tokenIndex) => {
+                      const isTokenActive = tokenIndex === activeTokenIndex;
+                      return (
+                        <span
+                          key={`${absIdx}-${tokenIndex}-${token.text}`}
+                          ref={(el) => {
+                            if (!fillRefsRef.current[absIdx]) fillRefsRef.current[absIdx] = [];
+                            fillRefsRef.current[absIdx][tokenIndex] = el;
+                          }}
+                          onClick={() => {
+                            if (audioRef.current && Number.isFinite(token.start)) {
+                              audioRef.current.currentTime = token.start;
+                              audioRef.current.play().catch(() => {});
+                            }
+                          }}
+                          className="cursor-pointer select-none transition-transform inline-block mr-2"
+                          style={{
+                            backgroundImage: "linear-gradient(to right, #ec4899 0%, #ec4899 var(--fill, 0%), rgba(255,255,255,0.85) var(--fill, 0%), rgba(255,255,255,0.85) 100%)",
+                            WebkitBackgroundClip: "text",
+                            WebkitTextFillColor: "transparent",
+                            textShadow: isTokenActive ? "0 0 20px rgba(236,72,153,0.7)" : "none",
+                            transform: isTokenActive ? "scale(1.06)" : "scale(1)",
+                          }}
+                        >
+                          {token.text}
+                        </span>
+                      );
+                    })
                   ) : (
                     line.text
                   )}
@@ -458,7 +579,7 @@ export default function KaraokeSingView({
         </div>
       </div>
 
-      {/* Hidden audio element */}
+      {/* Hidden audio element with word-timed VTT captions */}
       <audio
         ref={audioRef}
         src={activePlaybackUrl}
@@ -467,7 +588,11 @@ export default function KaraokeSingView({
         onTimeUpdate={handleTimeUpdate}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-      />
+      >
+        {vttUrl && (
+          <track kind="captions" src={vttUrl} srcLang="und" label="Word-timed captions" default />
+        )}
+      </audio>
     </div>
   );
 }

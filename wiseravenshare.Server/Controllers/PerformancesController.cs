@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Entities.Karaoke;
 using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -12,12 +13,101 @@ namespace Wiseravenshare.Server.Controllers;
 [Authorize]
 public sealed class PerformancesController(
     AppDbContext db,
-    BlobServiceClient blobs,
     IConfiguration configuration,
-    ILogger<PerformancesController> logger) : ControllerBase
+    KaraokePersistenceService persistence,
+    PerformanceCompletionService completionService,
+    ILogger<PerformancesController> logger,
+    BlobServiceClient? blobs = null) : ControllerBase
 {
     private readonly string _containerName =
         configuration["KaraokeStorage:Container"] ?? "karaoke-private";
+
+    // ----------------------------------------------------------------
+    // POST /api/performances  — create a new performance
+    // ----------------------------------------------------------------
+
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        [FromBody] CreatePerformanceRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        if (request is null || request.SongId == Guid.Empty)
+        {
+            return BadRequest(new { message = "songId is required." });
+        }
+
+        var performanceId = Guid.NewGuid();
+        await persistence.CreatePerformanceAsync(
+            performanceId,
+            userId,
+            request.SongId,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+
+        return CreatedAtAction(nameof(Get), new { id = performanceId }, new { id = performanceId });
+    }
+
+    // ----------------------------------------------------------------
+    // PUT /api/performances/{id}/turns  — save turns for performance
+    // ----------------------------------------------------------------
+
+    [HttpPut("{id:guid}/turns")]
+    public async Task<IActionResult> SaveTurns(
+        [FromRoute] Guid id,
+        [FromBody] SavePerformanceTurnsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        var perf = await db.Performances
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, cancellationToken);
+
+        if (perf is null) return NotFound();
+
+        var turns = (request?.Turns ?? [])
+            .Where(t => !string.IsNullOrWhiteSpace(t.Transcript))
+            .Select(t => new FinalTurn(t.TurnOrder, t.Transcript, t.StartMilliseconds, t.EndMilliseconds))
+            .ToList();
+
+        await persistence.SaveFinalTurnsAsync(id, turns, cancellationToken);
+        return NoContent();
+    }
+
+    // ----------------------------------------------------------------
+    // POST /api/performances/{id}/complete  — score performance
+    // ----------------------------------------------------------------
+
+    [HttpPost("{id:guid}/complete")]
+    public async Task<IActionResult> Complete(
+        [FromRoute] Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        var perf = await db.Performances
+            .Include(x => x.Turns)
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, cancellationToken);
+
+        if (perf is null) return NotFound();
+
+        var turns = perf.Turns
+            .OrderBy(t => t.TurnOrder)
+            .Select(t => new FinalTurn(t.TurnOrder, t.Transcript, t.StartMilliseconds, t.EndMilliseconds))
+            .ToList();
+
+        var result = await completionService.CompleteAsync(
+            id,
+            perf.SongId,
+            turns,
+            cancellationToken);
+
+        return Ok(result);
+    }
 
     // ----------------------------------------------------------------
     // GET /api/performances  — list the caller's performances
@@ -83,7 +173,7 @@ public sealed class PerformancesController(
         if (perf is null) return NotFound();
 
         object? alignment = null;
-        if (!string.IsNullOrWhiteSpace(perf.AlignmentBlobName))
+        if (blobs is not null && !string.IsNullOrWhiteSpace(perf.AlignmentBlobName))
         {
             try
             {
@@ -171,17 +261,45 @@ public sealed class PerformancesController(
 
         if (perf is null) return NotFound();
 
-        // Best-effort: delete blobs (don't fail the delete if blobs are already gone)
-        var container = blobs.GetBlobContainerClient(_containerName);
-        foreach (var blobName in new[] { perf.AlignmentBlobName, perf.RecordingBlobName })
+        // Best-effort: delete blobs if blob storage is configured
+        if (blobs is not null)
         {
-            if (string.IsNullOrWhiteSpace(blobName)) continue;
-            try { await container.GetBlobClient(blobName).DeleteIfExistsAsync(cancellationToken: cancellationToken); }
-            catch (Exception ex) { logger.LogWarning(ex, "Could not delete blob {Blob}", blobName); }
+            try
+            {
+                var container = blobs.GetBlobContainerClient(_containerName);
+                foreach (var blobName in new[] { perf.AlignmentBlobName, perf.RecordingBlobName })
+                {
+                    if (string.IsNullOrWhiteSpace(blobName)) continue;
+                    try { await container.GetBlobClient(blobName).DeleteIfExistsAsync(cancellationToken: cancellationToken); }
+                    catch (Exception ex) { logger.LogWarning(ex, "Could not delete blob {Blob}", blobName); }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not access blob container to delete blobs for performance {Id}", performanceId);
+            }
         }
 
         db.Performances.Remove(perf);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
+}
+
+public sealed class CreatePerformanceRequest
+{
+    public Guid SongId { get; set; }
+}
+
+public sealed class SavePerformanceTurnsRequest
+{
+    public List<FinalTurnDto> Turns { get; set; } = [];
+}
+
+public sealed class FinalTurnDto
+{
+    public int TurnOrder { get; set; }
+    public string Transcript { get; set; } = string.Empty;
+    public long? StartMilliseconds { get; set; }
+    public long? EndMilliseconds { get; set; }
 }

@@ -2188,9 +2188,14 @@ builder.Services.AddHttpClient("assemblyai", client =>
 {
     client.BaseAddress = new Uri("https://streaming.assemblyai.com");
     var apiKey = builder.Configuration["ASSEMBLYAI_API_KEY"]
+        ?? builder.Configuration["AssemblyAi:ApiKey"]
         ?? builder.Configuration["AssemblyAI:ApiKey"]
-        ?? throw new InvalidOperationException("ASSEMBLYAI_API_KEY is missing");
-    client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", apiKey);
+        ?? builder.Configuration["Authentication:AssemblyAiApiKey"]
+        ?? string.Empty;
+    if (!string.IsNullOrWhiteSpace(apiKey))
+    {
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", apiKey);
+    }
 });
 builder.Services.AddHttpClient<Wiseravenshare.Server.Services.LyricScoringClient>(client =>
 {
@@ -2532,6 +2537,13 @@ builder.Services.AddHttpClient("AudioServiceLong", client =>
     client.BaseAddress = new Uri(
         builder.Configuration["AudioService:BaseUrl"] ?? "http://localhost:8001");
     client.Timeout = TimeSpan.FromMinutes(13);
+});
+// AssemblyAI REST API — direct server-to-AAI calls for karaoke transcription.
+// Does NOT depend on the Python audio-processing microservice.
+builder.Services.AddHttpClient("AssemblyAiApi", client =>
+{
+    client.BaseAddress = new Uri("https://api.assemblyai.com");
+    client.Timeout = TimeSpan.FromMinutes(15);
 });
 builder.Services.AddHttpClient("KaraokeService", client =>
 {

@@ -56,6 +56,7 @@ export default function KaraokeTranscriber({
   const recordingChunksRef = useRef([]);
   const recordingMimeRef = useRef("audio/ogg;codecs=opus");
   const finalizedTurnsRef = useRef(new Map());
+  const latestTurnRef = useRef(null);
 
   const [status, setStatus] = useState("idle");
   const [liveText, setLiveText] = useState("");
@@ -128,10 +129,6 @@ export default function KaraokeTranscriber({
     recorderRef.current = recorder;
   }
 
-  function waitMs(milliseconds) {
-    return new Promise((resolve) => setTimeout(resolve, milliseconds));
-  }
-
   async function uploadRecording(performanceId, recordingBlob) {
     setUploadStatus("requesting");
     setUploadProgress(0);
@@ -178,13 +175,18 @@ export default function KaraokeTranscriber({
     setRetainedRecording(null);
     recordingChunksRef.current = [];
     finalizedTurnsRef.current = new Map();
+    latestTurnRef.current = null;
 
     sessionTokenRef.current = `${effectiveSessionId}-${createUuid()}`;
     performanceIdRef.current = "";
 
-    if (isGuid(String(songMetadata?.trackId || ""))) {
-      const { id } = await createPerformance(songMetadata.trackId, appParams.token);
-      performanceIdRef.current = id;
+    try {
+      if (isGuid(String(songMetadata?.trackId || ""))) {
+        const res = await createPerformance(songMetadata.trackId);
+        if (res?.id) performanceIdRef.current = res.id;
+      }
+    } catch (createErr) {
+      console.warn("Could not create performance record", createErr);
     }
 
     const tokenPayload = {
@@ -195,55 +197,79 @@ export default function KaraokeTranscriber({
       abTest: Boolean(songMetadata?.abTest),
     };
 
-    const tokenResponse = await apiClient.karaoke.issueStreamToken(tokenPayload);
+    let tokenResponse;
+    try {
+      tokenResponse = await apiClient.karaoke.issueStreamToken(tokenPayload);
+    } catch (tokenErr) {
+      const msg = tokenErr?.data?.message || tokenErr?.message || "Could not start transcription stream.";
+      setTranscriptionError(msg);
+      setStatus("idle");
+      return;
+    }
+
     const token = tokenResponse?.token;
-    if (!token) throw new Error("Could not start transcription stream.");
+    if (!token) {
+      setTranscriptionError("Could not obtain transcription stream token.");
+      setStatus("idle");
+      return;
+    }
 
     const languageCodes = normalizeLanguageCodes(
       tokenResponse?.languageCodes || tokenPayload.languageCodes || ["en"]
     );
     const voiceFocus = tokenResponse?.voiceFocus || undefined;
 
-    const transcriber = new StreamingTranscriber({
-      token,
-      speechModel: "universal-3-6-pro",
-      encoding: "ogg_opus",
-      mode: "max_accuracy",
-      languageCodes,
-      ...(voiceFocus ? { voiceFocus } : {}),
-    });
-    transcriberRef.current = transcriber;
+    try {
+      const transcriber = new StreamingTranscriber({
+        token,
+        speechModel: "universal-3-6-pro",
+        encoding: "ogg_opus",
+        mode: "max_accuracy",
+        languageCodes,
+        ...(voiceFocus ? { voiceFocus } : {}),
+      });
+      transcriberRef.current = transcriber;
 
-    transcriber.on("open", () => setStatus("listening"));
-    transcriber.on("close", () => setStatus("idle"));
-    transcriber.on("error", (error) => { console.error(error); setStatus("error"); });
-    transcriber.on("turn", (turn) => {
-      setLiveText(turn?.transcript || "");
-      if (!turn?.end_of_turn || !turn?.transcript?.trim()) return;
+      transcriber.on("open", () => setStatus("listening"));
+      transcriber.on("close", () => setStatus("idle"));
+      transcriber.on("error", (error) => {
+        console.error(error);
+        setTranscriptionError(error?.message || "Transcription streaming error.");
+        setStatus("error");
+      });
+      transcriber.on("turn", (turn) => {
+        latestTurnRef.current = turn;
+        setLiveText(turn?.transcript || "");
+        if (!turn?.end_of_turn || !turn?.transcript?.trim()) return;
 
-      setFinalLines((prev) => [...prev, turn.transcript]);
-      setLiveText("");
+        setFinalLines((prev) => [...prev, turn.transcript]);
+        setLiveText("");
 
-      const finalTurn = {
-        turnOrder: Number(turn.turn_order || 0),
-        transcript: turn.transcript,
-        startMilliseconds: Number(turn.words?.[0]?.start) || undefined,
-        endMilliseconds: Number(turn.words?.at(-1)?.end) || undefined,
-      };
-      finalizedTurnsRef.current.set(finalTurn.turnOrder, finalTurn);
-    });
+        const finalTurn = {
+          turnOrder: Number(turn.turn_order || 0),
+          transcript: turn.transcript,
+          startMilliseconds: Number(turn.words?.[0]?.start) || undefined,
+          endMilliseconds: Number(turn.words?.at(-1)?.end) || undefined,
+        };
+        finalizedTurnsRef.current.set(finalTurn.turnOrder, finalTurn);
+      });
 
-    await transcriber.connect();
+      await transcriber.connect();
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    });
-    streamRef.current = stream;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      streamRef.current = stream;
 
-    if (isSafariBrowser()) {
-      await startPcmWorklet(stream);
-    } else {
-      await startMediaRecorder(stream);
+      if (isSafariBrowser()) {
+        await startPcmWorklet(stream);
+      } else {
+        await startMediaRecorder(stream);
+      }
+    } catch (connErr) {
+      console.error(connErr);
+      setTranscriptionError(connErr?.message || "Failed to connect audio stream.");
+      setStatus("idle");
     }
   }
 
@@ -270,6 +296,22 @@ export default function KaraokeTranscriber({
     await transcriberRef.current?.close();
     transcriberRef.current = null;
 
+    // Check if there was an unfinalized latest turn
+    const last = latestTurnRef.current;
+    if (last && last.transcript?.trim()) {
+      const order = Number(last.turn_order || 0);
+      if (!finalizedTurnsRef.current.has(order)) {
+        setFinalLines((prev) => [...prev, last.transcript]);
+        finalizedTurnsRef.current.set(order, {
+          turnOrder: order,
+          transcript: last.transcript,
+          startMilliseconds: Number(last.words?.[0]?.start) || undefined,
+          endMilliseconds: Number(last.words?.at(-1)?.end) || undefined,
+        });
+      }
+    }
+    setLiveText("");
+
     // Build recording blob from captured chunks.
     const chunks = recordingChunksRef.current;
     recordingChunksRef.current = [];
@@ -284,14 +326,15 @@ export default function KaraokeTranscriber({
       try {
         const turns = Array.from(finalizedTurnsRef.current.values())
           .sort((a, b) => a.turnOrder - b.turnOrder);
-        await saveTurns(performanceIdRef.current, turns, appParams.token);
-        scoreResult = await completePerformanceApi(performanceIdRef.current, appParams.token);
+        await saveTurns(performanceIdRef.current, turns);
+        scoreResult = await completePerformanceApi(performanceIdRef.current);
         if (typeof scoreResult?.score === "number") {
           setLyricScore(scoreResult.score);
           onScored?.(scoreResult);
         }
       } catch (err) {
         console.error("Karaoke scoring failed", err);
+        setTranscriptionError("Scoring calculation encountered an issue.");
       }
     }
 

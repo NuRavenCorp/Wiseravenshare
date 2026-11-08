@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { apiClient } from "@/api/client";
 import { getPlayableUrl } from "@/lib/mediaUtils";
-import { Loader2, Mic, Wand2, Upload, FileAudio2, Music2, ChevronDown, ChevronRight, Play, BookOpen, ExternalLink } from "lucide-react";
+import { Loader2, Mic, Wand2, Upload, FileAudio2, Music2, ChevronDown, ChevronRight, Play, BookOpen, ExternalLink, Sliders, CheckCircle2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import KaraokePaywall from "@/components/media/KaraokePaywall";
@@ -52,19 +52,24 @@ function wordsToLrc(words = [], { maxWordsPerLine = 7, silenceGapSeconds = 1.5 }
   return lines.join("\n");
 }
 
-/** Normalize any transcription response into { text, lrc, words, word_count, vocals_isolated }. */
+/** Normalize any transcription response into { text, lrc, vtt, words, word_count, karaokeLines, vocals_isolated }. */
 function normalizeTranscriptResult(result) {
-  if (!result) return { text: "", lrc: "", words: [], word_count: 0, vocals_isolated: false };
+  if (!result) return { text: "", lrc: "", vtt: "", words: [], word_count: 0, karaokeLines: null, vocals_isolated: false };
   const words = Array.isArray(result.words) ? result.words : [];
-  // Generate LRC from words array if we have timing data
   const lrcFromWords = words.length > 0 ? wordsToLrc(words) : "";
   const lrc = result.lrc || lrcFromWords;
+  const vtt = result.vtt || "";
   const text = result.text || result.lyrics || result.transcript || words.map((w) => w.word).join(" ").trim();
+  const karaokeLines = Array.isArray(result.karaoke_lines) && result.karaoke_lines.length > 0
+    ? result.karaoke_lines
+    : null;
   return {
     text,
     lrc,
+    vtt,
     words,
     word_count: result.word_count ?? words.length,
+    karaokeLines,
     vocals_isolated: result.vocals_isolated ?? false,
     transcript_id: result.transcript_id,
     language_code: result.language_code,
@@ -82,7 +87,7 @@ function isHtml503(err) {
 function shouldFallbackFromAsync(err) {
   if (isHtml503(err)) return true;
   const status = Number(err?.status || 0);
-  if ([404, 405, 429, 500, 502, 503, 504].includes(status)) return true;
+  if ([400, 401, 403, 404, 405, 429, 500, 502, 503, 504].includes(status)) return true;
   const msg = String(err?.message || "").toLowerCase();
   return msg.includes("connection refused") || msg.includes("econnrefused") || msg.includes("timeout");
 }
@@ -91,7 +96,7 @@ function normalizeExtractionError(err, fallback = "Word extraction failed.") {
   const msg = String(err?.message || fallback);
   const lower = msg.toLowerCase();
   if (lower.includes("could not be found (404)") || lower.includes("source file may have been removed")) {
-    return "Selected track is no longer available in media storage. Re-upload the track, then retry extraction.";
+    return "Selected track URL returned 404 during extraction. If it still plays, refresh/reselect the track and retry.";
   }
   if (lower.includes("failed to load media")) {
     return "Selected track media could not be loaded. The file may be missing or unavailable; try another track or re-upload it.";
@@ -231,6 +236,85 @@ async function transcribeFile(file) {
 }
 
 async function transcribeUrl(url, fileName) {
+  const extensionFromMime = (mime) => {
+    const n = (mime || "").toLowerCase();
+    if (n.includes("audio/mpeg")) return ".mp3";
+    if (n.includes("audio/mp4")) return ".m4a";
+    if (n.includes("video/mp4")) return ".mp4";
+    if (n.includes("audio/wav")) return ".wav";
+    if (n.includes("audio/ogg")) return ".ogg";
+    if (n.includes("audio/webm") || n.includes("video/webm")) return ".webm";
+    return "";
+  };
+  const normalizeFileName = (baseName, sourceUrl, mime) => {
+    const rawName = (baseName || "karaoke-media").trim();
+    if (/\.[a-z0-9]{2,8}$/i.test(rawName)) return rawName;
+    let ext = "";
+    try {
+      const parsed = new URL(sourceUrl, window.location.origin);
+      const match = (parsed.pathname || "").match(/\.[a-z0-9]{2,8}$/i);
+      ext = match?.[0] || "";
+    } catch { ext = ""; }
+    if (!ext) ext = extensionFromMime(mime);
+    return `${rawName}${ext || ".webm"}`;
+  };
+  const downloadSourceAsFile = async (sourceUrl, baseName) => {
+    const trimmedUrl = String(sourceUrl || "").trim();
+    if (!trimmedUrl) {
+      throw new Error("Selected track media URL is empty.");
+    }
+
+    const lowerUrl = trimmedUrl.toLowerCase();
+    const isLocalObjectUrl = lowerUrl.startsWith("blob:") || lowerUrl.startsWith("data:");
+    let response;
+
+    if (isLocalObjectUrl) {
+      response = await fetch(trimmedUrl);
+    } else {
+      let credentials = "include";
+      const headers = {};
+      const token = (typeof window !== "undefined" && window.localStorage)
+        ? (window.localStorage.getItem("wiseravenshare_access_token") || window.localStorage.getItem("token") || "")
+        : "";
+      try {
+        const resolved = new URL(trimmedUrl, window.location.origin);
+        if (resolved.origin !== window.location.origin && /^https?:$/i.test(resolved.protocol)) {
+          credentials = "omit";
+        } else if (token) {
+          headers.Authorization = `Bearer ${token}`;
+        }
+      } catch {
+        credentials = "include";
+        if (token) headers.Authorization = `Bearer ${token}`;
+      }
+
+      response = await fetch(trimmedUrl, { credentials, headers, cache: "no-store" });
+    }
+
+    if (!response.ok) {
+      const mediaError = new Error(
+        response.status === 404
+          ? "Selected track media could not be found (404). The source file may have been removed."
+          : `Selected track media could not be loaded (${response.status}).`
+      );
+      mediaError.status = response.status;
+      throw mediaError;
+    }
+
+    const blob = await response.blob();
+    const normalizedName = normalizeFileName(baseName || "karaoke-media", trimmedUrl, blob.type);
+    return new File([blob], normalizedName, { type: blob.type || "application/octet-stream" });
+  };
+
+  const normalizedUrl = String(url || "").trim();
+  if (!normalizedUrl) {
+    throw new Error("This item does not have a playable media URL.");
+  }
+  if (normalizedUrl.startsWith("blob:") || normalizedUrl.startsWith("data:")) {
+    const file = await downloadSourceAsFile(normalizedUrl, fileName || "karaoke-media");
+    return transcribeFile(file);
+  }
+
   // Primary path: async job → poll (avoids DO App Platform 30s timeout)
   try {
     const submission = await apiClient.requestJson(
@@ -263,64 +347,12 @@ async function transcribeUrl(url, fileName) {
     }
     else {
       const status = primaryError?.status;
-      if (![404, 405, 429, 502, 503].includes(status)) throw primaryError;
+      if (![400, 401, 403, 404, 405, 429, 500, 502, 503, 504].includes(status)) throw primaryError;
     }
   }
 
   // Fallback: download the file locally and send to old endpoints
-  const extensionFromMime = (mime) => {
-    const n = (mime || "").toLowerCase();
-    if (n.includes("audio/mpeg")) return ".mp3";
-    if (n.includes("audio/mp4")) return ".m4a";
-    if (n.includes("video/mp4")) return ".mp4";
-    if (n.includes("audio/wav")) return ".wav";
-    if (n.includes("audio/ogg")) return ".ogg";
-    if (n.includes("audio/webm") || n.includes("video/webm")) return ".webm";
-    return "";
-  };
-  const normalizeFileName = (baseName, sourceUrl, mime) => {
-    const rawName = (baseName || "karaoke-media").trim();
-    if (/\.[a-z0-9]{2,8}$/i.test(rawName)) return rawName;
-    let ext = "";
-    try {
-      const parsed = new URL(sourceUrl, window.location.origin);
-      const match = (parsed.pathname || "").match(/\.[a-z0-9]{2,8}$/i);
-      ext = match?.[0] || "";
-    } catch { ext = ""; }
-    if (!ext) ext = extensionFromMime(mime);
-    return `${rawName}${ext || ".webm"}`;
-  };
-
-  let credentials = "include";
-  const headers = {};
-  const token = (typeof window !== "undefined" && window.localStorage)
-    ? (window.localStorage.getItem("wiseravenshare_access_token") || window.localStorage.getItem("token") || "")
-    : "";
-  try {
-    const resolved = new URL(url, window.location.origin);
-    if (resolved.origin !== window.location.origin && /^https?:$/i.test(resolved.protocol)) {
-      credentials = "omit";
-    } else if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-  } catch {
-    credentials = "include";
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
-
-  const response = await fetch(url, { credentials, headers });
-  if (!response.ok) {
-    const mediaError = new Error(
-      response.status === 404
-        ? "Selected track media could not be found (404). The source file may have been removed."
-        : `Selected track media could not be loaded (${response.status}).`
-    );
-    mediaError.status = response.status;
-    throw mediaError;
-  }
-  const blob = await response.blob();
-  const normalizedName = normalizeFileName(fileName || "karaoke-media", url, blob.type);
-  const file = new File([blob], normalizedName, { type: blob.type || "application/octet-stream" });
+  const file = await downloadSourceAsFile(normalizedUrl, fileName || "karaoke-media");
   return transcribeFile(file);
 }
 
@@ -354,13 +386,15 @@ function parseLrcLines(lrcText = "") {
   return parsed.sort((a, b) => a.timeSeconds - b.timeSeconds);
 }
 
-export default function KaraokeExtractor({ currentUser, userLoading = false, onAuthRequired, onTrackSelected = null }) {
+export default function KaraokeExtractor({ currentUser, userLoading = false, onAuthRequired, onTrackSelected = null, defaultTab = "catalog" }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("");
   const [extracting, setExtracting] = useState(false);
   const [lyrics, setLyrics] = useState("");
   const [lrc, setLrc] = useState("");
+  const [vtt, setVtt] = useState("");
+  const [karaokeLines, setKaraokeLines] = useState(null); // word-fill data (ms timestamps)
   const [wordCount, setWordCount] = useState(null);
   const [vocalsIsolated, setVocalsIsolated] = useState(false);
   const [error, setError] = useState("");
@@ -369,7 +403,22 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
   const [uploading, setUploading] = useState(false);
 
   // ── Catalog state ─────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState("catalog"); // "catalog" | "library" | "local"
+  const [songUploadFile, setSongUploadFile] = useState(null);
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadArtist, setUploadArtist] = useState("");
+  const [uploadGenre, setUploadGenre] = useState("");
+  const [uploadIsPublic, setUploadIsPublic] = useState(true);
+  const [autoExtractLyrics, setAutoExtractLyrics] = useState(true);
+  const [uploadSuccess, setUploadSuccess] = useState("");
+  const [lastUploadedSong, setLastUploadedSong] = useState(null);
+  const [lastUploadedSongFile, setLastUploadedSongFile] = useState(null);
+  const [saveExtractedLoading, setSaveExtractedLoading] = useState(false);
+  const [saveExtractedSuccess, setSaveExtractedSuccess] = useState("");
+
+  const [activeTab, setActiveTab] = useState(defaultTab);
+  useEffect(() => {
+    if (defaultTab) setActiveTab(defaultTab);
+  }, [defaultTab]);
   const [catalog, setCatalog] = useState([]);            // grouped array from API
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogGenres, setCatalogGenres] = useState([]);
@@ -473,6 +522,66 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
     [selectedId, sources]
   );
 
+  const handleUploadSongToLibrary = async () => {
+    if (!songUploadFile) return;
+    setUploading(true);
+    setError("");
+    setUploadSuccess("");
+    try {
+      const songTitle = uploadTitle.trim() || songUploadFile.name.replace(/\.[^/.]+$/, "");
+      const created = await apiClient.karaoke.songs.upload(songUploadFile, {
+        title: songTitle,
+        artist: uploadArtist.trim(),
+        genre: uploadGenre.trim(),
+        isPublic: uploadIsPublic,
+      });
+
+      if (autoExtractLyrics) {
+        setExtracting(true);
+        try {
+          const result = await transcribeFile(songUploadFile);
+          const normalized = normalizeTranscriptResult(result);
+          if (normalized.lrc || normalized.text) {
+            await apiClient.karaoke.songs.update(created.id, {
+              lrcContent: normalized.lrc,
+              plainLyrics: normalized.text,
+            });
+            created.lrcContent = normalized.lrc;
+            created.plainLyrics = normalized.text;
+          }
+          if (normalized.karaokeLines) {
+            created.karaokeLines = normalized.karaokeLines;
+            setKaraokeLines(normalized.karaokeLines);
+          }
+          if (normalized.vtt) {
+            created.vtt = normalized.vtt;
+            setVtt(normalized.vtt);
+          }
+          if (normalized.lrc) setLrc(normalized.lrc);
+          if (normalized.text) setLyrics(normalized.text);
+          setLastUploadedSong({ ...created });
+        } catch (transcribeErr) {
+          console.warn("Auto-extraction failed, but song was uploaded", transcribeErr);
+        } finally {
+          setExtracting(false);
+        }
+      }
+
+      setLastUploadedSongFile(songUploadFile);
+      setLastUploadedSong(created);
+      setUploadSuccess(`"${songTitle}" uploaded to your karaoke library!`);
+      setSongUploadFile(null);
+      setUploadTitle("");
+      setUploadArtist("");
+      setUploadGenre("");
+      onTrackSelected?.(created);
+    } catch (err) {
+      setError(err?.message || "Song upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleLibraryUpload = async () => {
     if (!libraryUploadFile) return;
     setUploading(true);
@@ -503,6 +612,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
 
     if (source.kind === "music" && source.sourceId) {
       candidates.add(`/api/ravensight/media/music/${encodeURIComponent(String(source.sourceId))}/stream`);
+      candidates.add(`/api/ravensight/media/music/${encodeURIComponent(String(source.sourceId))}/browser-compatible`);
     }
 
     try {
@@ -513,6 +623,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
           if (match.mediaUrl) candidates.add(match.mediaUrl);
           if (match.file_uri) candidates.add(match.file_uri);
           if (match.id) candidates.add(`/api/ravensight/media/music/${encodeURIComponent(String(match.id))}/stream`);
+          if (match.id) candidates.add(`/api/ravensight/media/music/${encodeURIComponent(String(match.id))}/browser-compatible`);
         }
       } else if (source.kind === "video") {
         const videos = await apiClient.ravensightMedia.listVideos();
@@ -557,6 +668,8 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
       const normalized = normalizeTranscriptResult(result);
       setLyrics(normalized.text);
       setLrc(normalized.lrc);
+      setVtt(normalized.vtt);
+      setKaraokeLines(normalized.karaokeLines);
       setWordCount(normalized.word_count);
       setVocalsIsolated(normalized.vocals_isolated);
     } catch (extractError) {
@@ -566,6 +679,84 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
     }
   };
 
+
+  const handleSingExtracted = async () => {
+    const songTitle = selectedSource?.title || (localFile ? localFile.name.replace(/\.[^/.]+$/, "") : "Extracted Song");
+    const songArtist = selectedSource?.artist || "Custom";
+    let audioUrl = "";
+    if (localFile) {
+      audioUrl = URL.createObjectURL(localFile);
+    } else if (selectedSource) {
+      const candidates = await resolveSelectedSourceCandidates(selectedSource);
+      for (const c of candidates) {
+        const p = await getPlayableUrl(c);
+        if (p) { audioUrl = p; break; }
+      }
+    }
+    const trackObj = {
+      id: selectedSource?.id || "extracted-track",
+      title: songTitle,
+      artist: songArtist,
+      genre: "Custom",
+      lrcContent: lrc,
+      plainLyrics: lyrics,
+      karaokeLines,
+      vtt,
+    };
+    setCatalogTrack(trackObj);
+    setCatalogPlaybackUrl(audioUrl);
+    setSingMode(true);
+  };
+
+  const handleSaveExtractedToSongs = async () => {
+    if (!lyrics && !lrc) return;
+    setSaveExtractedLoading(true);
+    setSaveExtractedSuccess("");
+    setError("");
+    try {
+      const songTitle = selectedSource?.title || (localFile ? localFile.name.replace(/\.[^/.]+$/, "") : "Extracted Song");
+      const songArtist = selectedSource?.artist || "Custom";
+      let saved = null;
+
+      if (localFile) {
+        saved = await apiClient.karaoke.songs.upload(localFile, {
+          title: songTitle,
+          artist: songArtist,
+          genre: "Custom",
+          isPublic: false,
+        });
+        if (lrc || lyrics) {
+          await apiClient.karaoke.songs.update(saved.id, {
+            lrcContent: lrc,
+            plainLyrics: lyrics,
+          });
+          saved.lrcContent = lrc;
+          saved.plainLyrics = lyrics;
+        }
+      } else if (selectedSource) {
+        if (selectedSource.sourceType === "karaoke" || selectedSource.kind === "song") {
+          saved = await apiClient.karaoke.songs.update(selectedSource.id, {
+            lrcContent: lrc,
+            plainLyrics: lyrics,
+          });
+        } else {
+          setSaveExtractedSuccess(`Lyrics extracted and ready for "${songTitle}"!`);
+          return;
+        }
+      }
+
+      if (saved) {
+        if (karaokeLines) saved.karaokeLines = karaokeLines;
+        if (vtt) saved.vtt = vtt;
+        setSaveExtractedSuccess(`"${songTitle}" saved to your Karaoke Songs!`);
+        onTrackSelected?.(saved);
+      }
+    } catch (saveErr) {
+      setError(saveErr?.message || "Failed to save lyrics to song record.");
+    } finally {
+      setSaveExtractedLoading(false);
+    }
+  };
   const handleTranscribeLocal = async () => {
     if (!localFile) return;
     setExtracting(true);
@@ -576,6 +767,8 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
       const normalized = normalizeTranscriptResult(result);
       setLyrics(normalized.text);
       setLrc(normalized.lrc);
+      setVtt(normalized.vtt);
+      setKaraokeLines(normalized.karaokeLines);
       setWordCount(normalized.word_count);
       setVocalsIsolated(normalized.vocals_isolated);
     } catch (extractError) {
@@ -699,8 +892,11 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
         track={catalogTrack}
         playbackUrl={catalogPlaybackUrl}
         timedLyrics={timedLyrics}
+        karaokeLines={karaokeLines}
+        vtt={vtt}
         lyrics={lyrics}
         currentUser={currentUser}
+        onOpenStudioPlayer={onOpenPlayer}
         onBack={() => {
           setSingMode(false);
           setCatalogPlaybackUrl("");
@@ -718,7 +914,8 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
         <div className="flex gap-1 border-b border-border mb-2">
           {[
             { id: "catalog", label: "Song Catalog", icon: Music2 },
-            { id: "library", label: "My Library",   icon: Mic },
+            { id: "upload",  label: "Upload Song",  icon: Upload },
+            { id: "library", label: "Media Library", icon: Mic },
             { id: "local",   label: "Local File",   icon: FileAudio2 },
           ].map(({ id, label, icon: Icon }) => (
             <button
@@ -883,6 +1080,141 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
         )}
 
         {/* ── Tab: My Library ────────────────────────────────────────── */}
+        {activeTab === "upload" && (
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Upload className="w-5 h-5 text-primary" />
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Upload Song to Karaoke Library</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Upload your song audio (MP3, WAV, M4A, FLAC, OGG) to sing and score.
+                </p>
+              </div>
+            </div>
+
+            {uploadSuccess && (
+              <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3.5 space-y-2 text-xs text-green-400">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                  <span className="font-medium">{uploadSuccess}</span>
+                </div>
+                {lastUploadedSong && (
+                  <div className="flex items-center gap-2 pt-1 flex-wrap">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setCatalogTrack(lastUploadedSong);
+                        setCatalogPlaybackUrl(lastUploadedSong.audioUrl || (lastUploadedSongFile ? URL.createObjectURL(lastUploadedSongFile) : ""));
+                        setKaraokeLines(lastUploadedSong.karaokeLines || null);
+                        setVtt(lastUploadedSong.vtt || "");
+                        setSingMode(true);
+                      }}
+                      className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      <Mic className="w-3.5 h-3.5 mr-1" /> Sing on Stage Now
+                    </Button>
+                    {onOpenPlayer && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onOpenPlayer(lastUploadedSong)}
+                        className="h-7 text-xs border-green-500/40 text-green-300 hover:bg-green-500/20"
+                      >
+                        <Sliders className="w-3.5 h-3.5 mr-1" /> Open Studio Player
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-foreground block mb-1">Audio File</label>
+                <Input
+                  type="file"
+                  accept="audio/*,video/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setSongUploadFile(f);
+                    if (f && !uploadTitle) {
+                      setUploadTitle(f.name.replace(/\.[^/.]+$/, ""));
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-foreground block mb-1">Song Title</label>
+                  <Input
+                    placeholder="e.g. Bohemian Rhapsody"
+                    value={uploadTitle}
+                    onChange={(e) => setUploadTitle(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-foreground block mb-1">Artist</label>
+                  <Input
+                    placeholder="e.g. Queen"
+                    value={uploadArtist}
+                    onChange={(e) => setUploadArtist(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-foreground block mb-1">Genre</label>
+                <Input
+                  placeholder="e.g. Rock, Pop, R&B, Ballad"
+                  value={uploadGenre}
+                  onChange={(e) => setUploadGenre(e.target.value)}
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-4 pt-1">
+                <label className="flex items-center gap-2 text-xs text-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoExtractLyrics}
+                    onChange={(e) => setAutoExtractLyrics(e.target.checked)}
+                    className="rounded border-border text-primary focus:ring-primary h-4 w-4"
+                  />
+                  <span>Auto-extract lyrics with AI (AssemblyAI)</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs text-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={uploadIsPublic}
+                    onChange={(e) => setUploadIsPublic(e.target.checked)}
+                    className="rounded border-border text-primary focus:ring-primary h-4 w-4"
+                  />
+                  <span>Share with community</span>
+                </label>
+              </div>
+
+              <div className="pt-2">
+                <Button
+                  onClick={handleUploadSongToLibrary}
+                  disabled={!songUploadFile || uploading || extracting}
+                  className="w-full sm:w-auto"
+                >
+                  {uploading || extracting ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <Upload className="w-4 h-4 mr-2" />
+                  )}
+                  {uploading
+                    ? "Uploading song..."
+                    : extracting
+                    ? "Extracting lyrics with AI (1-2 min)..."
+                    : "Upload & Save Song"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === "library" && (
           <>
         <div className="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -1074,6 +1406,64 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
                   <span>{wordCount} words</span>
                 )}
               </div>
+            </div>
+
+            {saveExtractedSuccess && (
+              <div className="flex items-center gap-2 rounded-md border border-green-500/30 bg-green-500/10 px-3 py-1.5 text-xs text-green-400">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span>{saveExtractedSuccess}</span>
+              </div>
+            )}
+
+            {/* Action buttons to consume the extracted lyrics immediately */}
+            <div className="flex items-center gap-2 flex-wrap pt-1 border-b border-border/50 pb-3">
+              <Button
+                size="sm"
+                onClick={handleSingExtracted}
+                className="h-8 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Mic className="w-3.5 h-3.5 mr-1.5" /> Sing on Stage (Word-by-Word)
+              </Button>
+
+              {onOpenPlayer && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const songTitle = selectedSource?.title || (localFile ? localFile.name.replace(/\.[^/.]+$/, "") : "Extracted Song");
+                    const songArtist = selectedSource?.artist || "Custom";
+                    const audioUrl = localFile ? URL.createObjectURL(localFile) : (selectedSource?.url || "");
+                    onOpenPlayer({
+                      id: selectedSource?.id || "extracted-track",
+                      title: songTitle,
+                      artist: songArtist,
+                      audioUrl,
+                      karaokeLines,
+                      vtt,
+                      lrcContent: lrc,
+                      plainLyrics: lyrics,
+                    });
+                  }}
+                  className="h-8 text-xs"
+                >
+                  <Sliders className="w-3.5 h-3.5 mr-1.5" /> Studio Player (EQ & Waveform)
+                </Button>
+              )}
+
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={saveExtractedLoading}
+                onClick={handleSaveExtractedToSongs}
+                className="h-8 text-xs"
+              >
+                {saveExtractedLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                ) : (
+                  <Save className="w-3.5 h-3.5 mr-1.5" />
+                )}
+                Save to My Songs
+              </Button>
             </div>
             {lrc && (
               <details className="group">

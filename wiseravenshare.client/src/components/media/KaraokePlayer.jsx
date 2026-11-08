@@ -5,10 +5,11 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { Play, Pause, SkipBack, SkipForward, ArrowLeft, Music, Mic, Loader2, Sliders } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, ArrowLeft, Music, Mic, Loader2, Sliders, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { parseLrc } from "@/lib/lrcParser";
 import { apiClient } from "@/api/client";
+import KaraokeTranscriber from "@/components/media/KaraokeTranscriber";
 
 // ─── EQ presets ───────────────────────────────────────────────────────────────
 const EQ_PRESETS = {
@@ -46,12 +47,15 @@ function fmt(s) {
 }
 
 // ─── KaraokePlayer ────────────────────────────────────────────────────────────
-export default function KaraokePlayer({ song, onClose, onSaved }) {
+export default function KaraokePlayer({ song, onClose, onSaved, karaokeLines: karaokeLinesProp = null, vtt: vttProp = "" }) {
   const audioRef = useRef(null);
   const audioCtxRef = useRef(null);
   const filtersRef = useRef([]);
   const lyricsContainerRef = useRef(null);
   const activeLineRef = useRef(null);
+  const fillRefsRef = useRef({});
+  const rafRef = useRef(null);
+  const [vttUrl, setVttUrl] = useState(null);  // blob URL for the <track> element
 
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -62,52 +66,132 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
   const [activeWordIdx, setActiveWordIdx] = useState(-1);
   const [eqPreset, setEqPreset] = useState("Flat");
   const [showEq, setShowEq] = useState(false);
+  const [showScoring, setShowScoring] = useState(false);
   const [lrcSaved, setLrcSaved] = useState(false);
+  const [extractingAi, setExtractingAi] = useState(false);
+  const [extractError, setExtractError] = useState("");
+  const [dynamicKaraokeLines, setDynamicKaraokeLines] = useState(null);
+
+  // karaokeLines: prefer dynamic (from AI extraction), then song-level data, fall back to prop
+  const karaokeLines = useMemo(
+    () => dynamicKaraokeLines || (Array.isArray(song?.karaokeLines) && song.karaokeLines.length > 0
+      ? song.karaokeLines
+      : karaokeLinesProp),
+    [dynamicKaraokeLines, song?.karaokeLines, karaokeLinesProp]
+  );
+
+  // VTT blob URL for the <track> element (native browser word-timing captions).
+  const vttContent = vttProp || song?.vtt || "";
+  useEffect(() => {
+    if (!vttContent) { setVttUrl(null); return; }
+    const blob = new Blob([vttContent], { type: "text/vtt" });
+    const url  = URL.createObjectURL(blob);
+    setVttUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [vttContent]);
 
   // Parse LRC whenever song or fetched content changes
   const parsedLrc = useMemo(() => {
-    const content = lrcData ?? song?.lrcContent ?? "";
+    const content = lrcData ?? song?.lrcContent ?? song?.plainLyrics ?? "";
     return parseLrc(content);
-  }, [lrcData, song?.lrcContent]);
+  }, [lrcData, song?.lrcContent, song?.plainLyrics]);
 
   const lines = parsedLrc.lines;
-
-  // Fetch LRC from LRCLIB if not present
-  useEffect(() => {
-    if (song?.lrcContent || !song?.title) return;
-    setFetchingLrc(true);
-    const artist = encodeURIComponent(song.artist ?? "");
-    const title = encodeURIComponent(song.title ?? "");
-    fetch(`https://lrclib.net/api/get?artist_name=${artist}&track_name=${title}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then(async (data) => {
-        if (!data) return;
-        const lrc = data.syncedLyrics ?? "";
-        const plain = data.plainLyrics ?? "";
-        if (lrc) {
-          setLrcData(lrc);
-          // Save back to server
-          try {
-            await apiClient.karaoke.songs.update(song.id, {
-              lrcContent: lrc,
-              plainLyrics: plain,
-            });
-            setLrcSaved(true);
-            onSaved?.({ ...song, lrcContent: lrc, plainLyrics: plain });
-          } catch (_) {
-            // Best-effort
-          }
-        }
-      })
-      .catch(() => {})
-      .finally(() => setFetchingLrc(false));
-  }, [song]);
 
   // Audio source URL
   const audioUrl = useMemo(
     () => song?.audioUrl ?? apiClient.karaoke.songs.streamUrl(song?.id),
     [song]
   );
+
+  // Fetch LRC from LRCLIB or server proxy if not present
+  useEffect(() => {
+    if (song?.lrcContent || !song?.title) return;
+    setFetchingLrc(true);
+
+    const tryFetchLyrics = async () => {
+      // 1. Try public LRCLIB directly
+      try {
+        const artist = encodeURIComponent(song.artist ?? "");
+        const title = encodeURIComponent(song.title ?? "");
+        const res = await fetch(`https://lrclib.net/api/get?artist_name=${artist}&track_name=${title}`);
+        if (res.ok) {
+          const data = await res.json();
+          const lrc = data?.syncedLyrics || "";
+          const plain = data?.plainLyrics || "";
+          if (lrc) {
+            setLrcData(lrc);
+            await apiClient.karaoke.songs.update(song.id, { lrcContent: lrc, plainLyrics: plain });
+            setLrcSaved(true);
+            onSaved?.({ ...song, lrcContent: lrc, plainLyrics: plain });
+            return;
+          }
+        }
+      } catch {
+        // Continue to server proxy
+      }
+
+      // 2. Try server lyrics proxy
+      try {
+        const proxyRes = await apiClient.karaoke.getLyrics({
+          artist: song.artist || "",
+          title: song.title || "",
+          album: song.album || undefined,
+        });
+        if (proxyRes?.found && proxyRes.lrc) {
+          setLrcData(proxyRes.lrc);
+          await apiClient.karaoke.songs.update(song.id, {
+            lrcContent: proxyRes.lrc,
+            plainLyrics: proxyRes.plainLyrics || "",
+          });
+          setLrcSaved(true);
+          onSaved?.({ ...song, lrcContent: proxyRes.lrc, plainLyrics: proxyRes.plainLyrics || "" });
+        }
+      } catch {
+        // Non-fatal
+      }
+    };
+
+    tryFetchLyrics().finally(() => setFetchingLrc(false));
+  }, [song, onSaved]);
+
+  // Extract lyrics via AssemblyAI
+  async function extractLyricsWithAi() {
+    if (!audioUrl) return;
+    setExtractingAi(true);
+    setExtractError("");
+    try {
+      // Use URL transcription endpoint
+      const result = await apiClient.podcastAudio.transcribeUrl(audioUrl, {
+        wordTimestamps: true,
+      });
+
+      const lrc = result?.lrc || "";
+      const text = result?.text || result?.lyrics || "";
+      const kLines = result?.karaoke_lines || null;
+
+      if (!lrc && !text) {
+        throw new Error("AI transcription produced empty lyrics.");
+      }
+
+      setLrcData(lrc || text);
+      if (kLines) setDynamicKaraokeLines(kLines);
+
+      // Save to server
+      if (song?.id) {
+        await apiClient.karaoke.songs.update(song.id, {
+          lrcContent: lrc,
+          plainLyrics: text,
+        });
+        setLrcSaved(true);
+        onSaved?.({ ...song, lrcContent: lrc, plainLyrics: text, karaokeLines: kLines });
+      }
+    } catch (err) {
+      setExtractError(err?.message || "AI extraction failed. Please check your audio file or retry.");
+    } finally {
+      setExtractingAi(false);
+    }
+  }
 
   // Sync active line/word
   useEffect(() => {
@@ -145,6 +229,31 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
       });
     }
   }, [activeLineIdx]);
+
+  // ── rAF word-fill loop (only when karaokeLines are available) ───────────────
+  useEffect(() => {
+    if (!karaokeLines) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    function frame() {
+      const nowMs = audio.currentTime * 1000;
+      for (let li = 0; li < karaokeLines.length; li++) {
+        const kLine = karaokeLines[li];
+        for (let wi = 0; wi < kLine.words.length; wi++) {
+          const kw = kLine.words[wi];
+          const dur = Math.max(1, kw.end - kw.start);
+          const progress = Math.max(0, Math.min(1, (nowMs - kw.start) / dur));
+          const el = fillRefsRef.current[`${li}-${wi}`];
+          if (el) el.style.width = `${progress * 100}%`;
+        }
+      }
+      rafRef.current = requestAnimationFrame(frame);
+    }
+
+    rafRef.current = requestAnimationFrame(frame);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [karaokeLines]);
 
   // Lazy Web Audio API setup
   function ensureAudioContext() {
@@ -234,7 +343,7 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
         .word-active { animation: wordPop 0.25s ease; }
       `}</style>
 
-      {/* Hidden audio element */}
+      {/* Hidden audio element with optional word-timed VTT caption track */}
       <audio
         ref={audioRef}
         src={audioUrl}
@@ -244,7 +353,11 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
         preload="metadata"
-      />
+      >
+        {vttUrl && (
+          <track kind="captions" src={vttUrl} srcLang="und" label="Word-timed captions" default />
+        )}
+      </audio>
 
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-3 bg-black/40 backdrop-blur border-b border-white/10 shrink-0">
@@ -260,9 +373,23 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
           {lrcSaved && <span className="text-xs text-green-400">Lyrics saved</span>}
           <Button
             variant="ghost"
+            size="sm"
+            onClick={() => setShowScoring((p) => !p)}
+            className={`gap-1.5 text-xs rounded-full border transition-colors ${
+              showScoring
+                ? "border-primary bg-primary/20 text-primary"
+                : "border-white/20 text-white/70 hover:text-white hover:bg-white/10"
+            }`}
+          >
+            <Mic className="w-3.5 h-3.5" />
+            {showScoring ? "Scoring On" : "Sing & Score"}
+          </Button>
+          <Button
+            variant="ghost"
             size="icon"
             onClick={() => setShowEq((p) => !p)}
             className={`text-white hover:bg-white/10 ${showEq ? "bg-white/20" : ""}`}
+            title="Audio Equalizer"
           >
             <Sliders className="w-4 h-4" />
           </Button>
@@ -295,11 +422,28 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
         style={{ scrollbarWidth: "none" }}
       >
         {lines.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-4 text-white/30">
-            <Mic className="w-12 h-12" />
-            <p className="text-sm">
-              {fetchingLrc ? "Fetching lyrics…" : "No lyrics available"}
+          <div className="flex flex-col items-center justify-center h-full gap-4 text-white/40 px-4 text-center my-auto">
+            <Mic className="w-12 h-12 text-white/25" />
+            <p className="text-sm font-medium">
+              {fetchingLrc ? "Searching for lyrics on LRCLIB…" : "No synchronized lyrics found for this song."}
             </p>
+            {!fetchingLrc && (
+              <div className="flex flex-col items-center gap-2 max-w-sm">
+                <Button
+                  onClick={extractLyricsWithAi}
+                  disabled={extractingAi}
+                  variant="outline"
+                  className="bg-white/10 hover:bg-white/20 text-white border-white/20 gap-2"
+                >
+                  {extractingAi ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4 text-yellow-400" />}
+                  {extractingAi ? "Extracting lyrics with AI (1-2 min)…" : "Extract Lyrics with AI (AssemblyAI)"}
+                </Button>
+                {extractError && <p className="text-xs text-red-400">{extractError}</p>}
+                <p className="text-[11px] text-white/40 leading-relaxed">
+                  Transcribes sung vocals into word-by-word synchronized LRC lyrics and saves them to your song.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           lines.map((line, i) => {
@@ -307,6 +451,11 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
             const dist = Math.abs(i - activeLineIdx);
             const opacity =
               isActive ? 1 : dist === 1 ? 0.45 : dist === 2 ? 0.25 : 0.12;
+
+            // Find matching karaokeLines entry by time proximity for fill animation.
+            const kLine = karaokeLines && isActive
+              ? karaokeLines.find((kl) => Math.abs(kl.start / 1000 - line.time) < 0.5)
+              : null;
 
             return (
               <div
@@ -320,14 +469,51 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
                 }`}
                 style={{ opacity }}
               >
-                {isActive && line.words ? (
+                {isActive && kLine ? (
+                  /* Word-fill + click-to-seek + keyboard accessibility */
+                  kLine.words.map((kw, wi) => {
+                    const kLineIdx = karaokeLines.indexOf(kLine);
+                    return (
+                      <span
+                        key={wi}
+                        role="button"
+                        tabIndex={0}
+                        title={`${(kw.start / 1000).toFixed(2)}s`}
+                        aria-label={`Seek to ${kw.text}`}
+                        onClick={(e) => { e.stopPropagation(); if (audioRef.current) audioRef.current.currentTime = kw.start / 1000; }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            if (audioRef.current) audioRef.current.currentTime = kw.start / 1000;
+                          }
+                        }}
+                        style={{ display: "inline-block", marginRight: "0.28em", position: "relative", color: "#555", cursor: "pointer", borderRadius: "0.2em" }}
+                        className="hover:text-[#a995ff] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#8c6cff]"
+                      >
+                        {kw.text}
+                        <span
+                          ref={(el) => {
+                            if (el) fillRefsRef.current[`${kLineIdx}-${wi}`] = el;
+                            else delete fillRefsRef.current[`${kLineIdx}-${wi}`];
+                          }}
+                          style={{
+                            position: "absolute", inset: 0, width: "0%", overflow: "hidden",
+                            color: "#fff", whiteSpace: "nowrap",
+                            pointerEvents: "none",
+                            textShadow: "0 0 12px #8c6cff",
+                          }}
+                        >
+                          {kw.text}
+                        </span>
+                      </span>
+                    );
+                  })
+                ) : isActive && line.words ? (
                   line.words.map((w, wi) => (
                     <span
                       key={wi}
                       className={`transition-colors duration-100 ${
-                        wi <= activeWordIdx
-                          ? "text-yellow-300 word-active"
-                          : "text-white"
+                        wi <= activeWordIdx ? "text-yellow-300 word-active" : "text-white"
                       }`}
                     >
                       {w.text}{" "}
@@ -341,6 +527,20 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
           })
         )}
       </div>
+
+      {/* Docked live mic scoring panel */}
+      {showScoring && (
+        <div className="shrink-0 border-t border-white/10 px-4 py-3 bg-black/75 backdrop-blur max-h-56 overflow-y-auto">
+          <KaraokeTranscriber
+            sessionId={song?.id}
+            songMetadata={{
+              trackId: song?.id,
+              language: song?.language || "en",
+              languageCodes: song?.language ? [song.language] : ["en"],
+            }}
+          />
+        </div>
+      )}
 
       {/* Bottom controls */}
       <div className="shrink-0 bg-black/60 backdrop-blur border-t border-white/10 px-4 pt-3 pb-5 space-y-3">
@@ -361,12 +561,13 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
 
         {/* Playback buttons */}
         <div className="flex items-center justify-center gap-6">
-          <button onClick={skipBack} className="text-white/60 hover:text-white transition-colors">
+          <button onClick={skipBack} className="text-white/60 hover:text-white transition-colors" title="Rewind 5s">
             <SkipBack className="w-6 h-6" />
           </button>
           <button
             onClick={togglePlay}
             className="w-14 h-14 rounded-full bg-yellow-400 flex items-center justify-center text-black hover:bg-yellow-300 transition-colors shadow-lg"
+            title={playing ? "Pause" : "Play"}
           >
             {playing ? (
               <Pause className="w-7 h-7" />
@@ -374,7 +575,7 @@ export default function KaraokePlayer({ song, onClose, onSaved }) {
               <Play className="w-7 h-7 ml-1" />
             )}
           </button>
-          <button onClick={skipForward} className="text-white/60 hover:text-white transition-colors">
+          <button onClick={skipForward} className="text-white/60 hover:text-white transition-colors" title="Forward 5s">
             <SkipForward className="w-6 h-6" />
           </button>
         </div>

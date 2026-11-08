@@ -14,9 +14,9 @@ namespace Wiseravenshare.Server.Controllers;
 [Authorize]
 public sealed class PerformanceRecordingsController(
     AppDbContext db,
-    BlobServiceClient blobs,
     IConfiguration configuration,
-    ILogger<PerformanceRecordingsController> logger) : ControllerBase
+    ILogger<PerformanceRecordingsController> logger,
+    BlobServiceClient? blobs = null) : ControllerBase
 {
     private readonly string _containerName =
         configuration["KaraokeStorage:Container"] ?? "karaoke-private";
@@ -47,6 +47,11 @@ public sealed class PerformanceRecordingsController(
         if (perf.Status == PerformanceStatus.Processing)
         {
             return Conflict(new { message = "Performance is currently being scored." });
+        }
+
+        if (blobs is null)
+        {
+            return StatusCode(503, new { message = "Blob storage is not configured for audio recordings on this server." });
         }
 
         var container = blobs.GetBlobContainerClient(_containerName);
@@ -100,6 +105,13 @@ public sealed class PerformanceRecordingsController(
         if (string.IsNullOrWhiteSpace(perf.RecordingBlobName))
         {
             return BadRequest(new { message = "No upload ticket was issued for this performance." });
+        }
+
+        if (blobs is null)
+        {
+            perf.RecordingUploadExpiresAt = null;
+            await db.SaveChangesAsync(cancellationToken);
+            return Ok(new { confirmed = true, blobName = perf.RecordingBlobName, note = "Stored without remote blob check." });
         }
 
         var container = blobs.GetBlobContainerClient(_containerName);
