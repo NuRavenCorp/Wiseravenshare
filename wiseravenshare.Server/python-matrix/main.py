@@ -16,6 +16,7 @@ from urllib import request as urllib_request
 import psycopg
 import redis
 import redis.asyncio as aredis
+import asyncpg
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
@@ -590,8 +591,12 @@ from chat.bridge import PostChatBridge
 from chat.router import router as chat_router
 from chat.state import _chat_state
 from karaoke.router import router as karaoke_router
+from agent.social_router import router as agent_social_router
+from agent.karaoke_router import router as agent_karaoke_router
+from agent.tool_router import router as agent_tool_router
 
 CHAT_ENABLED = os.environ.get("CHAT_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+AGENT_ENABLED = os.environ.get("AGENT_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 _asyncpg_pool: asyncpg.Pool | None = None
 _chat_ws: ChatConnectionManager | None = None
@@ -715,6 +720,10 @@ if RAVENSIGHT_ENABLED:
     app.include_router(ravensight_router)
 
 app.include_router(karaoke_router)
+if AGENT_ENABLED:
+    app.include_router(agent_social_router)
+    app.include_router(agent_karaoke_router)
+    app.include_router(agent_tool_router)
 
 
 def _get_predictor() -> Predictor | None:
