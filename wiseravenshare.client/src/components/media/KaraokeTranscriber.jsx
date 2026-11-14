@@ -177,7 +177,7 @@ export default function KaraokeTranscriber({
     latestTurnRef.current = null;
 
     sessionTokenRef.current = `${effectiveSessionId}-${createUuid()}`;
-    performanceIdRef.current = "";
+    performanceIdRef.current = createUuid();
 
     try {
       if (isGuid(String(songMetadata?.trackId || ""))) {
@@ -186,6 +186,15 @@ export default function KaraokeTranscriber({
       }
     } catch (createErr) {
       console.warn("Could not create performance record", createErr);
+    }
+
+    if (isGuid(String(songMetadata?.trackId || "")) && isGuid(performanceIdRef.current)) {
+      apiClient.karaoke.startPerformance(performanceIdRef.current, {
+        songId: songMetadata.trackId,
+        startedAtUtc: new Date().toISOString(),
+      }).catch((error) => {
+        console.warn("Legacy startPerformance failed", error);
+      });
     }
 
     const tokenPayload = {
@@ -251,6 +260,20 @@ export default function KaraokeTranscriber({
           endMilliseconds: Number(turn.words?.at(-1)?.end) || undefined,
         };
         finalizedTurnsRef.current.set(finalTurn.turnOrder, finalTurn);
+
+        apiClient.karaoke.persistFinalizedTurn({
+          sessionId: sessionTokenRef.current,
+          turnOrder: finalTurn.turnOrder,
+          transcript: finalTurn.transcript,
+          endOfTurn: true,
+          words: (turn.words || []).map((w) => ({
+            word: w.word,
+            start: Number(w.start || 0),
+            end: Number(w.end || 0),
+          })),
+        }).catch((error) => {
+          console.warn("Legacy persistFinalizedTurn failed", error);
+        });
       });
 
       await transcriber.connect();
@@ -319,22 +342,46 @@ export default function KaraokeTranscriber({
         ? new Blob(chunks, { type: recordingMimeRef.current })
         : null;
 
-    // Save turns then score via /api/performances.
+    // Score both new and legacy paths in parallel; accept whichever succeeds first.
     let scoreResult = null;
-    if (isGuid(performanceIdRef.current) && finalizedTurnsRef.current.size > 0) {
-      try {
-        const turns = Array.from(finalizedTurnsRef.current.values())
-          .sort((a, b) => a.turnOrder - b.turnOrder);
+    const canScore = isGuid(performanceIdRef.current) && finalizedTurnsRef.current.size > 0;
+    if (canScore) {
+      const turns = Array.from(finalizedTurnsRef.current.values())
+        .sort((a, b) => a.turnOrder - b.turnOrder);
+
+      const newFlowPromise = (async () => {
         await saveTurns(performanceIdRef.current, turns);
-        scoreResult = await completePerformanceApi(performanceIdRef.current);
-        if (typeof scoreResult?.score === "number") {
-          setLyricScore(scoreResult.score);
-          onScored?.(scoreResult);
+        return completePerformanceApi(performanceIdRef.current);
+      })();
+
+      const legacyFlowPromise = apiClient.karaoke.completePerformance(performanceIdRef.current, {
+        sessionId: sessionTokenRef.current,
+        songId: songMetadata?.trackId,
+      });
+
+      const [newFlow, legacyFlow] = await Promise.allSettled([
+        newFlowPromise,
+        legacyFlowPromise,
+      ]);
+
+      if (newFlow.status === "fulfilled" && typeof newFlow.value?.score === "number") {
+        scoreResult = newFlow.value;
+      } else if (legacyFlow.status === "fulfilled" && typeof legacyFlow.value?.score === "number") {
+        scoreResult = legacyFlow.value;
+      } else {
+        if (newFlow.status === "rejected") {
+          console.error("Karaoke scoring failed on /api/performances flow", newFlow.reason);
         }
-      } catch (err) {
-        console.error("Karaoke scoring failed", err);
+        if (legacyFlow.status === "rejected") {
+          console.error("Karaoke scoring failed on legacy flow", legacyFlow.reason);
+        }
         setTranscriptionError("Scoring calculation encountered an issue.");
       }
+    }
+
+    if (typeof scoreResult?.score === "number") {
+      setLyricScore(scoreResult.score);
+      onScored?.(scoreResult);
     }
 
     // Upload recording blob after scoring so it doesn't block the score.
