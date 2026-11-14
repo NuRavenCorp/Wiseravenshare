@@ -1,7 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { StreamingTranscriber } from "assemblyai";
 import { apiClient } from "@/api/client";
-import { appParams } from "@/lib/app-params";
 import {
   createPerformance,
   saveTurns,
