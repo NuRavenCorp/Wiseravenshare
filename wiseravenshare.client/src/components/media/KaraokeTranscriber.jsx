@@ -6,8 +6,9 @@ import {
   saveTurns,
   completePerformance as completePerformanceApi,
 } from "@/api/KaraokeApi";
+import { useKaraokeAgent } from "@/hooks/useKaraokeAgent";
 import { Button } from "@/components/ui/button";
-import { Mic, Square, Loader2, Upload, RotateCcw } from "lucide-react";
+import { Mic, Square, Loader2, Upload, RotateCcw, Bot } from "lucide-react";
 
 function isSafariBrowser() {
   if (typeof navigator === "undefined") return false;
@@ -69,6 +70,8 @@ export default function KaraokeTranscriber({
 
   const sessionTokenRef = useRef("");
   const performanceIdRef = useRef("");
+
+  const { agentFeedback, agentError, startSession, sendTurn, endSession } = useKaraokeAgent();
 
   const effectiveSessionId = useMemo(
     () => sessionId || `karaoke-${Date.now()}`,
@@ -202,6 +205,9 @@ export default function KaraokeTranscriber({
       console.warn("Could not create performance record", createErr);
     }
 
+    // Start NuravenCorpLLM agent session in parallel (best-effort).
+    startSession(performanceIdRef.current || null);
+
     if (isGuid(String(songMetadata?.trackId || "")) && isGuid(performanceIdRef.current)) {
       apiClient.karaoke.startPerformance(performanceIdRef.current, {
         songId: songMetadata.trackId,
@@ -283,6 +289,9 @@ export default function KaraokeTranscriber({
           endMilliseconds: Number(turn.words?.at(-1)?.end) || undefined,
         };
         finalizedTurnsRef.current.set(finalTurn.turnOrder, finalTurn);
+
+        // Feed the turn to NuravenCorpLLM for live analysis (best-effort).
+        sendTurn(finalTurn.transcript);
 
         apiClient.karaoke.persistFinalizedTurn({
           sessionId: sessionTokenRef.current,
@@ -416,6 +425,9 @@ export default function KaraokeTranscriber({
       }
     }
 
+    // Close NuravenCorpLLM agent session in parallel (best-effort).
+    endSession();
+
     setStatus("idle");
   }
 
@@ -486,6 +498,15 @@ export default function KaraokeTranscriber({
       )}
 
       {liveText && <p className="text-sm text-foreground/80" aria-live="polite">{liveText}</p>}
+
+      {(agentFeedback || agentError) && (
+        <div className="flex items-start gap-2 rounded-md bg-primary/10 border border-primary/20 px-3 py-2 text-xs">
+          <Bot className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
+          <p className={agentError ? "text-destructive" : "text-primary"}>
+            {agentError || agentFeedback}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
