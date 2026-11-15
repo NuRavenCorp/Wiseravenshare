@@ -11,12 +11,14 @@ namespace Wiseravenshare.Server.Controllers;
 /// Manages user-uploaded full song files stored in the local bucket.
 ///
 /// Routes:
-///   POST   /api/karaoke/songs                      – upload a new song file
-///   GET    /api/karaoke/songs                      – list caller's songs
-///   GET    /api/karaoke/songs/{id}                 – get metadata
-///   GET    /api/karaoke/songs/{id}/stream          – stream audio bytes
-///   PATCH  /api/karaoke/songs/{id}                 – update metadata/lyrics
-///   DELETE /api/karaoke/songs/{id}                 – soft-delete
+///   POST   /api/karaoke/songs                              – upload a new song file
+///   GET    /api/karaoke/songs                              – list caller's songs
+///   GET    /api/karaoke/songs/{id}                         – get metadata
+///   GET    /api/karaoke/songs/{id}/stream                  – stream audio bytes
+///   PATCH  /api/karaoke/songs/{id}                         – update metadata/lyrics
+///   DELETE /api/karaoke/songs/{id}                         – soft-delete
+///   POST   /api/karaoke/songs/{id}/process                 – trigger vocal separation + LRC extraction
+///   GET    /api/karaoke/songs/{id}/processing-status       – poll job status, creates KaraokeTrack when done
 /// </summary>
 [ApiController]
 [Route("api/karaoke/songs")]
@@ -24,6 +26,7 @@ namespace Wiseravenshare.Server.Controllers;
 public sealed class KaraokeSongFilesController(
     AppDbContext db,
     IConfiguration configuration,
+    IHttpClientFactory httpClientFactory,
     ILogger<KaraokeSongFilesController> logger) : ControllerBase
 {
     private static readonly HashSet<string> AllowedAudioTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -133,6 +136,7 @@ public sealed class KaraokeSongFilesController(
             .OrderByDescending(s => s.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
+            .Include(s => s.KaraokeTrack)
             .ToListAsync(cancellationToken);
 
         return Ok(new
@@ -150,6 +154,7 @@ public sealed class KaraokeSongFilesController(
         var userId = User.GetUserId();
         var song   = await db.KaraokeSongFiles
             .AsNoTracking()
+            .Include(s => s.KaraokeTrack)
             .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted, cancellationToken);
 
         if (song is null) return NotFound();
@@ -280,11 +285,190 @@ public sealed class KaraokeSongFilesController(
         return NoContent();
     }
 
+    // ── Trigger vocal separation + LRC extraction ─────────────────────────
+
+    /// <summary>
+    /// Submits the song to the karaoke engine for vocal separation and LRC extraction.
+    /// Returns immediately with a job_id; poll /processing-status?jobId=xxx to track completion.
+    /// </summary>
+    [HttpPost("{id:guid}/process")]
+    public async Task<IActionResult> Process(Guid id, CancellationToken cancellationToken = default)
+    {
+        var userId = User.GetUserId();
+        var song   = await db.KaraokeSongFiles
+            .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted, cancellationToken);
+
+        if (song is null) return NotFound();
+        if (song.UploadedByUserId != userId) return Forbid();
+
+        if (string.IsNullOrWhiteSpace(song.LocalBucketKey))
+            return BadRequest(new { message = "Song file not yet stored." });
+
+        var fullPath = Path.Combine(BucketsRoot, song.LocalBucketKey);
+        if (!System.IO.File.Exists(fullPath))
+            return NotFound(new { message = "Audio file not found on disk." });
+
+        try
+        {
+            using var client = httpClientFactory.CreateClient("KaraokeServiceUpload");
+            using var multipart = new MultipartFormDataContent();
+            await using var stream = System.IO.File.OpenRead(fullPath);
+            var fileContent = new System.Net.Http.StreamContent(stream);
+            fileContent.Headers.ContentType =
+                new System.Net.Http.Headers.MediaTypeHeaderValue(song.ContentType ?? "audio/mpeg");
+            multipart.Add(fileContent, "file", song.OriginalFileName ?? $"{id}.mp3");
+            multipart.Add(new StringContent(userId.ToString()), "user_id");
+            multipart.Add(new StringContent(song.Title), "song_title");
+            multipart.Add(new StringContent(id.ToString("N")), "song_id");
+
+            var resp = await client.PostAsync("/generate-backing/jobs", multipart, cancellationToken);
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            if (!resp.IsSuccessStatusCode)
+            {
+                logger.LogWarning("Karaoke engine returned {Status} for song {Id}: {Body}",
+                    resp.StatusCode, id, body);
+                return StatusCode(503, new { message = "Vocal separation service unavailable." });
+            }
+
+            song.Status = SongFileStatus.ProcessingQueued;
+            song.ProcessingStartedAt = DateTime.UtcNow;
+            song.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+
+            return Content(body, "application/json");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Karaoke engine unreachable for song {Id}", id);
+            return StatusCode(503, new { message = "Vocal separation service is not available in this environment." });
+        }
+    }
+
+    /// <summary>
+    /// Polls the karaoke engine job status.  When the job is complete, creates or updates
+    /// the linked KaraokeTrack record with the instrumental URL and LRC content.
+    /// </summary>
+    [HttpGet("{id:guid}/processing-status")]
+    public async Task<IActionResult> ProcessingStatus(
+        Guid id,
+        [FromQuery] string jobId,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = User.GetUserId();
+        var song   = await db.KaraokeSongFiles
+            .Include(s => s.KaraokeTrack)
+            .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted, cancellationToken);
+
+        if (song is null) return NotFound();
+        if (song.UploadedByUserId != userId) return Forbid();
+
+        // If already linked to a completed track, return immediately.
+        if (song.KaraokeTrack?.Status == KaraokeTrackStatus.Ready)
+        {
+            return Ok(new
+            {
+                status = "completed",
+                instrumentalUrl = song.KaraokeTrack.InstrumentalUrl,
+                lrcContent      = song.KaraokeTrack.LrcContent,
+                plainLyrics     = song.KaraokeTrack.PlainLyrics,
+                karaokeTrackId  = song.KaraokeTrackId
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(jobId))
+            return BadRequest(new { message = "jobId is required." });
+
+        try
+        {
+            using var client = httpClientFactory.CreateClient("KaraokeService");
+            var resp = await client.GetAsync(
+                $"/jobs/{Uri.EscapeDataString(jobId)}",
+                cancellationToken);
+
+            if (!resp.IsSuccessStatusCode)
+                return Ok(new { status = "unknown", jobId });
+
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var root   = doc.RootElement;
+            var status = root.TryGetProperty("status", out var s) ? s.GetString() : "unknown";
+
+            if (status is not "completed")
+                return Ok(new { status, jobId });
+
+            // Job completed — extract result and materialise KaraokeTrack.
+            var instrumentalUrl = root.TryGetProperty("instrumental_url", out var iu) ? iu.GetString() : null;
+            var lrcContent      = root.TryGetProperty("lrc",              out var lc) ? lc.GetString() : null;
+            var plainLyrics     = root.TryGetProperty("lyrics",           out var pl) ? pl.GetString()
+                                : root.TryGetProperty("text",             out var tx) ? tx.GetString() : null;
+
+            KaraokeTrack track;
+            if (song.KaraokeTrackId.HasValue && song.KaraokeTrack is not null)
+            {
+                track = song.KaraokeTrack;
+            }
+            else
+            {
+                track = new KaraokeTrack
+                {
+                    Id               = Guid.NewGuid(),
+                    Title            = song.Title,
+                    Artist           = song.Artist ?? string.Empty,
+                    Genre            = song.Genre,
+                    Language         = song.Language,
+                    SourceType       = KaraokeTrackSource.UserUploaded,
+                    License          = "User Upload",
+                    UploadedByUserId = userId,
+                };
+                db.KaraokeTracks.Add(track);
+            }
+
+            if (!string.IsNullOrWhiteSpace(instrumentalUrl)) track.InstrumentalUrl = instrumentalUrl;
+            if (!string.IsNullOrWhiteSpace(lrcContent))      track.LrcContent      = lrcContent;
+            if (!string.IsNullOrWhiteSpace(plainLyrics))     track.PlainLyrics     = plainLyrics;
+            track.HasInstrumental = !string.IsNullOrWhiteSpace(track.InstrumentalUrl);
+            track.HasLrc          = !string.IsNullOrWhiteSpace(track.LrcContent);
+            track.Status          = KaraokeTrackStatus.Ready;
+
+            song.KaraokeTrack           = track;
+            song.KaraokeTrackId         = track.Id;
+            song.Status                 = SongFileStatus.Ready;
+            song.ProcessingCompletedAt  = DateTime.UtcNow;
+            song.UpdatedAt              = DateTime.UtcNow;
+
+            // Promote LRC to the song record if not already set.
+            if (string.IsNullOrWhiteSpace(song.LrcContent) && !string.IsNullOrWhiteSpace(lrcContent))
+                song.LrcContent = lrcContent;
+            if (string.IsNullOrWhiteSpace(song.PlainLyrics) && !string.IsNullOrWhiteSpace(plainLyrics))
+                song.PlainLyrics = plainLyrics;
+
+            await db.SaveChangesAsync(cancellationToken);
+
+            return Ok(new
+            {
+                status          = "completed",
+                instrumentalUrl = track.InstrumentalUrl,
+                lrcContent      = track.LrcContent,
+                plainLyrics     = track.PlainLyrics,
+                karaokeTrackId  = track.Id
+            });
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "Karaoke engine unreachable when polling job {JobId}", jobId);
+            return Ok(new { status = "unknown", jobId });
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────
 
     private static object MapDto(KaraokeSongFile s, HttpRequest request)
     {
         var baseUrl = $"{request.Scheme}://{request.Host}";
+        var audioUrl = s.IsMigratedToCloud && !string.IsNullOrWhiteSpace(s.CloudPublicUrl)
+            ? s.CloudPublicUrl
+            : (s.LocalBucketKey is not null ? $"{baseUrl}/api/karaoke/songs/{s.Id}/stream" : null);
+        var instrumentalUrl = s.KaraokeTrack?.InstrumentalUrl;
         return new
         {
             id               = s.Id,
@@ -301,13 +485,11 @@ public sealed class KaraokeSongFilesController(
             status           = s.Status.ToString(),
             isPublic         = s.IsPublic,
             playCount        = s.PlayCount,
-            lrcContent       = s.LrcContent,
-            plainLyrics      = s.PlainLyrics,
+            lrcContent       = s.LrcContent ?? s.KaraokeTrack?.LrcContent,
+            plainLyrics      = s.PlainLyrics ?? s.KaraokeTrack?.PlainLyrics,
             coverImageUrl    = s.CoverImageUrl,
-            // Resolved audio URL: cloud if available, otherwise local stream
-            audioUrl         = s.IsMigratedToCloud && !string.IsNullOrWhiteSpace(s.CloudPublicUrl)
-                ? s.CloudPublicUrl
-                : (s.LocalBucketKey is not null ? $"{baseUrl}/api/karaoke/songs/{s.Id}/stream" : null),
+            audioUrl,
+            instrumentalUrl,
             isMigratedToCloud   = s.IsMigratedToCloud,
             karaokeTrackId      = s.KaraokeTrackId,
             uploadedByUserId    = s.UploadedByUserId,

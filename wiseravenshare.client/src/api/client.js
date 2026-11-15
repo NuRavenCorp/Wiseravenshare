@@ -975,6 +975,13 @@ export const apiClient = {
             return requestJson(`/api/karaoke/songs/${encodedId}/delete`, { method: "POST" });
           });
       },
+      process(id) {
+        return requestJson(`/api/karaoke/songs/${encodeURIComponent(id)}/process`, { method: "POST" });
+      },
+      processingStatus(id, jobId) {
+        const q = jobId ? `?jobId=${encodeURIComponent(jobId)}` : "";
+        return requestJson(`/api/karaoke/songs/${encodeURIComponent(id)}/processing-status${q}`, { method: "GET" });
+      },
     },
     recordPlay(trackId) {
       return requestJson(`/api/karaoke/db-catalog/${encodeURIComponent(trackId)}/play`, { method: "POST" });

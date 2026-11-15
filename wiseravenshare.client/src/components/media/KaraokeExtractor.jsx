@@ -588,6 +588,12 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
       setUploadTitle("");
       setUploadArtist("");
       setUploadGenre("");
+
+      // Best-effort: kick off vocal separation + LRC extraction via karaoke engine.
+      apiClient.karaoke.songs.process(created.id).catch((err) => {
+        console.warn("[Karaoke] Vocal separation not available:", err?.message);
+      });
+
       onTrackSelected?.(created);
     } catch (err) {
       setError(err?.message || "Song upload failed.");

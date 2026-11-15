@@ -98,9 +98,9 @@ export default function KaraokePlayer({ song, onClose, onSaved, karaokeLines: ka
 
   const lines = parsedLrc.lines;
 
-  // Audio source URL
+  // Audio source URL — use instrumental (vocal-separated) when available, fall back to full mix
   const audioUrl = useMemo(
-    () => song?.audioUrl ?? apiClient.karaoke.songs.streamUrl(song?.id),
+    () => song?.instrumentalUrl || song?.audioUrl || apiClient.karaoke.songs.streamUrl(song?.id),
     [song]
   );
 
