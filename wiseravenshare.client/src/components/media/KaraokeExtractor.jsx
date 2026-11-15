@@ -400,7 +400,7 @@ function parseLrcLines(lrcText = "") {
   return parsed.sort((a, b) => a.timeSeconds - b.timeSeconds);
 }
 
-export default function KaraokeExtractor({ currentUser, userLoading = false, onAuthRequired, onTrackSelected = null, defaultTab = "catalog" }) {
+export default function KaraokeExtractor({ currentUser, userLoading = false, onAuthRequired, onTrackSelected = null, defaultTab = "catalog", onOpenPlayer = null }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("");
@@ -871,7 +871,7 @@ export default function KaraokeExtractor({ currentUser, userLoading = false, onA
 
     const audioUrl = track.instrumentalUrl || track.sourceUrl || "";
     if (!audioUrl) {
-      setSingMode(true);
+      setCatalogPlaybackError("No instrumental audio is available for this track yet — it may still be processing.");
       return;
     }
 

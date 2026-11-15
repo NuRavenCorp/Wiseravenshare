@@ -163,6 +163,20 @@ export default function KaraokeTranscriber({
   }
 
   async function start() {
+    // Guard: only start from idle or a previous error state.
+    if (status !== "idle" && status !== "error") return;
+
+    // If recovering from an error, tear down any stale streams first.
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    if (sourceNodeRef.current) { sourceNodeRef.current.disconnect(); sourceNodeRef.current = null; }
+    if (workletNodeRef.current) { workletNodeRef.current.disconnect(); workletNodeRef.current = null; }
+    if (audioContextRef.current) { audioContextRef.current.close().catch(() => {}); audioContextRef.current = null; }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    transcriberRef.current?.close().catch(() => {});
+    transcriberRef.current = null;
+
     setStatus("connecting");
     setLiveText("");
     setLyricScore(null);
@@ -242,8 +256,17 @@ export default function KaraokeTranscriber({
       transcriber.on("close", () => setStatus("idle"));
       transcriber.on("error", (error) => {
         console.error(error);
-        setTranscriptionError(error?.message || "Transcription streaming error.");
-        setStatus("error");
+        setTranscriptionError(error?.message || "Transcription streaming error. Click Start to retry.");
+        // Clean up all streams immediately so the UI returns to a usable state.
+        recorderRef.current?.stop();
+        recorderRef.current = null;
+        if (sourceNodeRef.current) { sourceNodeRef.current.disconnect(); sourceNodeRef.current = null; }
+        if (workletNodeRef.current) { workletNodeRef.current.disconnect(); workletNodeRef.current = null; }
+        if (audioContextRef.current) { audioContextRef.current.close().catch(() => {}); audioContextRef.current = null; }
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        transcriberRef.current = null;
+        setStatus("idle");
       });
       transcriber.on("turn", (turn) => {
         latestTurnRef.current = turn;
@@ -368,14 +391,11 @@ export default function KaraokeTranscriber({
         scoreResult = newFlow.value;
       } else if (legacyFlow.status === "fulfilled" && typeof legacyFlow.value?.score === "number") {
         scoreResult = legacyFlow.value;
-      } else {
-        if (newFlow.status === "rejected") {
-          console.error("Karaoke scoring failed on /api/performances flow", newFlow.reason);
-        }
-        if (legacyFlow.status === "rejected") {
-          console.error("Karaoke scoring failed on legacy flow", legacyFlow.reason);
-        }
-        setTranscriptionError("Scoring calculation encountered an issue.");
+      } else if (newFlow.status === "rejected" && legacyFlow.status === "rejected") {
+        // Only surface an error if both paths failed.
+        console.error("Karaoke scoring failed on /api/performances flow", newFlow.reason);
+        console.error("Karaoke scoring failed on legacy flow", legacyFlow.reason);
+        setTranscriptionError("Scoring unavailable — your lyrics were saved.");
       }
     }
 
