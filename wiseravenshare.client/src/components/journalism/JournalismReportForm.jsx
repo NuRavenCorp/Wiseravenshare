@@ -31,7 +31,9 @@ export default function JournalismReportForm({ onPublished }) {
 
   const buildJournalismPrompt = () => {
     const lines = [
-      "Generate a structured journalism report from these field notes.",
+      "You are a professional journalism assistant. Generate a structured news report from the following field notes.",
+      "Return a clear, factual headline on the first line, then write the full report body. Do not add labels like 'Headline:' — just write the headline directly followed by the body.",
+      "",
       `Who: ${fields.who || "Not specified"}`,
       `What: ${fields.what || "Not specified"}`,
       `Where: ${fields.where || "Not specified"}`,
@@ -42,7 +44,6 @@ export default function JournalismReportForm({ onPublished }) {
     if (media.length > 0) {
       lines.push(`Media evidence: ${media.map((m) => `${m.type}: ${m.name}`).join(", ")}`);
     }
-    lines.push("Return the report with a headline first, then the full body.");
     return lines.join("\n");
   };
 
@@ -111,14 +112,20 @@ export default function JournalismReportForm({ onPublished }) {
     setGenerating(true);
     setError(null);
     try {
-      const res = await apiClient.functions.invoke("GenerateJournalismReport", {
-        prompt: buildJournalismPrompt(),
+      // Use the same RavenChat endpoint so the same LLM + configuration applies.
+      const payload = await apiClient.requestJson("/api/raven-assistant/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          Message: buildJournalismPrompt(),
+        }),
       });
-      if (res?.data?.error) {
-        throw new Error(res.data.error);
+
+      const reply = payload?.Answer ?? payload?.answer ?? "";
+      if (!reply) {
+        throw new Error("AI returned an empty response. Please try again.");
       }
 
-      const parsed = parseGeneratedReport(res?.data?.reply);
+      const parsed = parseGeneratedReport(reply);
       setDraftHeadline((current) => current.trim() || parsed.headline);
       setDraftBody((current) => (current.trim() ? current : parsed.body));
     } catch (err) {
