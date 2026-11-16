@@ -3145,7 +3145,8 @@ app.Use(async (context, next) =>
         "img-src 'self' data: blob: https:; " +
         "media-src 'self' blob: data: https:; " +
         "font-src 'self' data: https: https://fonts.gstatic.com; " +
-        "connect-src 'self' https: wss:; " +
+        "connect-src 'self' blob: https: wss:; " +
+        "worker-src 'self' blob:; " +
         "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; " +
         "frame-ancestors 'none'; " +
         "base-uri 'self'; " +

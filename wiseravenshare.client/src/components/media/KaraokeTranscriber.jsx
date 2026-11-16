@@ -93,7 +93,9 @@ export default function KaraokeTranscriber({
     workletNode.port.onmessage = ({ data }) => {
       if (!data || !(data instanceof ArrayBuffer)) return;
       transcriberRef.current?.sendAudio(data);
-      recordingChunksRef.current.push(new Uint8Array(data));
+      // PCM chunks are not stored here — MediaRecorder handles the recording blob.
+      // If MediaRecorder is unavailable we silently skip the recording; the
+      // transcription session itself is unaffected.
     };
 
     sourceNode.connect(workletNode);
@@ -106,28 +108,26 @@ export default function KaraokeTranscriber({
     recordingMimeRef.current = "audio/pcm";
   }
 
-  async function startMediaRecorder(stream) {
-    const preferredMime = "audio/ogg;codecs=opus";
-    const fallbackMime = "audio/webm;codecs=opus";
+  // Dedicated recording-only path: collect audio/webm or audio/ogg chunks for the
+  // final blob upload WITHOUT sending them to AssemblyAI (PCM worklet handles that).
+  async function startRecordingOnly(stream) {
+    if (!window.MediaRecorder) return;
+    const preferredMime = "audio/webm;codecs=opus";
+    const fallbackMime  = "audio/ogg;codecs=opus";
     const mime = MediaRecorder.isTypeSupported(preferredMime)
       ? preferredMime
       : MediaRecorder.isTypeSupported(fallbackMime)
       ? fallbackMime
       : null;
-
-    if (!window.MediaRecorder || !mime) {
-      await startPcmWorklet(stream);
-      return;
-    }
+    if (!mime) return;
 
     recordingMimeRef.current = mime;
     const recorder = new MediaRecorder(stream, { mimeType: mime });
     recorder.ondataavailable = (event) => {
       if (!event.data?.size) return;
       recordingChunksRef.current.push(event.data);
-      event.data.arrayBuffer().then((buffer) => transcriberRef.current?.sendAudio(buffer));
     };
-    recorder.start(100);
+    recorder.start(1000); // 1-second chunks; no streaming needed
     recorderRef.current = recorder;
   }
 
@@ -251,7 +251,10 @@ export default function KaraokeTranscriber({
       const transcriber = new StreamingTranscriber({
         token,
         speechModel: "universal-3-6-pro",
-        encoding: "ogg_opus",
+        // pcm_s16le is sent as raw 16-bit PCM via the AudioWorklet — no container
+        // format is involved so there is no "OggS page" validation on the server.
+        encoding: "pcm_s16le",
+        sampleRate: 16000,
         mode: "max_accuracy",
         languageCodes,
         ...(voiceFocus ? { voiceFocus } : {}),
@@ -315,11 +318,13 @@ export default function KaraokeTranscriber({
       });
       streamRef.current = stream;
 
-      if (isSafariBrowser()) {
-        await startPcmWorklet(stream);
-      } else {
-        await startMediaRecorder(stream);
-      }
+      // Always use the PCM AudioWorklet for AssemblyAI streaming — it sends
+      // raw 16-bit PCM frames, avoiding the OGG container fragmentation issue
+      // that causes "expected 'OggS' page capture pattern" rejections.
+      await startPcmWorklet(stream);
+
+      // Additionally start a MediaRecorder for the final recording blob (best-effort).
+      await startRecordingOnly(stream);
     } catch (connErr) {
       console.error(connErr);
       setTranscriptionError(connErr?.message || "Failed to connect audio stream.");
