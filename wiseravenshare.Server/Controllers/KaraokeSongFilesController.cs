@@ -36,8 +36,46 @@ public sealed class KaraokeSongFilesController(
         "audio/webm", "audio/aac", "audio/x-aac", "application/octet-stream"
     };
 
-    private string BucketsRoot => configuration["Persistence:BucketsRoot"] ?? "/app/Buckets";
+    private string BucketsRoot => ResolveBucketsRoot();
     private string SongsDir   => Path.Combine(BucketsRoot, "karaoke", "songs");
+
+    private string ResolveBucketsRoot()
+    {
+        var configuredRoot = configuration["Persistence:BucketsRoot"] ?? "/app/Buckets";
+        if (EnsureDirectoryWritable(configuredRoot))
+        {
+            return configuredRoot;
+        }
+
+        var fallbackRoot = Path.Combine(Path.GetTempPath(), "wiseravenshare-buckets");
+        if (EnsureDirectoryWritable(fallbackRoot))
+        {
+            logger.LogWarning(
+                "Persistence:BucketsRoot '{ConfiguredRoot}' is not writable. Falling back to '{FallbackRoot}'.",
+                configuredRoot, fallbackRoot);
+            return fallbackRoot;
+        }
+
+        // Return configured root so downstream code still has a deterministic path,
+        // but callers will get explicit failures from file operations.
+        return configuredRoot;
+    }
+
+    private static bool EnsureDirectoryWritable(string path)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+            var probe = Path.Combine(path, $".writeprobe-{Guid.NewGuid():N}.tmp");
+            System.IO.File.WriteAllText(probe, "ok");
+            System.IO.File.Delete(probe);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     // ── Upload ────────────────────────────────────────────────────────────
 
@@ -85,27 +123,46 @@ public sealed class KaraokeSongFilesController(
             Status           = SongFileStatus.Uploading,
         };
 
-        // Persist to local bucket
-        var relativeKey = Path.Combine("karaoke", "songs", entity.Id.ToString("N"), $"audio{ext}");
-        var fullPath    = Path.Combine(BucketsRoot, relativeKey);
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-
-        await using (var dest = System.IO.File.Create(fullPath))
-        await using (var src  = file.OpenReadStream())
+        try
         {
-            await src.CopyToAsync(dest, cancellationToken);
+            // Persist to local bucket
+            var relativeKey = Path.Combine("karaoke", "songs", entity.Id.ToString("N"), $"audio{ext}");
+            var fullPath    = Path.Combine(BucketsRoot, relativeKey);
+            var dir = Path.GetDirectoryName(fullPath);
+            if (string.IsNullOrWhiteSpace(dir))
+            {
+                throw new InvalidOperationException("Could not resolve upload directory.");
+            }
+
+            Directory.CreateDirectory(dir);
+
+            await using (var dest = System.IO.File.Create(fullPath))
+            await using (var src  = file.OpenReadStream())
+            {
+                await src.CopyToAsync(dest, cancellationToken);
+            }
+
+            entity.LocalBucketKey = relativeKey;
+            entity.Status         = SongFileStatus.Uploaded;
+
+            db.KaraokeSongFiles.Add(entity);
+            await db.SaveChangesAsync(cancellationToken);
+
+            logger.LogInformation("KaraokeSongFile {Id} uploaded by {UserId} ({Bytes} bytes)",
+                entity.Id, userId, entity.FileSizeBytes);
+
+            return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity, Request));
         }
-
-        entity.LocalBucketKey = relativeKey;
-        entity.Status         = SongFileStatus.Uploaded;
-
-        db.KaraokeSongFiles.Add(entity);
-        await db.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation("KaraokeSongFile {Id} uploaded by {UserId} ({Bytes} bytes)",
-            entity.Id, userId, entity.FileSizeBytes);
-
-        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity, Request));
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Failed uploading karaoke song for user {UserId}. File={FileName}, ContentType={ContentType}, Size={Size}",
+                userId, file.FileName, contentType, file.Length);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                message = "Karaoke upload storage is unavailable right now. Please retry in a moment."
+            });
+        }
     }
 
     // ── List ──────────────────────────────────────────────────────────────
