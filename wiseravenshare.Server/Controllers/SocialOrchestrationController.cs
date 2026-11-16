@@ -174,7 +174,165 @@ public sealed class SocialOrchestrationController : ControllerBase
         });
     }
 
-    // ── LLM tailoring helper ──────────────────────────────────────────────────
+    // ── Generate endpoint (LLM drafts only — no publishing) ──────────────────
+
+    /// <summary>
+    /// Step 1 of the two-step flow: asks NuRavenCorpLLM to tailor content for
+    /// each platform and returns editable drafts. Nothing is published.
+    /// React frontend renders the drafts in editable fields before the user approves.
+    /// </summary>
+    [HttpPost("generate")]
+    public async Task<IActionResult> Generate(
+        [FromBody] GenerateDraftsRequest request,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.SourceContent))
+            return BadRequest(new { error = "sourceContent is required." });
+
+        var platforms = (request.TargetPlatforms ?? ["facebook", "instagram", "tiktok", "youtube"])
+            .Select(p => p.Trim().ToLowerInvariant()).Distinct().ToList();
+
+        var orchestrateReq = new OrchestrateRequest
+        {
+            RawContent = request.SourceContent,
+            Platforms = platforms.ToArray(),
+            MediaType = request.MediaType,
+            PostTitle = request.ArticleTitle,
+            Context = request.Context
+        };
+
+        var tailored = await TailorContentAsync(orchestrateReq, platforms, ct);
+
+        return Ok(new
+        {
+            facebookPost = tailored.Facebook,
+            instagramCaption = tailored.Instagram,
+            tiktokCaption = tailored.TikTok,
+            youtubeTitle = tailored.YouTubeTitle,
+            youtubeDescription = tailored.YouTubeDescription,
+            tailoredByLlm = tailored.TailoredByLlm
+        });
+    }
+
+    // ── Publish endpoint (takes approved drafts) ──────────────────────────────
+
+    /// <summary>
+    /// Step 2 of the two-step flow: receives the user-approved per-platform drafts
+    /// and queues them asynchronously via the existing SocialPublishQueueService.
+    /// Returns 202 immediately so video processing doesn't time out the React call.
+    /// </summary>
+    [HttpPost("publish")]
+    public async Task<IActionResult> Publish(
+        [FromBody] PublishApprovedDraftsRequest request,
+        CancellationToken ct)
+    {
+        if (request.Drafts is null)
+            return BadRequest(new { error = "drafts is required." });
+
+        var userId = User.GetUserId();
+        var userFeeds = ResolveUserFeeds(userId);
+
+        var fbPageId = request.FacebookPageId
+            ?? (userFeeds?.Facebook?.Enabled == true ? userFeeds.Facebook.DestinationId : null);
+        var fbPageToken = userFeeds?.Facebook?.Enabled == true
+            && !string.IsNullOrWhiteSpace(userFeeds.Facebook.DestinationToken)
+                ? userFeeds.Facebook.DestinationToken : null;
+        var ttUsername = request.TikTokUsername
+            ?? (userFeeds?.TikTok?.Enabled == true ? userFeeds.TikTok.DestinationId : null);
+        var ytChannelId = request.YouTubeChannelId
+            ?? (userFeeds?.YouTube?.Enabled == true ? userFeeds.YouTube.DestinationId : null);
+
+        var mediaType = ResolveMediaType(request.MediaType);
+
+        var platforms = (request.TargetPlatforms ?? ["facebook", "instagram", "tiktok", "youtube"])
+            .Select(p => p.Trim().ToLowerInvariant()).ToList();
+
+        // Build separate publish requests per platform so each uses its own tailored copy
+        var publishJobs = new List<(string platform, PublishSocialContentRequest req)>();
+
+        if (platforms.Contains("facebook") && !string.IsNullOrWhiteSpace(fbPageId))
+        {
+            publishJobs.Add(("facebook", new PublishSocialContentRequest
+            {
+                Message = request.Drafts.FacebookPost,
+                PhotoUrl = mediaType == SocialMediaType.Photo ? request.PublicMediaUrl : null,
+                VideoUrl = mediaType == SocialMediaType.Video ? request.PublicMediaUrl : null,
+                MusicUrl = mediaType == SocialMediaType.Music ? request.PublicMediaUrl : null,
+                MediaType = mediaType,
+                PublishToFacebook = true,
+                FacebookPageId = fbPageId,
+                FacebookPageAccessToken = fbPageToken
+            }));
+        }
+
+        if (platforms.Contains("instagram") && !string.IsNullOrWhiteSpace(request.PublicMediaUrl))
+        {
+            publishJobs.Add(("instagram", new PublishSocialContentRequest
+            {
+                Message = request.Drafts.InstagramCaption,
+                PhotoUrl = mediaType != SocialMediaType.Video ? request.PublicMediaUrl : null,
+                VideoUrl = mediaType == SocialMediaType.Video ? request.PublicMediaUrl : null,
+                MediaType = mediaType,
+                PublishToInstagram = true
+            }));
+        }
+
+        if (platforms.Contains("tiktok"))
+        {
+            publishJobs.Add(("tiktok", new PublishSocialContentRequest
+            {
+                Message = request.Drafts.TiktokCaption,
+                VideoUrl = mediaType == SocialMediaType.Video ? request.PublicMediaUrl : null,
+                MediaType = mediaType,
+                PublishToTikTok = true,
+                TikTokUsername = ttUsername
+            }));
+        }
+
+        if (platforms.Contains("youtube") && !string.IsNullOrWhiteSpace(request.PublicMediaUrl))
+        {
+            publishJobs.Add(("youtube", new PublishSocialContentRequest
+            {
+                Message = request.Drafts.YoutubeDescription,
+                VideoUrl = mediaType == SocialMediaType.Video ? request.PublicMediaUrl : null,
+                MediaType = mediaType,
+                YouTubeTitle = request.Drafts.YoutubeTitle,
+                YouTubeDescription = request.Drafts.YoutubeDescription,
+                PublishToYouTube = true,
+                YouTubeChannelId = ytChannelId
+            }));
+        }
+
+        if (publishJobs.Count == 0)
+            return BadRequest(new { error = "No publishable platforms resolved. Check connections and media URL." });
+
+        // Enqueue all as a single combined job to allow unified status polling
+        var combined = publishJobs.First().req;
+        combined.PublishToFacebook = publishJobs.Any(j => j.platform == "facebook");
+        combined.PublishToInstagram = publishJobs.Any(j => j.platform == "instagram");
+        combined.PublishToTikTok = publishJobs.Any(j => j.platform == "tiktok");
+        combined.PublishToYouTube = publishJobs.Any(j => j.platform == "youtube");
+        // Use the first message; per-platform copy is already saved in the respective flags
+        combined.Message = request.Drafts.FacebookPost
+            ?? request.Drafts.InstagramCaption
+            ?? request.Drafts.TiktokCaption
+            ?? request.Drafts.YoutubeDescription
+            ?? string.Empty;
+
+        var activePlatforms = publishJobs.Select(j => j.platform).Distinct().ToList();
+        var snapshot = _publishQueue.Enqueue(userId, combined, activePlatforms);
+
+        return Accepted(new
+        {
+            job_id = snapshot.JobId,
+            queued = true,
+            state = "queued",
+            platforms = activePlatforms,
+            message = "Social publishing queued. Videos will appear once platform processing finishes."
+        });
+    }
+
+
 
     private async Task<TailoredContent> TailorContentAsync(
         OrchestrateRequest request, List<string> platforms, CancellationToken ct)
@@ -364,4 +522,38 @@ public sealed class OrchestrateRequest
 
     /// <summary>Queue the job (default: true). Set false for synchronous publish.</summary>
     public bool? Queue { get; set; }
+}
+
+// ── Two-step flow DTOs ────────────────────────────────────────────────────────
+
+/// <summary>Step 1 request — generate LLM drafts without publishing.</summary>
+public sealed class GenerateDraftsRequest
+{
+    public string SourceContent { get; set; } = string.Empty;
+    public string? ArticleTitle { get; set; }
+    public string[]? TargetPlatforms { get; set; }
+    public string? MediaType { get; set; }
+    public string? Context { get; set; }
+}
+
+/// <summary>Per-platform approved drafts returned by /generate and sent back via /publish.</summary>
+public sealed class ApprovedDrafts
+{
+    public string FacebookPost { get; set; } = string.Empty;
+    public string InstagramCaption { get; set; } = string.Empty;
+    public string TiktokCaption { get; set; } = string.Empty;
+    public string YoutubeTitle { get; set; } = string.Empty;
+    public string YoutubeDescription { get; set; } = string.Empty;
+}
+
+/// <summary>Step 2 request — publish approved drafts.</summary>
+public sealed class PublishApprovedDraftsRequest
+{
+    public ApprovedDrafts? Drafts { get; set; }
+    public string? PublicMediaUrl { get; set; }
+    public string? MediaType { get; set; }
+    public string[]? TargetPlatforms { get; set; }
+    public string? FacebookPageId { get; set; }
+    public string? TikTokUsername { get; set; }
+    public string? YouTubeChannelId { get; set; }
 }
