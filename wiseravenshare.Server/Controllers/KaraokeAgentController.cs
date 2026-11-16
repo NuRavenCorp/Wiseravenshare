@@ -39,7 +39,13 @@ public sealed class KaraokeAgentController : ControllerBase
     {
         var agentToken = await ExchangeCrossAppTokenAsync(ct);
         if (agentToken is null)
-            return StatusCode(503, new { message = "NuravenCorpLLM is not reachable." });
+        {
+            // NuRavenCorpLLM is offline — return a stub session so the karaoke
+            // screen keeps working.  Subsequent SendEvent calls will return
+            // { hasError: true } and the UI continues independently.
+            _logger.LogWarning("NuRavenCorpLLM unreachable; issuing offline stub karaoke session.");
+            return Ok(new { sessionId = $"offline-{Guid.NewGuid():N}", offline = true });
+        }
 
         var body = JsonSerializer.Serialize(new
         {
@@ -48,29 +54,41 @@ public sealed class KaraokeAgentController : ControllerBase
             extensionKey = "wiseravenshare"
         });
 
-        using var resp = await PostNuRavenAsync(
-            "/api/media-agent/sessions", body, agentToken, ct);
-
-        if (!resp.IsSuccessStatusCode)
+        try
         {
-            var err = await resp.Content.ReadAsStringAsync(ct);
-            _logger.LogWarning("NuRavenCorpLLM session start returned {Status}: {Err}",
-                resp.StatusCode, err);
-            return StatusCode((int)resp.StatusCode, new { message = "Could not create agent session." });
+            using var resp = await PostNuRavenAsync(
+                "/api/media-agent/sessions", body, agentToken, ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning("NuRavenCorpLLM session start returned {Status}: {Err}",
+                    resp.StatusCode, err);
+                // Degrade gracefully — karaoke screen continues without agent.
+                return Ok(new { sessionId = $"offline-{Guid.NewGuid():N}", offline = true });
+            }
+
+            var payload = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(payload);
+            var sessionId = doc.RootElement.TryGetProperty("sessionId", out var sid)
+                ? sid.GetString() : null;
+
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                _logger.LogWarning("NuRavenCorpLLM returned no sessionId; using offline stub.");
+                return Ok(new { sessionId = $"offline-{Guid.NewGuid():N}", offline = true });
+            }
+
+            // Bootstrap the session with the Karaoke policy directive
+            await BootstrapInternalAsync(sessionId, agentToken, ct);
+
+            return Ok(new { sessionId, offline = false });
         }
-
-        var payload = await resp.Content.ReadAsStringAsync(ct);
-        using var doc = JsonDocument.Parse(payload);
-        var sessionId = doc.RootElement.TryGetProperty("sessionId", out var sid)
-            ? sid.GetString() : null;
-
-        if (string.IsNullOrWhiteSpace(sessionId))
-            return StatusCode(502, new { message = "Agent returned no sessionId." });
-
-        // Bootstrap the session with the Karaoke policy directive
-        await BootstrapInternalAsync(sessionId, agentToken, ct);
-
-        return Ok(new { sessionId });
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "NuRavenCorpLLM session start failed; using offline stub.");
+            return Ok(new { sessionId = $"offline-{Guid.NewGuid():N}", offline = true });
+        }
     }
 
     // ── POST /api/karaoke/agent/sessions/{id}/event ──────────────────────────
@@ -83,27 +101,39 @@ public sealed class KaraokeAgentController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Input))
             return BadRequest(new { message = "input is required." });
 
+        // Offline stub sessions — skip the upstream call entirely (best-effort).
+        if (sessionId.StartsWith("offline-", StringComparison.Ordinal))
+            return Ok(new { text = (string?)null, toolResults = Array.Empty<object>(), hasError = false, offline = true });
+
         var agentToken = await ExchangeCrossAppTokenAsync(ct);
         if (agentToken is null)
-            return StatusCode(503, new { message = "NuravenCorpLLM is not reachable." });
+            return Ok(new { text = (string?)null, toolResults = Array.Empty<object>(), hasError = true });
 
         var body = JsonSerializer.Serialize(new { input = request.Input.Trim() });
 
-        using var resp = await PostNuRavenAsync(
-            $"/api/media-agent/sessions/{Uri.EscapeDataString(sessionId)}/event",
-            body, agentToken, ct);
-
-        var payload = await resp.Content.ReadAsStringAsync(ct);
-
-        if (!resp.IsSuccessStatusCode)
+        try
         {
-            _logger.LogWarning("NuRavenCorpLLM event returned {Status} for session {SessionId}",
-                resp.StatusCode, sessionId);
+            using var resp = await PostNuRavenAsync(
+                $"/api/media-agent/sessions/{Uri.EscapeDataString(sessionId)}/event",
+                body, agentToken, ct);
+
+            var payload = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("NuRavenCorpLLM event returned {Status} for session {SessionId}",
+                    resp.StatusCode, sessionId);
+                return Ok(new { text = (string?)null, toolResults = Array.Empty<object>(), hasError = true });
+            }
+
+            // Pass agent response straight through to the client
+            return Content(payload, "application/json");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "NuRavenCorpLLM event call failed for session {SessionId}", sessionId);
             return Ok(new { text = (string?)null, toolResults = Array.Empty<object>(), hasError = true });
         }
-
-        // Pass agent response straight through to the client
-        return Content(payload, "application/json");
     }
 
     // ── DELETE /api/karaoke/agent/sessions/{id} ───────────────────────────────

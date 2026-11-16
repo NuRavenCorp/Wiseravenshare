@@ -35,11 +35,9 @@ public sealed class AgentGatewayController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Agent schema proxy failed.");
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
-            {
-                message = "Agent schema service is unavailable."
-            });
+            _logger.LogWarning(ex, "Agent schema proxy failed; returning empty schema.");
+            // Return an empty-but-valid schema so callers degrade gracefully.
+            return new JsonResult(new { schemas = Array.Empty<object>() }) { StatusCode = 200 };
         }
     }
 
@@ -74,11 +72,9 @@ public sealed class AgentGatewayController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Agent execute proxy failed.");
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
-            {
-                message = "Agent execute service is unavailable."
-            });
+            _logger.LogWarning(ex, "Agent execute proxy failed; returning skipped fallback.");
+            // Best-effort — callers must handle { skipped: true } gracefully.
+            return new JsonResult(new { result = (object?)null, skipped = true, reason = "Agent service unavailable" }) { StatusCode = 200 };
         }
     }
 
