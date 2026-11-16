@@ -104,21 +104,41 @@ public sealed class PythonMatrixController : ControllerBase
             return BadRequest(new { message = "viewer_id is required." });
         }
 
-        var clampedPageSize = Math.Clamp(pageSize, 1, 100);
+        var clampedPageSize   = Math.Clamp(pageSize, 1, 100);
         var clampedWindowDays = Math.Clamp(windowDays, 1, 90);
+
+        // Best-effort: ranked feed is non-critical.  Cap at 8 s so a slow
+        // python-matrix doesn't cascade into a gateway 504.
+        using var feedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        feedCts.CancelAfter(TimeSpan.FromSeconds(8));
 
         try
         {
             using var client = _httpClientFactory.CreateClient("PythonMatrixService");
             var relativeUrl =
                 $"post/feed/ranked?viewer_id={Uri.EscapeDataString(viewerId.Trim())}&page_size={clampedPageSize}&window_days={clampedWindowDays}";
-            var response = await client.GetAsync(relativeUrl, cancellationToken);
+            var response = await client.GetAsync(relativeUrl, feedCts.Token);
+
+            // If the ranker itself returns a server error, return an empty ranked
+            // feed so the caller can fall back to its own ordering.
+            if ((int)response.StatusCode >= 500)
+            {
+                _logger.LogWarning("Python matrix ranked feed returned {Status}; returning empty ranked list.",
+                    (int)response.StatusCode);
+                return Ok(new { ranked_post_ids = Array.Empty<string>(), source = "unavailable" });
+            }
+
             return await ProxyJsonResponse(response, cancellationToken);
+        }
+        catch (OperationCanceledException) when (feedCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("Python matrix ranked feed timed out after 8 s; returning empty ranked list.");
+            return Ok(new { ranked_post_ids = Array.Empty<string>(), source = "timeout" });
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Python matrix ranked post feed request failed.");
-            return StatusCode(503, new { message = "Python matrix post ranking is unavailable." });
+            return Ok(new { ranked_post_ids = Array.Empty<string>(), source = "unavailable" });
         }
     }
 

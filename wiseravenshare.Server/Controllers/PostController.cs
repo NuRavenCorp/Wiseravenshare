@@ -220,8 +220,16 @@ namespace Wiseravenshare.Server.Controllers
         [ProducesResponseType(typeof(IEnumerable<PostDto>), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetUserPosts(Guid userId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
-            var posts = await _postService.GetUserPostsAsync(userId, page, pageSize);
-            return Ok(posts);
+            try
+            {
+                var posts = await _postService.GetUserPostsAsync(userId, page, pageSize);
+                return Ok(posts);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetUserPosts failed for user {UserId}", userId);
+                return Ok(Array.Empty<PostDto>());
+            }
         }
 
         /// <summary>

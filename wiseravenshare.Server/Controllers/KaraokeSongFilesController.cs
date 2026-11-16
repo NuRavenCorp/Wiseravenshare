@@ -123,27 +123,35 @@ public sealed class KaraokeSongFilesController(
         pageSize = Math.Clamp(pageSize, 1, 200);
         page     = Math.Max(1, page);
 
-        var query = db.KaraokeSongFiles
-            .AsNoTracking()
-            .Where(s => !s.IsDeleted);
-
-        query = includePublic
-            ? query.Where(s => s.UploadedByUserId == userId || s.IsPublic)
-            : query.Where(s => s.UploadedByUserId == userId);
-
-        var total = await query.CountAsync(cancellationToken);
-        var items = await query
-            .OrderByDescending(s => s.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Include(s => s.KaraokeTrack)
-            .ToListAsync(cancellationToken);
-
-        return Ok(new
+        try
         {
-            total, page, pageSize,
-            items = items.Select(s => MapDto(s, Request))
-        });
+            var query = db.KaraokeSongFiles
+                .AsNoTracking()
+                .Where(s => !s.IsDeleted);
+
+            query = includePublic
+                ? query.Where(s => s.UploadedByUserId == userId || s.IsPublic)
+                : query.Where(s => s.UploadedByUserId == userId);
+
+            var total = await query.CountAsync(cancellationToken);
+            var items = await query
+                .OrderByDescending(s => s.CreatedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Include(s => s.KaraokeTrack)
+                .ToListAsync(cancellationToken);
+
+            return Ok(new
+            {
+                total, page, pageSize,
+                items = items.Select(s => MapDto(s, Request))
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "KaraokeSongFiles List query failed; returning empty list.");
+            return Ok(new { total = 0, page, pageSize, items = Array.Empty<object>() });
+        }
     }
 
     // ── Get single ────────────────────────────────────────────────────────
@@ -460,7 +468,146 @@ public sealed class KaraokeSongFilesController(
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────
+    // ── Promote transcribed song to karaoke track ─────────────────────────
+    //
+    // Accepts finalized AssemblyAI turns (word + timestamps) and converts
+    // them into extended LRC format so the karaoke player can do word-by-word
+    // highlighting on a user-uploaded song without needing vocal separation.
+    //
+    // POST /api/karaoke/songs/{id}/promote-to-karaoke
+    // Body: { turns: [ { transcript, startSec, endSec,
+    //                    words: [{word,start,end}] } ] }
+    //
+    // Returns: { karaokeTrackId, lrcContent, plainLyrics }
+
+    [HttpPost("{id:guid}/promote-to-karaoke")]
+    public async Task<IActionResult> PromoteToKaraoke(
+        Guid id,
+        [FromBody] PromoteToKaraokeRequest body,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = User.GetUserId();
+        var song   = await db.KaraokeSongFiles
+            .Include(s => s.KaraokeTrack)
+            .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted, cancellationToken);
+
+        if (song is null) return NotFound();
+        if (song.UploadedByUserId != userId) return Forbid();
+
+        if (body?.Turns is not { Count: > 0 })
+            return BadRequest(new { message = "At least one turn with word timestamps is required." });
+
+        // ── Build extended LRC from word timestamps ───────────────────────
+        // Format: [mm:ss.xx]<mm:ss.xx>word1 <mm:ss.xx>word2 ...
+
+        static string ToLrcTs(double seconds)
+        {
+            var ts = TimeSpan.FromSeconds(Math.Max(0, seconds));
+            return $"{(int)ts.TotalMinutes:D2}:{ts.Seconds:D2}.{ts.Milliseconds / 10:D2}";
+        }
+
+        var lrcLines = new System.Text.StringBuilder();
+        var plainLines = new System.Text.StringBuilder();
+
+        // Sort turns by start time
+        var turns = body.Turns
+            .Where(t => !string.IsNullOrWhiteSpace(t.Transcript))
+            .OrderBy(t => t.StartSec)
+            .ToList();
+
+        foreach (var turn in turns)
+        {
+            var words = (turn.Words ?? [])
+                .Where(w => !string.IsNullOrWhiteSpace(w.Word) && w.Start >= 0)
+                .OrderBy(w => w.Start)
+                .ToList();
+
+            if (words.Count == 0)
+            {
+                // No word timing: emit plain LRC line using turn start
+                var lineSec = turn.StartSec > 0 ? turn.StartSec : 0;
+                lrcLines.AppendLine($"[{ToLrcTs(lineSec)}]{turn.Transcript.Trim()}");
+                plainLines.AppendLine(turn.Transcript.Trim());
+                continue;
+            }
+
+            // Group words into display lines (≤10 words or natural pause ≥1.5 s)
+            var lineGroups = new List<List<PromoteWordDto>>();
+            var current = new List<PromoteWordDto>();
+            for (var i = 0; i < words.Count; i++)
+            {
+                current.Add(words[i]);
+                var pause = i + 1 < words.Count ? words[i + 1].Start - words[i].End : 0;
+                if (current.Count >= 10 || pause >= 1.5)
+                {
+                    lineGroups.Add(current);
+                    current = [];
+                }
+            }
+            if (current.Count > 0) lineGroups.Add(current);
+
+            foreach (var group in lineGroups)
+            {
+                var lineStart = group[0].Start;
+                var wordPart  = string.Join(" ", group.Select(w => $"<{ToLrcTs(w.Start)}>{w.Word}"));
+                var plainPart = string.Join(" ", group.Select(w => w.Word));
+                lrcLines.AppendLine($"[{ToLrcTs(lineStart)}]{wordPart}");
+                plainLines.AppendLine(plainPart);
+            }
+        }
+
+        var lrcContent  = lrcLines.ToString().Trim();
+        var plainLyrics = plainLines.ToString().Trim();
+
+        // ── Persist / update KaraokeTrack ─────────────────────────────────
+        KaraokeTrack track;
+        if (song.KaraokeTrackId.HasValue && song.KaraokeTrack is not null)
+        {
+            track = song.KaraokeTrack;
+        }
+        else
+        {
+            track = new KaraokeTrack
+            {
+                Id               = Guid.NewGuid(),
+                Title            = song.Title,
+                Artist           = song.Artist ?? string.Empty,
+                Genre            = song.Genre,
+                Language         = song.Language,
+                SourceType       = KaraokeTrackSource.UserUploaded,
+                License          = "User Upload",
+                UploadedByUserId = userId,
+            };
+            db.KaraokeTracks.Add(track);
+        }
+
+        track.LrcContent  = lrcContent;
+        track.PlainLyrics = plainLyrics;
+        track.HasLrc      = true;
+        track.Status      = KaraokeTrackStatus.Ready;
+        track.UpdatedAt   = DateTime.UtcNow;
+
+        song.KaraokeTrack  = track;
+        song.KaraokeTrackId = track.Id;
+        song.LrcContent    = lrcContent;
+        song.PlainLyrics   = plainLyrics;
+        song.Status        = SongFileStatus.Ready;
+        song.UpdatedAt     = DateTime.UtcNow;
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Song {Id} promoted to karaoke track {TrackId} with {Lines} LRC lines",
+            id, track.Id, turns.Count);
+
+        return Ok(new
+        {
+            karaokeTrackId = track.Id,
+            lrcContent,
+            plainLyrics,
+            lineCount = turns.Count
+        });
+    }
 
     private static object MapDto(KaraokeSongFile s, HttpRequest request)
     {
@@ -535,4 +682,25 @@ public sealed class UpdateSongFileRequest
     public string? LrcContent     { get; set; }
     public string? PlainLyrics    { get; set; }
     public int?    DurationSeconds{ get; set; }
+}
+
+/// <summary>Request body for POST /{id}/promote-to-karaoke.</summary>
+public sealed class PromoteToKaraokeRequest
+{
+    public List<PromoteTurnDto> Turns { get; set; } = [];
+}
+
+public sealed class PromoteTurnDto
+{
+    public string Transcript { get; set; } = string.Empty;
+    public double StartSec   { get; set; }
+    public double EndSec     { get; set; }
+    public List<PromoteWordDto>? Words { get; set; }
+}
+
+public sealed class PromoteWordDto
+{
+    public string Word  { get; set; } = string.Empty;
+    public double Start { get; set; }
+    public double End   { get; set; }
 }
