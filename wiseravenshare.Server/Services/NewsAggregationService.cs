@@ -749,7 +749,9 @@ public sealed class NewsAggregationService : INewsAggregationService
     private async Task<ProviderFetchResult> FetchTheNewsApiAsync(string query, string language, int limit, CancellationToken cancellationToken)
     {
         const string providerName = "thenewsapi";
-        var apiKey = _configuration["NewsApis:TheNewsApi:ApiKey"];
+        // Support both hierarchical config and flat env var naming on hosts like DigitalOcean.
+        var apiKey = _configuration["NewsApis:TheNewsApi:ApiKey"]
+            ?? _configuration["NEWS_API_KEY"];
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             return ProviderFetchResult.NotConfigured(providerName, "TheNewsAPI key is missing.");
