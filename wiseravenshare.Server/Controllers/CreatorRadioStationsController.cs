@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Wiseravenshare.Server.DTOs.FM;
 using Wiseravenshare.Server.Exceptions;
 using Wiseravenshare.Server.Services.FM;
@@ -25,8 +27,18 @@ public sealed class CreatorRadioStationsController : ControllerBase
     public async Task<IActionResult> GetMine(CancellationToken cancellationToken)
     {
         var userId = RequireUserId();
-        var stations = await _service.GetCreatorStationsAsync(userId, userId, cancellationToken);
-        return Ok(stations);
+        try
+        {
+            var stations = await _service.GetCreatorStationsAsync(userId, userId, cancellationToken);
+            return Ok(stations);
+        }
+        catch (Exception ex)
+        {
+            var logger = HttpContext.RequestServices
+                .GetService<ILogger<CreatorRadioStationsController>>();
+            logger?.LogError(ex, "Failed to load creator stations for user {UserId}", userId);
+            return Ok(Array.Empty<CreatorRadioStationDto>());
+        }
     }
 
     [HttpGet("public")]

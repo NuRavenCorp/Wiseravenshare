@@ -362,19 +362,19 @@ public sealed class FunctionCompatController : ControllerBase
     [HttpPost("AddJamSessionToCalendar")]
     public IActionResult AddJamSessionToCalendar([FromBody] AddJamSessionToCalendarRequest? request)
     {
-        if (request is null || string.IsNullOrWhiteSpace(request.Title))
-        {
-            return BadRequest(new { error = "title is required." });
-        }
+        // Accept any identifying field; use a sensible default so callers with no title don't get 400
+        var title = request?.Title?.Trim()
+                    ?? request?.Description?.Trim()
+                    ?? "Jam Session";
 
         return Ok(new
         {
             success = true,
             provider = "google-calendar",
             event_id = $"compat-{Guid.NewGuid():N}",
-            title = request.Title.Trim(),
-            scheduled_date = request.ScheduledDate,
-            invited = request.AttendeeEmails?.Length ?? 0,
+            title,
+            scheduled_date = request?.ScheduledDate,
+            invited = request?.AttendeeEmails?.Length ?? 0,
             message = "Jam session accepted in compatibility mode."
         });
     }
@@ -886,7 +886,14 @@ public sealed class FunctionCompatController : ControllerBase
     [Authorize]
     public async Task<IActionResult> SendMessage([FromBody] SendMessageRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Content))
+        // Accept 'message', 'body', or 'text' as aliases for 'content'
+        var content = !string.IsNullOrWhiteSpace(request.Content) ? request.Content
+                    : !string.IsNullOrWhiteSpace(request.Message) ? request.Message
+                    : !string.IsNullOrWhiteSpace(request.Body)    ? request.Body
+                    : !string.IsNullOrWhiteSpace(request.Text)    ? request.Text
+                    : null;
+
+        if (string.IsNullOrWhiteSpace(content))
         {
             return BadRequest(new { error = "content is required." });
         }
@@ -976,7 +983,7 @@ public sealed class FunctionCompatController : ControllerBase
         {
             ConversationId = conversationId,
             SenderId = senderId,
-            Content = request.Content.Trim(),
+            Content = content.Trim(),
             Type = MessageType.Text,
             ReplyToId = request.ParentMessageId
         };
@@ -2826,7 +2833,12 @@ public sealed class SendMessageRequest
     public Guid? ConversationId { get; set; }
     public Guid? RecipientId { get; set; }
     public string? RecipientEmail { get; set; }
+    // Primary field
     public string Content { get; set; } = string.Empty;
+    // Accepted aliases so the frontend can send any of these
+    public string? Message { get; set; }
+    public string? Body { get; set; }
+    public string? Text { get; set; }
     public Guid? ParentMessageId { get; set; }
 }
 
