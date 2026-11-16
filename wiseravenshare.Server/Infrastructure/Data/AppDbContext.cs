@@ -177,6 +177,7 @@ public class AppDbContext : DbContext
     public DbSet<SavedMedia> SavedMediaItems => Set<SavedMedia>();
     public DbSet<CachedYouTubeRecord> CachedYouTubeRecords => Set<CachedYouTubeRecord>();
     public DbSet<UserActivity> UserActivities => Set<UserActivity>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     // Studio
     public DbSet<Wiseravenshare.Server.Entities.Studio.StudioProject> StudioProjects => Set<Wiseravenshare.Server.Entities.Studio.StudioProject>();

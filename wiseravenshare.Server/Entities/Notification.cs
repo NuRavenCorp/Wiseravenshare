@@ -16,6 +16,9 @@ namespace Wiseravenshare.Server.Entities
         public Guid? VideoId { get; set; }
         public Guid? MessageId { get; set; }
 
+        [MaxLength(100)]
+        public string? StreamId { get; set; }   // Go Live stream reference
+
         [MaxLength(500)]
         public string? Content { get; set; }
 
@@ -42,6 +45,11 @@ namespace Wiseravenshare.Server.Entities
         Message,
         TruthAlert,
         SystemAlert,
-        Achievement
+        Achievement,
+        LiveStream,     // viewer joined / follower joined a go-live
+        Affirmation,    // positive affirmation on live stream
+        LiveLike,       // like on a live stream
+        LiveComment,    // comment on a live stream
+        LiveView,       // view on a live stream
     }
 }

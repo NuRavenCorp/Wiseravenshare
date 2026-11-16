@@ -2217,6 +2217,8 @@ builder.Services.AddSingleton<Azure.Storage.Blobs.BlobServiceClient?>(sp =>
 });
 builder.Services.AddScoped<Wiseravenshare.Server.Services.KaraokePersistenceService>();
 builder.Services.AddScoped<Wiseravenshare.Server.Services.PerformanceCompletionService>();
+builder.Services.AddScoped<Wiseravenshare.Server.Services.INotificationService,
+    Wiseravenshare.Server.Services.NotificationService>();
 
 // ── ML Microservice (behavioral recommendations) ─────────────────────────────
 builder.Services.AddHttpClient<Wiseravenshare.Server.Services.MlClient>(c =>

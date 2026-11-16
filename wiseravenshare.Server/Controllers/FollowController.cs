@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Hubs;
 using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
 
@@ -16,10 +17,15 @@ public class FollowController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IHubContext<SocialHub> _socialHub;
+    private readonly INotificationService _notificationService;
     private readonly ILogger<FollowController> _logger;
 
-    public FollowController(AppDbContext db, IHubContext<SocialHub> socialHub, ILogger<FollowController> logger)
-    { _db = db; _socialHub = socialHub; _logger = logger; }
+    public FollowController(
+        AppDbContext db,
+        IHubContext<SocialHub> socialHub,
+        INotificationService notificationService,
+        ILogger<FollowController> logger)
+    { _db = db; _socialHub = socialHub; _notificationService = notificationService; _logger = logger; }
 
     [HttpPost("toggle")]
     public async Task<IActionResult> ToggleFollow([FromBody] ToggleFollowRequest request, CancellationToken ct)
@@ -42,8 +48,19 @@ public class FollowController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         if (nowFollowing)
+        {
+            // Real-time hub push
             await _socialHub.Clients.Group(SocialHub.BuildUserGroup(request.TargetUserId.ToString()))
                 .SendAsync("NewFollower", new { followerId, targetUserId = request.TargetUserId, occurredAt = DateTime.UtcNow }, ct);
+
+            // Persistent notification
+            _ = _notificationService.SendAsync(
+                request.TargetUserId,
+                NotificationType.Follow,
+                actorId: followerId,
+                content: "started following you",
+                cancellationToken: ct);
+        }
 
         return Ok(new { nowFollowing, followerId, targetUserId = request.TargetUserId });
     }

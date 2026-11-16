@@ -124,17 +124,12 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("UserId1")
-                        .HasColumnType("uuid");
-
                     b.Property<int?>("WordCount")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CraftDomainId");
-
-                    b.HasIndex("UserId1");
 
                     b.HasIndex("UserId", "CraftDomainId", "ReviewedAt");
 
@@ -733,15 +728,10 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("UserId1")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
 
                     b.HasIndex("UserId")
                         .IsUnique();
-
-                    b.HasIndex("UserId1");
 
                     b.ToTable("UserCraftProfiles", "app_data");
                 });
@@ -2329,6 +2319,176 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.ToTable("NotificationCosts", "app_data");
                 });
 
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.CompatJamSession", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Bpm")
+                        .HasColumnType("integer")
+                        .HasColumnName("bpm");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_date");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<int?>("MaxParticipants")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_participants");
+
+                    b.Property<string>("ParticipantsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("participants");
+
+                    b.Property<string>("ScheduledDateRaw")
+                        .HasColumnType("text")
+                        .HasColumnName("scheduled_date");
+
+                    b.Property<string>("SignupIdsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("signup_ids");
+
+                    b.Property<string>("StartedAtRaw")
+                        .HasColumnType("text")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title");
+
+                    b.Property<string>("TrackUrisJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("track_uris");
+
+                    b.Property<DateTime>("UpdatedDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedDate");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("compat_jam_sessions", "app_data");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.CompatJournalismReport", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_date");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<string>("Headline")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("headline");
+
+                    b.Property<string>("ImageUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("image_url");
+
+                    b.Property<string>("PostId")
+                        .HasColumnType("text")
+                        .HasColumnName("post_id");
+
+                    b.Property<string>("Region")
+                        .HasColumnType("text")
+                        .HasColumnName("region");
+
+                    b.Property<string>("SourceUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("source_url");
+
+                    b.Property<DateTime>("UpdatedDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_date");
+
+                    b.Property<string>("VerificationStatus")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("verification_status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedDate");
+
+                    b.HasIndex("VerificationStatus");
+
+                    b.ToTable("compat_journalism_reports", "app_data");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.CompatVibe", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CreatedById")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_date");
+
+                    b.Property<string>("Mood")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("mood");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("text")
+                        .HasColumnName("note");
+
+                    b.Property<DateTime>("UpdatedDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedById");
+
+                    b.HasIndex("CreatedDate");
+
+                    b.HasIndex("Mood");
+
+                    b.ToTable("compat_vibes", "app_data");
+                });
+
             modelBuilder.Entity("Wiseravenshare.Server.Entities.Conversation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3779,6 +3939,68 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.ToTable("WorkHourValuations", "app_data");
                 });
 
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.ExternalVerifier", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ApiKeyEnvVar")
+                        .HasColumnType("text")
+                        .HasColumnName("api_key_env_var");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EndpointTemplate")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("endpoint_template");
+
+                    b.Property<string>("FetchType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("stub")
+                        .HasColumnName("fetch_type");
+
+                    b.Property<bool>("IsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_enabled");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("ScoreJsonPath")
+                        .HasColumnType("text")
+                        .HasColumnName("score_json_path");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<decimal>("Weight")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric")
+                        .HasDefaultValue(0.10m)
+                        .HasColumnName("weight");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsEnabled");
+
+                    b.ToTable("external_verifiers", "app_data");
+                });
+
             modelBuilder.Entity("Wiseravenshare.Server.Entities.FM.CreatorRadioStation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4736,6 +4958,415 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.ToTable("InstrumentConnections", "app_data");
                 });
 
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Karaoke.KaraokeSongFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Album")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("Artist")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int?>("Bpm")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CloudBlobKey")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<DateTime?>("CloudMigratedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CloudPublicUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("CoverImageLocalKey")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("CoverImageUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DurationSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Genre")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsMigratedToCloud")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPublic")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("KaraokeTrackId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("LocalBucketKey")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("LrcContent")
+                        .HasColumnType("text");
+
+                    b.Property<string>("MusicalKey")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("PlainLyrics")
+                        .HasColumnType("text");
+
+                    b.Property<int>("PlayCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ProcessingCompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProcessingError")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<DateTime?>("ProcessingStartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UploadedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KaraokeTrackId");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.ToTable("KaraokeSongFiles", "app_data");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Karaoke.KaraokeTrack", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Album")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("Artist")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("AttributionText")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int?>("Bpm")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CoverImageBlobKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("CoverImageUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DurationSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Genre")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("HasInstrumental")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("HasLrc")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("InstrumentalBlobKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("InstrumentalUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPublic")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("License")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("LicenseUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("LrcBlobKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("LrcContent")
+                        .HasColumnType("text");
+
+                    b.Property<string>("LrcUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("MusicalKey")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("PlainLyrics")
+                        .HasColumnType("text");
+
+                    b.Property<int>("PlayCount")
+                        .HasColumnType("integer");
+
+                    b.Property<float?>("Rating")
+                        .HasColumnType("real");
+
+                    b.Property<int>("RatingCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("SourceType")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UploadedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("VocalsBlobKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.ToTable("KaraokeTracks", "app_data");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Karaoke.KaraokeTrackPlay", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DurationPlayedSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("PlayedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Stars")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TrackId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TrackId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("KaraokeTrackPlays", "app_data");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Karaoke.Performance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AlignmentBlobName")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Extras")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<decimal?>("LyricScore")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<int?>("Matches")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Missing")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RecordingBlobName")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTimeOffset?>("RecordingUploadExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SongId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Substitutions")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SongId", "LyricScore");
+
+                    b.HasIndex("UserId", "StartedAt");
+
+                    b.ToTable("performances", "app_data");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Karaoke.PerformanceTurn", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("EndMilliseconds")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("PerformanceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("StartMilliseconds")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Transcript")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<int>("TurnOrder")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformanceId", "TurnOrder")
+                        .IsUnique();
+
+                    b.ToTable("performance_turns", "app_data");
+                });
+
             modelBuilder.Entity("Wiseravenshare.Server.Entities.MediaBookmark", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5302,6 +5933,79 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.HasIndex("SenderId");
 
                     b.ToTable("Messages", "app_data");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Notification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CommentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Content")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<JsonDocument>("Metadata")
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid?>("PostId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("StreamId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("VideoId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorId");
+
+                    b.HasIndex("CommentId");
+
+                    b.HasIndex("MessageId");
+
+                    b.HasIndex("PostId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("VideoId");
+
+                    b.ToTable("Notifications", "app_data");
                 });
 
             modelBuilder.Entity("Wiseravenshare.Server.Entities.Personalization.ContentTag", b =>
@@ -6257,6 +6961,9 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
 
                     b.Property<JsonDocument>("TruthSources")
                         .HasColumnType("jsonb");
+
+                    b.Property<string>("TruthStatus")
+                        .HasColumnType("text");
 
                     b.Property<int>("Type")
                         .HasColumnType("integer");
@@ -7805,18 +8512,12 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.HasOne("WiseRavenShare.Server.Core.Entities.Craft.CraftDomain", "Domain")
                         .WithMany()
                         .HasForeignKey("CraftDomainId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("WiseRavenShare.Server.Core.Entities.Craft.UserCraftProfile", null)
-                        .WithMany("DraftReviews")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Wiseravenshare.Server.Entities.User", "User")
                         .WithMany()
-                        .HasForeignKey("UserId1")
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -7861,6 +8562,12 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Wiseravenshare.Server.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.Navigation("Lesson");
                 });
 
@@ -7891,7 +8598,7 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.HasOne("WiseRavenShare.Server.Core.Entities.Craft.CraftDomain", "Domain")
                         .WithMany()
                         .HasForeignKey("CraftDomainId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Wiseravenshare.Server.Entities.User", "User")
@@ -7947,15 +8654,9 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("WiseRavenShare.Server.Core.Entities.Craft.UserCraftProfile", b =>
                 {
-                    b.HasOne("Wiseravenshare.Server.Entities.User", null)
+                    b.HasOne("Wiseravenshare.Server.Entities.User", "User")
                         .WithOne()
                         .HasForeignKey("WiseRavenShare.Server.Core.Entities.Craft.UserCraftProfile", "UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Wiseravenshare.Server.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId1")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -7972,7 +8673,8 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
 
                     b.HasOne("WiseRavenShare.Server.Core.Entities.Craft.UserCraftProfile", null)
                         .WithMany("SkillScores")
-                        .HasForeignKey("UserCraftProfileId");
+                        .HasForeignKey("UserCraftProfileId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("Wiseravenshare.Server.Entities.User", "User")
                         .WithMany()
@@ -8715,6 +9417,62 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Karaoke.KaraokeSongFile", b =>
+                {
+                    b.HasOne("Wiseravenshare.Server.Entities.Karaoke.KaraokeTrack", "KaraokeTrack")
+                        .WithMany()
+                        .HasForeignKey("KaraokeTrackId");
+
+                    b.HasOne("Wiseravenshare.Server.Entities.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("KaraokeTrack");
+
+                    b.Navigation("UploadedByUser");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Karaoke.KaraokeTrack", b =>
+                {
+                    b.HasOne("Wiseravenshare.Server.Entities.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId");
+
+                    b.Navigation("UploadedByUser");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Karaoke.KaraokeTrackPlay", b =>
+                {
+                    b.HasOne("Wiseravenshare.Server.Entities.Karaoke.KaraokeTrack", "Track")
+                        .WithMany()
+                        .HasForeignKey("TrackId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Wiseravenshare.Server.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Track");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Karaoke.PerformanceTurn", b =>
+                {
+                    b.HasOne("Wiseravenshare.Server.Entities.Karaoke.Performance", "Performance")
+                        .WithMany("Turns")
+                        .HasForeignKey("PerformanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Performance");
+                });
+
             modelBuilder.Entity("Wiseravenshare.Server.Entities.MediaBookmark", b =>
                 {
                     b.HasOne("Wiseravenshare.Server.Entities.MediaItem", "MediaItem")
@@ -8901,6 +9659,47 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.Navigation("ReplyTo");
 
                     b.Navigation("Sender");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Notification", b =>
+                {
+                    b.HasOne("Wiseravenshare.Server.Entities.User", "Actor")
+                        .WithMany()
+                        .HasForeignKey("ActorId");
+
+                    b.HasOne("Wiseravenshare.Server.Entities.Comment", "Comment")
+                        .WithMany()
+                        .HasForeignKey("CommentId");
+
+                    b.HasOne("Wiseravenshare.Server.Entities.Message", "Message")
+                        .WithMany()
+                        .HasForeignKey("MessageId");
+
+                    b.HasOne("Wiseravenshare.Server.Entities.Post", "Post")
+                        .WithMany()
+                        .HasForeignKey("PostId");
+
+                    b.HasOne("Wiseravenshare.Server.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Wiseravenshare.Server.Entities.Video", "Video")
+                        .WithMany()
+                        .HasForeignKey("VideoId");
+
+                    b.Navigation("Actor");
+
+                    b.Navigation("Comment");
+
+                    b.Navigation("Message");
+
+                    b.Navigation("Post");
+
+                    b.Navigation("User");
+
+                    b.Navigation("Video");
                 });
 
             modelBuilder.Entity("Wiseravenshare.Server.Entities.Personalization.ContentTagMapping", b =>
@@ -9422,8 +10221,6 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("WiseRavenShare.Server.Core.Entities.Craft.UserCraftProfile", b =>
                 {
-                    b.Navigation("DraftReviews");
-
                     b.Navigation("SkillScores");
                 });
 
@@ -9539,6 +10336,11 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                     b.Navigation("History");
 
                     b.Navigation("Likes");
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Karaoke.Performance", b =>
+                {
+                    b.Navigation("Turns");
                 });
 
             modelBuilder.Entity("Wiseravenshare.Server.Entities.MediaComment", b =>

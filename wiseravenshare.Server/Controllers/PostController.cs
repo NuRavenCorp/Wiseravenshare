@@ -28,6 +28,7 @@ namespace Wiseravenshare.Server.Controllers
         private readonly ILogger<PostsController> _logger;
         private readonly OutputCacheInvalidationService _cacheInvalidation;
         private readonly IPersonalizationService _personalizationService;
+        private readonly Wiseravenshare.Server.Services.INotificationService _notificationService;
         private static readonly System.Text.RegularExpressions.Regex HashtagRegex = new(@"#([\p{L}\p{N}_-]{2,64})", System.Text.RegularExpressions.RegexOptions.Compiled);
         private static readonly System.Text.RegularExpressions.Regex PartialRegex = new(@"%([\p{L}\p{N}_-]{2,64})", System.Text.RegularExpressions.RegexOptions.Compiled);
 
@@ -36,13 +37,15 @@ namespace Wiseravenshare.Server.Controllers
             IUserRepository userRepository,
             ILogger<PostsController> logger,
             OutputCacheInvalidationService cacheInvalidation,
-            IPersonalizationService personalizationService)
+            IPersonalizationService personalizationService,
+            Wiseravenshare.Server.Services.INotificationService notificationService)
         {
             _postService = postService;
             _userRepository = userRepository;
             _logger = logger;
             _cacheInvalidation = cacheInvalidation;
             _personalizationService = personalizationService;
+            _notificationService = notificationService;
         }
 
         /// <summary>
@@ -245,6 +248,16 @@ namespace Wiseravenshare.Server.Controllers
                 var userId = await ResolveEffectiveUserIdAsync();
                 var state = await _postService.LikePostAsync(userId, id);
                 await TryTrackPostInteractionAsync(userId, id, "Like");
+
+                // Notify post owner (best-effort)
+                _ = _notificationService.SendAsync(
+                    await GetPostOwnerIdAsync(id),
+                    Wiseravenshare.Server.Entities.NotificationType.Like,
+                    actorId: userId,
+                    postId: id,
+                    content: "liked your post",
+                    cancellationToken: HttpContext.RequestAborted);
+
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return Ok(state);
             }
@@ -300,6 +313,16 @@ namespace Wiseravenshare.Server.Controllers
                 var userId = await ResolveEffectiveUserIdAsync();
                 var state = await _postService.RepostPostAsync(userId, id);
                 await TryTrackPostInteractionAsync(userId, id, "Share");
+
+                // Notify original post owner
+                _ = _notificationService.SendAsync(
+                    await GetPostOwnerIdAsync(id),
+                    Wiseravenshare.Server.Entities.NotificationType.Repost,
+                    actorId: userId,
+                    postId: id,
+                    content: "reposted your post",
+                    cancellationToken: HttpContext.RequestAborted);
+
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return Ok(state);
             }
@@ -366,6 +389,17 @@ namespace Wiseravenshare.Server.Controllers
             var userId = await ResolveEffectiveUserIdAsync();
             var comment = await _postService.AddCommentAsync(userId, id, dto);
             await TryTrackPostInteractionAsync(userId, id, "Comment");
+
+            // Notify post owner
+            _ = _notificationService.SendAsync(
+                await GetPostOwnerIdAsync(id),
+                Wiseravenshare.Server.Entities.NotificationType.Comment,
+                actorId: userId,
+                postId: id,
+                commentId: comment.Id,
+                content: "commented on your post",
+                cancellationToken: HttpContext.RequestAborted);
+
             await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(comment);
         }
@@ -826,6 +860,20 @@ namespace Wiseravenshare.Server.Controllers
             guidBytes[6] = (byte)((guidBytes[6] & 0x0F) | 0x40); // version 4-style layout
             guidBytes[8] = (byte)((guidBytes[8] & 0x3F) | 0x80); // RFC 4122 variant
             return new Guid(guidBytes);
+        }
+
+        /// <summary>Returns the owner UserId of a post. Returns Guid.Empty if the post is not found.</summary>
+        private async Task<Guid> GetPostOwnerIdAsync(Guid postId)
+        {
+            try
+            {
+                var post = await _postService.GetPostAsync(postId);
+                return post?.UserId ?? Guid.Empty;
+            }
+            catch
+            {
+                return Guid.Empty;
+            }
         }
     }
 }
