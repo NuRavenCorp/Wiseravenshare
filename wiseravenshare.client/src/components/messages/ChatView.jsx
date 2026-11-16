@@ -80,19 +80,47 @@ export default function ChatView({ conversation, currentUserId }) {
     const trimmed = input.trim();
     if (!trimmed || !conversation || !recipientUserId) return;
     setSending(true);
+
+    // Optimistically append the message locally.
+    const optimistic = {
+      id: `opt-${Date.now()}`,
+      content: trimmed,
+      created_by_id: currentUserId,
+      created_date: new Date().toISOString(),
+      optimistic: true,
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    setInput("");
+
     try {
-      // Try real-time first; fall back to REST if not connected.
+      // Primary path: SignalR real-time hub.
       const sent = await sendMessage({ recipientUserId, text: trimmed });
+
       if (!sent) {
-        await apiClient.functions.invoke("SendMessage", {
-          conversationId: conversation.id,
-          content: trimmed,
+        // REST fallback: use /api/functions/send-message with both recipientId
+        // and conversationId so the endpoint can resolve the conversation.
+        await apiClient.requestJson("/api/functions/send-message", {
+          method: "POST",
+          body: JSON.stringify({
+            conversationId: conversation.id,
+            recipientId: recipientUserId,
+            content: trimmed,
+          }),
         });
+        // Refresh messages so the server-persisted record replaces the optimistic one.
         fetchMessages();
       }
-      setInput("");
+
+      // Replace optimistic message with confirmed one.
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === optimistic.id ? { ...m, optimistic: false } : m
+        )
+      );
     } catch (e) {
-      console.error(e);
+      console.error("Send message failed", e);
+      // Remove optimistic message on failure so the user knows to retry.
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
     } finally {
       setSending(false);
     }
@@ -136,15 +164,15 @@ export default function ChatView({ conversation, currentUserId }) {
             return (
               <div key={m.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                 <div
-                  className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
+                  className={`max-w-[75%] rounded-lg px-3 py-2 text-sm transition-opacity ${
                     isMe
                       ? "bg-primary text-primary-foreground"
                       : "bg-secondary text-secondary-foreground"
-                  }`}
+                  } ${m.optimistic ? "opacity-60" : "opacity-100"}`}
                 >
                   <p>{m.content}</p>
                   <p className={`text-[10px] mt-1 ${isMe ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
-                    {new Date(m.created_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {m.optimistic ? "Sending…" : new Date(m.created_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </div>
               </div>

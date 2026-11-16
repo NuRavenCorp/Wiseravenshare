@@ -427,6 +427,7 @@ const entityProxy = new Proxy(
 );
 
 export const apiClient = {
+  requestJson,
   podcastAudio: {
     convertForBrowser(trackId) {
       return requestBlob(`/api/ravensight/media/music/${encodeURIComponent(trackId)}/browser-compatible`, { method: "GET" });
