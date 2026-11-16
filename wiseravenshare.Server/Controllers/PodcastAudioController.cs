@@ -350,7 +350,10 @@ public sealed class PodcastAudioController : ControllerBase
     }
 
     /// <summary>
-    /// Convert AssemblyAI words array to LRC using gap + punctuation grouping.
+    /// Convert AssemblyAI words array to extended LRC using gap + punctuation grouping.
+    /// Extended format: [mm:ss.xx]&lt;mm:ss.xx&gt;word1 &lt;mm:ss.xx&gt;word2 ...
+    /// The lrcParser on the client parses word tokens so word-by-word
+    /// highlighting works from stored LRC without a separate karaoke_lines field.
     /// </summary>
     private static string WordsToLrc(JsonArray words)
     {
@@ -360,13 +363,21 @@ public sealed class PodcastAudioController : ControllerBase
         foreach (var group in groups)
         {
             if (group.Count == 0) continue;
-            var startSec = group[0].StartMs / 1000.0;
-            var mm = ((int)Math.Floor(startSec / 60)).ToString("D2");
-            var ss = ((int)Math.Floor(startSec % 60)).ToString("D2");
-            var ms = ((int)Math.Round((startSec % 1) * 100)).ToString("D2");
-            lines.Add($"[{mm}:{ss}.{ms}]{string.Join(" ", group.Select(x => x.Text))}");
+            var lineTs   = FormatLrcTs(group[0].StartMs / 1000.0);
+            var wordParts = string.Join(" ", group.Select(w =>
+                $"<{FormatLrcTs(w.StartMs / 1000.0)}>{w.Text}"));
+            lines.Add($"[{lineTs}]{wordParts}");
         }
         return string.Join("\n", lines);
+    }
+
+    private static string FormatLrcTs(double seconds)
+    {
+        var totalSec = Math.Max(0, seconds);
+        var mm  = ((int)Math.Floor(totalSec / 60)).ToString("D2");
+        var ss  = ((int)Math.Floor(totalSec % 60)).ToString("D2");
+        var cs  = ((int)Math.Round((totalSec % 1) * 100)).ToString("D2");
+        return $"{mm}:{ss}.{cs}";
     }
 
     /// <summary>

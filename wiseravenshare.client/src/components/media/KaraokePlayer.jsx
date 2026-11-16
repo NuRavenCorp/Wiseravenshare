@@ -46,6 +46,28 @@ function fmt(s) {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
+/**
+ * Build an extended LRC string from karaoke_lines word data.
+ * Format: [mm:ss.xx]<mm:ss.xx>word1 <mm:ss.xx>word2 ...
+ * The lrcParser already understands this format and extracts word tokens,
+ * enabling word-by-word colour highlighting from the stored lrcContent alone.
+ */
+function buildExtendedLrc(karaokeLines) {
+  if (!Array.isArray(karaokeLines) || karaokeLines.length === 0) return "";
+  const ts = (ms) => {
+    const t = Math.max(0, Math.round(ms));
+    const min  = Math.floor(t / 60000);
+    const sec  = Math.floor((t % 60000) / 1000);
+    const cs   = Math.floor((t % 1000) / 10);
+    return `${String(min).padStart(2,"0")}:${String(sec).padStart(2,"0")}.${String(cs).padStart(2,"0")}`;
+  };
+  return karaokeLines.map((kl) => {
+    const lineTs   = ts(kl.start ?? 0);
+    const wordPart = (kl.words ?? []).map((w) => `<${ts(w.start ?? 0)}>${w.text ?? ""}`).join(" ");
+    return `[${lineTs}]${wordPart}`;
+  }).join("\n");
+}
+
 // ─── KaraokePlayer ────────────────────────────────────────────────────────────
 export default function KaraokePlayer({ song, onClose, onSaved, karaokeLines: karaokeLinesProp = null, vtt: vttProp = "" }) {
   const audioRef = useRef(null);
@@ -216,14 +238,17 @@ export default function KaraokePlayer({ song, onClose, onSaved, karaokeLines: ka
       setLrcData(lrc || text);
       if (kLines) setDynamicKaraokeLines(kLines);
 
-      // Save to server
+      // Persist to server.
+      // When word-level karaoke_lines are available, generate extended LRC so
+      // future loads have word-by-word highlighting from stored lrcContent alone.
+      const lrcToSave = kLines ? buildExtendedLrc(kLines) : lrc;
       if (song?.id) {
         await apiClient.karaoke.songs.update(song.id, {
-          lrcContent: lrc,
+          lrcContent: lrcToSave || lrc,
           plainLyrics: text,
         });
         setLrcSaved(true);
-        onSaved?.({ ...song, lrcContent: lrc, plainLyrics: text, karaokeLines: kLines });
+        onSaved?.({ ...song, lrcContent: lrcToSave || lrc, plainLyrics: text, karaokeLines: kLines });
       }
     } catch (err) {
       setExtractError(err?.message || "AI extraction failed. Please check your audio file or retry.");

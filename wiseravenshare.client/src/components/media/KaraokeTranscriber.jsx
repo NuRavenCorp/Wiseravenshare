@@ -90,12 +90,29 @@ export default function KaraokeTranscriber({
     const sinkNode = context.createGain();
     sinkNode.gain.value = 0;
 
+    // Buffer 100 ms worth of PCM before each sendAudio() call.
+    // The AudioWorklet fires every 128 samples @ 16 kHz = 8 ms, but AssemblyAI
+    // requires 20–1000 ms per call, so we accumulate 1600 samples (100 ms) first.
+    const SEND_SAMPLES = 1600;
+    const pendingSamples = new Int16Array(SEND_SAMPLES);
+    let pendingCount = 0;
+
     workletNode.port.onmessage = ({ data }) => {
       if (!data || !(data instanceof ArrayBuffer)) return;
-      transcriberRef.current?.sendAudio(data);
+      const incoming = new Int16Array(data); // 128 samples per worklet tick
+      let srcOffset = 0;
+      while (srcOffset < incoming.length) {
+        const toCopy = Math.min(SEND_SAMPLES - pendingCount, incoming.length - srcOffset);
+        pendingSamples.set(incoming.subarray(srcOffset, srcOffset + toCopy), pendingCount);
+        pendingCount += toCopy;
+        srcOffset += toCopy;
+        if (pendingCount >= SEND_SAMPLES) {
+          // slice(0) creates an owned copy so pendingSamples can be reused
+          transcriberRef.current?.sendAudio(pendingSamples.buffer.slice(0));
+          pendingCount = 0;
+        }
+      }
       // PCM chunks are not stored here — MediaRecorder handles the recording blob.
-      // If MediaRecorder is unavailable we silently skip the recording; the
-      // transcription session itself is unaffected.
     };
 
     sourceNode.connect(workletNode);
