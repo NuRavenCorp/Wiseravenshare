@@ -178,6 +178,7 @@ public class AppDbContext : DbContext
     public DbSet<CachedYouTubeRecord> CachedYouTubeRecords => Set<CachedYouTubeRecord>();
     public DbSet<UserActivity> UserActivities => Set<UserActivity>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<Appointment> Appointments => Set<Appointment>();
 
     // Studio
     public DbSet<Wiseravenshare.Server.Entities.Studio.StudioProject> StudioProjects => Set<Wiseravenshare.Server.Entities.Studio.StudioProject>();
@@ -1387,6 +1388,21 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Wiseravenshare.Server.Entities.Studio.StudioEditEvent>(e => {
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.ProjectId);
+        });
+
+        // Appointments (calendar planner)
+        modelBuilder.Entity<Appointment>(entity =>
+        {
+            entity.ToTable("Appointments");
+            entity.Property(a => a.Title).HasMaxLength(255);
+            entity.Property(a => a.Description).HasColumnType("text");
+            entity.Property(a => a.Color).HasMaxLength(20);
+            entity.HasIndex(a => a.UserId);
+            entity.HasIndex(a => new { a.UserId, a.StartUtc });
+            entity.HasOne(a => a.User)
+                .WithMany()
+                .HasForeignKey(a => a.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
