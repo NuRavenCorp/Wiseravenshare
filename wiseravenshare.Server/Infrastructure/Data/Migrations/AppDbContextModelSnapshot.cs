@@ -24,6 +24,65 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Appointment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AlertDismissed")
+                        .HasDefaultValue(false)
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasDefaultValue("#3788d8")
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("EndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("ReminderMinutesBefore")
+                        .HasDefaultValue(15)
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "StartUtc")
+                        .HasDatabaseName("IX_Appointments_UserId_StartUtc");
+
+                    b.ToTable("Appointments", "app_data");
+                });
+
             modelBuilder.Entity("WiseRavenShare.Server.Core.Entities.Craft.CraftDomain", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8938,6 +8997,17 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
                         .HasForeignKey("CommentId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Appointment", b =>
+                {
+                    b.HasOne("Wiseravenshare.Server.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Wiseravenshare.Server.Entities.Communique.CommunicationPreferences", b =>

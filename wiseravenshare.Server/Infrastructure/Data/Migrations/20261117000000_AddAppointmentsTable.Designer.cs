@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Wiseravenshare.Server.Infrastructure.Data;
 
 #nullable disable
@@ -16,9 +17,49 @@ namespace Wiseravenshare.Server.Infrastructure.Data.Migrations
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
-            // BuildTargetModel is used by EF tooling for snapshots.
-            // Runtime migration (MigrateAsync) only needs the [Migration] attribute
-            // and the Up() / Down() methods in the sibling partial class.
+#pragma warning disable 612, 618
+            modelBuilder
+                .HasDefaultSchema("app_data")
+                .HasAnnotation("ProductVersion", "10.0.11")
+                .HasAnnotation("Relational:MaxIdentifierLength", 63);
+
+            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+
+            // ── Appointment ───────────────────────────────────────────────
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Appointment", b =>
+            {
+                b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                b.Property<bool>("AlertDismissed").HasDefaultValue(false).HasColumnType("boolean");
+                b.Property<string>("Color").IsRequired().HasMaxLength(20).HasDefaultValue("#3788d8").HasColumnType("character varying(20)");
+                b.Property<DateTime>("CreatedAt").HasColumnType("timestamp with time zone");
+                b.Property<DateTime?>("DeletedAt").HasColumnType("timestamp with time zone");
+                b.Property<string>("Description").HasColumnType("text");
+                b.Property<DateTime>("EndUtc").HasColumnType("timestamp with time zone");
+                b.Property<bool>("IsDeleted").HasColumnType("boolean");
+                b.Property<int>("ReminderMinutesBefore").HasDefaultValue(15).HasColumnType("integer");
+                b.Property<DateTime>("StartUtc").HasColumnType("timestamp with time zone");
+                b.Property<string>("Title").IsRequired().HasMaxLength(255).HasColumnType("character varying(255)");
+                b.Property<DateTime>("UpdatedAt").HasColumnType("timestamp with time zone");
+                b.Property<Guid>("UserId").HasColumnType("uuid");
+
+                b.HasKey("Id");
+                b.HasIndex("UserId");
+                b.HasIndex("UserId", "StartUtc").HasDatabaseName("IX_Appointments_UserId_StartUtc");
+                b.ToTable("Appointments", "app_data");
+            });
+
+            // FK wiring (BuildTargetModel is a snapshot — only Appointment shown here)
+            modelBuilder.Entity("Wiseravenshare.Server.Entities.Appointment", b =>
+            {
+                b.HasOne("Wiseravenshare.Server.Entities.User", "User")
+                    .WithMany()
+                    .HasForeignKey("UserId")
+                    .OnDelete(DeleteBehavior.Cascade)
+                    .IsRequired();
+
+                b.Navigation("User");
+            });
+#pragma warning restore 612, 618
         }
     }
 }
