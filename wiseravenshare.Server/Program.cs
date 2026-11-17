@@ -1837,6 +1837,41 @@ CREATE INDEX IF NOT EXISTS ""IX_Appointments_UserId_StartUtc""
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
+static async Task EnsurePlannerSessionStatesTableAsync(string connectionString, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+    const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.""PlannerSessionStates"" (
+    ""Id""           UUID         NOT NULL DEFAULT gen_random_uuid(),
+    ""UserId""       UUID         NOT NULL,
+    ""CurrentView""  VARCHAR(50)  NOT NULL DEFAULT 'timeGridDay',
+    ""FocusDateUtc"" TIMESTAMPTZ  NULL,
+    ""DraftJson""    TEXT         NULL,
+    ""ModalOpen""    BOOLEAN      NOT NULL DEFAULT FALSE,
+    ""CreatedAt""    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    ""UpdatedAt""    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    ""IsDeleted""    BOOLEAN      NOT NULL DEFAULT FALSE,
+    ""DeletedAt""    TIMESTAMPTZ  NULL,
+    CONSTRAINT ""PK_PlannerSessionStates"" PRIMARY KEY (""Id""),
+    CONSTRAINT ""FK_PlannerSessionStates_Users_UserId""
+        FOREIGN KEY (""UserId"")
+        REFERENCES app_data.""Users""(""Id"")
+        ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PlannerSessionStates_UserId""
+    ON app_data.""PlannerSessionStates""(""UserId"");
+";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
 static async Task EnsureKaraokeScoringTablesAsync(string connectionString, CancellationToken cancellationToken = default)
 {
     if (string.IsNullOrWhiteSpace(connectionString)) return;
@@ -3085,6 +3120,15 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(ex, "Appointments table bootstrap failed during startup.");
     }
 
+    try
+    {
+        await EnsurePlannerSessionStatesTableAsync(defaultConnectionString);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Planner session state table bootstrap failed during startup.");
+    }
+
     // Seed default badge catalog (badge-first currency system)
     try
     {
@@ -3392,6 +3436,18 @@ app.MapHub<LiveChatHub>("/api/hubs/live-chat");
 app.MapHub<SocialHub>("/api/hubs/social");
 app.MapHub<WiseRavenShare.Server.API.Hubs.AssistantHub>("/api/hubs/assistant");
 app.MapHub<GoLiveHub>("/api/hubs/go-live");
+app.MapGet("/manifest.json", async (HttpContext context) =>
+{
+    var manifestPath = Path.Combine(app.Environment.WebRootPath ?? string.Empty, "manifest.json");
+    if (!File.Exists(manifestPath))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    context.Response.ContentType = "application/manifest+json";
+    await context.Response.SendFileAsync(manifestPath);
+});
 
 if (frontendDistExists)
 {

@@ -27,6 +27,77 @@ public sealed class AppointmentsController(
 {
     // ── List (date-range) ─────────────────────────────────────────────────
 
+    [HttpGet("session-state")]
+    public async Task<IActionResult> GetSessionState(CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        var session = await db.PlannerSessionStates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.UserId == userId && !s.IsDeleted, ct);
+
+        if (session is null)
+        {
+            return Ok(new
+            {
+                currentView = "timeGridDay",
+                focusDateUtc = (DateTime?)null,
+                draftJson = (string?)null,
+                modalOpen = false
+            });
+        }
+
+        return Ok(new
+        {
+            currentView = session.CurrentView,
+            focusDateUtc = session.FocusDateUtc.HasValue
+                ? DateTime.SpecifyKind(session.FocusDateUtc.Value, DateTimeKind.Utc)
+                : (DateTime?)null,
+            draftJson = session.DraftJson,
+            modalOpen = session.ModalOpen
+        });
+    }
+
+    [HttpPut("session-state")]
+    public async Task<IActionResult> UpsertSessionState(
+        [FromBody] PlannerSessionStateRequest body,
+        CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        var session = await db.PlannerSessionStates
+            .FirstOrDefaultAsync(s => s.UserId == userId && !s.IsDeleted, ct);
+
+        var currentView = string.IsNullOrWhiteSpace(body.CurrentView)
+            ? "timeGridDay"
+            : body.CurrentView.Trim();
+
+        if (currentView.Length > 50)
+            return BadRequest(new { message = "CurrentView exceeds the 50 character limit." });
+
+        if (session is null)
+        {
+            session = new PlannerSessionState
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                CreatedAt = DateTime.UtcNow
+            };
+            db.PlannerSessionStates.Add(session);
+        }
+
+        session.CurrentView = currentView;
+        session.FocusDateUtc = body.FocusDateUtc?.ToUniversalTime();
+        session.DraftJson = string.IsNullOrWhiteSpace(body.DraftJson) ? null : body.DraftJson;
+        session.ModalOpen = body.ModalOpen;
+        session.UpdatedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAppointments(
         [FromQuery] DateTimeOffset? start,
@@ -197,4 +268,12 @@ public sealed class AppointmentRequest
     public DateTime EndUtc                { get; set; }
     public int      ReminderMinutesBefore { get; set; } = 15;
     public string   Color                 { get; set; } = "#3788d8";
+}
+
+public sealed class PlannerSessionStateRequest
+{
+    public string? CurrentView { get; set; }
+    public DateTime? FocusDateUtc { get; set; }
+    public string? DraftJson { get; set; }
+    public bool ModalOpen { get; set; }
 }

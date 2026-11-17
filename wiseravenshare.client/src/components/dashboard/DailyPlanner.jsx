@@ -51,13 +51,120 @@ const DEFAULT_FORM = {
 
 export default function DailyPlanner() {
   const calendarRef = useRef(null);
+  const sessionSaveTimeoutRef = useRef(null);
 
   const [events, setEvents]           = useState([]);
   const [activeAlert, setActiveAlert] = useState(null);
+  const [loadError, setLoadError]     = useState("");
+  const [sessionHydrated, setSessionHydrated] = useState(false);
+  const [initialView, setInitialView] = useState("timeGridDay");
+  const [initialDate, setInitialDate] = useState(null);
   const [modalOpen, setModalOpen]     = useState(false);
   const [saving, setSaving]           = useState(false);
   const [deleting, setDeleting]       = useState(false);
   const [formData, setFormData]       = useState(DEFAULT_FORM);
+
+  const handlePlannerAuthError = useCallback((err) => {
+    if (err?.status === 401 || err?.status === 403) {
+      apiClient.auth.clearToken();
+      setLoadError("Your planner session expired. Redirecting to sign in.");
+      apiClient.auth.redirectToLogin("/planner");
+      return true;
+    }
+    return false;
+  }, []);
+
+  const queueSessionSave = useCallback((overrides = {}) => {
+    if (!sessionHydrated) return;
+
+    const api = calendarRef.current?.getApi();
+    const currentView = overrides.currentView ?? api?.view?.type ?? initialView;
+    const focusDateUtc = overrides.focusDateUtc ?? (api?.getDate ? api.getDate().toISOString() : null);
+    const modalIsOpen = overrides.modalOpen ?? modalOpen;
+
+    const hasDraft =
+      modalIsOpen && (
+      formData.id ||
+      formData.title.trim().length > 0 ||
+      formData.description.trim().length > 0 ||
+      formData.start ||
+      formData.end
+      );
+
+    const draftJson = Object.prototype.hasOwnProperty.call(overrides, "draftJson")
+      ? overrides.draftJson
+      : (hasDraft ? JSON.stringify(formData) : null);
+
+    if (sessionSaveTimeoutRef.current) {
+      clearTimeout(sessionSaveTimeoutRef.current);
+    }
+
+    sessionSaveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await apiClient.requestJson("/api/appointments/session-state", {
+          method: "PUT",
+          body: JSON.stringify({
+            currentView,
+            focusDateUtc,
+            draftJson,
+            modalOpen: modalIsOpen,
+          }),
+        });
+      } catch (err) {
+        handlePlannerAuthError(err);
+      }
+    }, 350);
+  }, [formData, handlePlannerAuthError, initialView, modalOpen, sessionHydrated]);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSessionState = async () => {
+      try {
+        const state = await apiClient.requestJson("/api/appointments/session-state");
+        if (!mounted || !state) return;
+
+        const nextView = typeof state.currentView === "string" && state.currentView.trim()
+          ? state.currentView.trim()
+          : "timeGridDay";
+        setInitialView(nextView);
+        setInitialDate(typeof state.focusDateUtc === "string" ? state.focusDateUtc : null);
+
+        if (state.draftJson) {
+          try {
+            const parsed = JSON.parse(state.draftJson);
+            if (parsed && typeof parsed === "object") {
+              setFormData((prev) => ({ ...prev, ...parsed }));
+            }
+          } catch {
+            // Ignore invalid persisted drafts and continue with defaults.
+          }
+        }
+
+        if (state.modalOpen === true) {
+          setModalOpen(true);
+        }
+      } catch (err) {
+        handlePlannerAuthError(err);
+      } finally {
+        if (mounted) {
+          setSessionHydrated(true);
+        }
+      }
+    };
+
+    loadSessionState();
+    return () => {
+      mounted = false;
+      if (sessionSaveTimeoutRef.current) {
+        clearTimeout(sessionSaveTimeoutRef.current);
+      }
+    };
+  }, [handlePlannerAuthError]);
+
+  useEffect(() => {
+    if (!sessionHydrated) return;
+    queueSessionSave();
+  }, [sessionHydrated, modalOpen, formData, queueSessionSave]);
 
   // ── Browser notification permission ───────────────────────────────────────
   useEffect(() => {
@@ -109,7 +216,9 @@ export default function DailyPlanner() {
     );
     try {
       await apiClient.requestJson(`/api/appointments/${id}/dismiss-alert`, { method: "PATCH" });
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      handlePlannerAuthError(err);
+    }
   };
 
   // ── Fetch when calendar view changes ──────────────────────────────────────
@@ -119,10 +228,19 @@ export default function DailyPlanner() {
         `/api/appointments?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
       );
       setEvents(Array.isArray(data) ? data : []);
+      setLoadError("");
+      queueSessionSave({
+        currentView: dateInfo?.view?.type,
+        focusDateUtc: dateInfo?.startStr ?? null,
+      });
     } catch (err) {
+      if (handlePlannerAuthError(err)) {
+        return;
+      }
+      setLoadError("Failed to load appointments.");
       console.error("Failed to load appointments:", err);
     }
-  }, []);
+  }, [handlePlannerAuthError, queueSessionSave]);
 
   // ── Drag-drop / resize ────────────────────────────────────────────────────
   const handleEventChange = async (changeInfo) => {
@@ -140,7 +258,8 @@ export default function DailyPlanner() {
         method: "PUT",
         body: JSON.stringify(payload),
       });
-    } catch {
+    } catch (err) {
+      handlePlannerAuthError(err);
       changeInfo.revert();
     }
   };
@@ -195,8 +314,12 @@ export default function DailyPlanner() {
         });
       }
       setModalOpen(false);
+      queueSessionSave({ modalOpen: false, draftJson: null });
       refreshCalendar();
     } catch (err) {
+      if (handlePlannerAuthError(err)) {
+        return;
+      }
       alert(err?.message || "Failed to save appointment.");
     } finally {
       setSaving(false);
@@ -210,8 +333,12 @@ export default function DailyPlanner() {
     try {
       await apiClient.requestJson(`/api/appointments/${formData.id}`, { method: "DELETE" });
       setModalOpen(false);
+      queueSessionSave({ modalOpen: false, draftJson: null });
       setEvents((prev) => prev.filter((ev) => ev.id !== formData.id));
     } catch (err) {
+      if (handlePlannerAuthError(err)) {
+        return;
+      }
       alert(err?.message || "Failed to delete appointment.");
     } finally {
       setDeleting(false);
@@ -226,6 +353,14 @@ export default function DailyPlanner() {
       endStr:   api.view.activeEnd.toISOString(),
     });
   };
+
+  if (!sessionHydrated) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-6 flex items-center justify-center">
+        <Loader2 className="w-5 h-5 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   // ─── Render ──────────────────────────────────────────────────────────────
   return (
@@ -250,13 +385,19 @@ export default function DailyPlanner() {
           </Button>
         </div>
       )}
+      {loadError && (
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {loadError}
+        </div>
+      )}
 
       {/* FullCalendar */}
       <div className="fc-dark rounded-xl overflow-hidden border border-border bg-card shadow-sm">
         <FullCalendar
           ref={calendarRef}
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-          initialView="timeGridDay"
+          initialView={initialView}
+          initialDate={initialDate || undefined}
           headerToolbar={{
             left:   "prev,next today",
             center: "title",
