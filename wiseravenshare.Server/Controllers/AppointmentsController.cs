@@ -29,15 +29,15 @@ public sealed class AppointmentsController(
 
     [HttpGet]
     public async Task<IActionResult> GetAppointments(
-        [FromQuery] DateTime? start,
-        [FromQuery] DateTime? end,
+        [FromQuery] DateTimeOffset? start,
+        [FromQuery] DateTimeOffset? end,
         CancellationToken ct = default)
     {
         var userId = User.GetUserId();
         if (userId == Guid.Empty) return Unauthorized();
 
-        var from = (start ?? DateTime.UtcNow.AddMonths(-1)).ToUniversalTime();
-        var to   = (end   ?? DateTime.UtcNow.AddMonths(2)).ToUniversalTime();
+        var from = (start ?? DateTimeOffset.UtcNow.AddMonths(-1)).UtcDateTime;
+        var to   = (end   ?? DateTimeOffset.UtcNow.AddMonths(2)).UtcDateTime;
 
         var events = await db.Appointments
             .Where(a => a.UserId == userId
