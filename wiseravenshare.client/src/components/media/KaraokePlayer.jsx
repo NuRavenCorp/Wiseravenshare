@@ -118,7 +118,52 @@ export default function KaraokePlayer({ song, onClose, onSaved, karaokeLines: ka
     return parseLrc(content);
   }, [lrcData, song?.lrcContent, song?.plainLyrics]);
 
-  const lines = parsedLrc.lines;
+  const lines = useMemo(() => {
+    let baseLines = Array.isArray(parsedLrc.lines) ? parsedLrc.lines : [];
+    if (baseLines.length === 0) {
+      const plain = String(lrcData ?? song?.plainLyrics ?? "").trim();
+      if (plain) {
+        const plainLines = plain.split(/\r?\n+/).map((row) => row.trim()).filter(Boolean);
+        if (plainLines.length > 0) {
+          const fallbackStep = Number.isFinite(duration) && duration > 0
+            ? duration / plainLines.length
+            : 3;
+          baseLines = plainLines.map((text, index) => ({
+            time: fallbackStep * index,
+            text,
+            words: null,
+          }));
+        }
+      }
+    }
+    if (baseLines.length === 0) return [];
+
+    const durationSec = Number.isFinite(duration) && duration > 0 ? duration : null;
+    return baseLines.map((line, index) => {
+      if (Array.isArray(line.words) && line.words.length > 0) return line;
+
+      const text = String(line.text || "").trim();
+      const parts = text.split(/\s+/).filter(Boolean);
+      if (parts.length === 0) return line;
+
+      const lineStart = Number(line.time) || 0;
+      const nextLineStart = baseLines[index + 1]?.time;
+      const fallbackEnd = lineStart + 2.5;
+      const lineEnd = Number.isFinite(nextLineStart)
+        ? nextLineStart
+        : (durationSec ?? fallbackEnd);
+      const safeEnd = Math.max(lineStart + 0.3, lineEnd);
+      const step = (safeEnd - lineStart) / parts.length;
+
+      return {
+        ...line,
+        words: parts.map((part, wordIndex) => ({
+          text: part,
+          time: lineStart + (step * wordIndex),
+        })),
+      };
+    });
+  }, [parsedLrc.lines, lrcData, song?.plainLyrics, duration]);
 
   // Audio source URL — use instrumental (vocal-separated) when available, fall back to full mix
   const audioUrl = useMemo(

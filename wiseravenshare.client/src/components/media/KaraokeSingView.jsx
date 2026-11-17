@@ -244,10 +244,39 @@ export default function KaraokeSingView({
   }, [activeIndex]);
 
   const activeLines = useMemo(() => {
-    if (linesFromKaraokeLines && linesFromKaraokeLines.length > 0) return linesFromKaraokeLines;
-    if (relayLines.length > 0) return relayLines;
-    return timedLyrics;
-  }, [linesFromKaraokeLines, relayLines, timedLyrics]);
+    const sourceLines = linesFromKaraokeLines && linesFromKaraokeLines.length > 0
+      ? linesFromKaraokeLines
+      : (relayLines.length > 0 ? relayLines : timedLyrics);
+
+    if (!Array.isArray(sourceLines) || sourceLines.length === 0) return [];
+
+    const fallbackEndSeconds = Number.isFinite(duration) && duration > 0 ? duration : null;
+    return sourceLines.map((line, index) => {
+      const existingTokens = Array.isArray(line.tokens) ? line.tokens.filter((t) => t?.text) : [];
+      if (existingTokens.length > 0) return line;
+
+      const text = String(line?.text || "").trim();
+      const words = text.split(/\s+/).filter(Boolean);
+      if (words.length === 0) return line;
+
+      const lineStart = Number(line?.timeSeconds ?? line?.time ?? 0);
+      const nextStart = Number(sourceLines[index + 1]?.timeSeconds ?? sourceLines[index + 1]?.time);
+      const lineEnd = Number.isFinite(nextStart)
+        ? nextStart
+        : (fallbackEndSeconds ?? (lineStart + 2.5));
+      const safeEnd = Math.max(lineStart + 0.3, lineEnd);
+      const step = (safeEnd - lineStart) / words.length;
+
+      return {
+        ...line,
+        tokens: words.map((word, wordIndex) => {
+          const start = lineStart + (step * wordIndex);
+          const end = wordIndex === words.length - 1 ? safeEnd : lineStart + (step * (wordIndex + 1));
+          return { text: word, start, end };
+        }),
+      };
+    });
+  }, [linesFromKaraokeLines, relayLines, timedLyrics, duration]);
 
   // Real-time word-fill animation loop using requestAnimationFrame (60/120fps)
   useEffect(() => {
