@@ -311,6 +311,9 @@ ON CONFLICT (""UserId"") DO UPDATE
 
     private async Task<Guid> ResolveUserIdAsync(CancellationToken ct)
     {
+        const int maxUsernameLength = 100;
+        const int maxDisplayNameLength = 200;
+
         var email = User.FindFirstValue(ClaimTypes.Email)
             ?? User.FindFirstValue(JwtRegisteredClaimNames.Email)
             ?? User.FindFirstValue("email");
@@ -340,16 +343,29 @@ ON CONFLICT (""UserId"") DO UPDATE
             {
                 baseUsername = $"user{userId.ToString("N")[..8]}";
             }
+            if (baseUsername.Length > maxUsernameLength)
+            {
+                baseUsername = baseUsername[..maxUsernameLength];
+            }
 
             var username = baseUsername;
             var suffix = 0;
-            while (await db.Users.AnyAsync(u => u.Username == username, ct))
+            while (await db.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower(), ct))
             {
                 suffix++;
-                username = $"{baseUsername}{suffix}";
+                var suffixText = suffix.ToString();
+                var maxStemLength = Math.Max(1, maxUsernameLength - suffixText.Length);
+                var stem = baseUsername.Length > maxStemLength
+                    ? baseUsername[..maxStemLength]
+                    : baseUsername;
+                username = $"{stem}{suffixText}";
             }
 
             var displayName = string.IsNullOrWhiteSpace(baseUsernameRaw) ? username : baseUsernameRaw.Trim();
+            if (displayName.Length > maxDisplayNameLength)
+            {
+                displayName = displayName[..maxDisplayNameLength];
+            }
             var newUser = new User
             {
                 Id = userId,
@@ -381,8 +397,7 @@ ON CONFLICT (""UserId"") DO UPDATE
                 {
                     return recovered;
                 }
-
-                throw;
+                logger.LogWarning("Unable to provision planner user record for {Email}. Falling back to claim lookup.", normalizedEmail);
             }
         }
 
@@ -419,3 +434,4 @@ public sealed class PlannerSessionStateRequest
     public string? DraftJson { get; set; }
     public bool ModalOpen { get; set; }
 }
+
