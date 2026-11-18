@@ -171,6 +171,7 @@ const requestJson = async (path, options = {}) => {
 
   if (
     response.status === 401 &&
+    token &&
     !omitAuth &&
     !__retryAuth &&
     !isAuthRouteRequest(path) &&
@@ -211,6 +212,7 @@ const request = async (path, options = {}) => {
 
   if (
     response.status === 401 &&
+    token &&
     !omitAuth &&
     !__retryAuth &&
     !isAuthRouteRequest(path) &&
@@ -238,6 +240,7 @@ const requestBlob = async (path, options = {}) => {
   const response = await fetch(buildUrl(path), { credentials: "include", ...fetchOptions, headers });
   if (
     response.status === 401 &&
+    token &&
     !omitAuth &&
     !__retryAuth &&
     !isAuthRouteRequest(path) &&

@@ -129,6 +129,7 @@ export const AuthProvider = ({ children }) => {
       setUser(currentUser);
       setUserRoles(deriveRoles(currentUser));
       setIsAuthenticated(true);
+      setAuthError(null);
       setIsLoadingAuth(false);
       setAuthChecked(true);
     } catch (error) {
@@ -206,4 +207,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
