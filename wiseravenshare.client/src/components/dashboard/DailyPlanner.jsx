@@ -295,7 +295,7 @@ export default function DailyPlanner() {
       if (handlePlannerAuthError(err)) {
         return;
       }
-      setLoadError("Failed to load appointments.");
+      setLoadError(err?.message || "Failed to load appointments.");
       console.error("Failed to load appointments:", err);
     }
   }, [clearAuthBanner, handlePlannerAuthError, queueSessionSave]);
