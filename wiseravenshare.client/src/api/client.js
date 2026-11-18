@@ -94,11 +94,16 @@ const parseResponseBody = async (response) => {
 };
 
 let refreshInFlightPromise = null;
+let refreshFailedUntil = 0;
 
 const isAuthRouteRequest = (path = "") =>
   typeof path === "string" && path.toLowerCase().startsWith("/api/auth/");
 
 const refreshAccessToken = async () => {
+  if (Date.now() < refreshFailedUntil) {
+    return false;
+  }
+
   if (refreshInFlightPromise) {
     return refreshInFlightPromise;
   }
@@ -112,12 +117,22 @@ const refreshAccessToken = async () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(storedRefreshToken ? { refreshToken: storedRefreshToken } : {}),
       });
-      if (!response.ok) return false;
+      if (!response.ok) {
+        if (response.status === 400 || response.status === 401 || response.status === 403) {
+          writeStoredToken(null);
+        }
+        refreshFailedUntil = Date.now() + 120_000;
+        return false;
+      }
 
       const data = await parseResponseBody(response);
       const newToken = data?.token || data?.access_token;
-      if (!newToken) return false;
+      if (!newToken) {
+        refreshFailedUntil = Date.now() + 120_000;
+        return false;
+      }
 
+      refreshFailedUntil = 0;
       writeStoredToken(newToken);
       const newRefreshToken = data?.refreshToken || data?.refresh_token;
       if (newRefreshToken) {
@@ -125,6 +140,7 @@ const refreshAccessToken = async () => {
       }
       return true;
     } catch {
+      refreshFailedUntil = Date.now() + 120_000;
       return false;
     } finally {
       refreshInFlightPromise = null;
@@ -215,11 +231,20 @@ const request = async (path, options = {}) => {
 };
 
 const requestBlob = async (path, options = {}) => {
-  const { omitAuth = false, ...fetchOptions } = options;
+  const { omitAuth = false, __retryAuth = false, ...fetchOptions } = options;
   const token = readStoredToken();
   const headers = { Accept: "audio/mpeg, application/json;q=0.9, */*;q=0.8", ...(fetchOptions.headers || {}) };
   if (token && !omitAuth) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(buildUrl(path), { credentials: "include", ...fetchOptions, headers });
+  if (
+    response.status === 401 &&
+    !omitAuth &&
+    !__retryAuth &&
+    !isAuthRouteRequest(path) &&
+    (await refreshAccessToken())
+  ) {
+    return requestBlob(path, { ...options, __retryAuth: true });
+  }
   if (!response.ok) {
     const data = await parseResponseBody(response);
     const error = new Error(data?.message || `Request failed with status ${response.status}`);
@@ -690,15 +715,37 @@ export const apiClient = {
       });
     },
     async me() {
-      const token = readStoredToken();
+      const verifyWithToken = async (token) => requestJson("/api/auth/verify", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      });
+
+      let token = readStoredToken();
       if (!token) {
         throw new Error("Not authenticated.");
       }
 
-      const data = await requestJson("/api/auth/verify", {
-        method: "POST",
-        body: JSON.stringify({ token }),
-      });
+      let data;
+      try {
+        data = await verifyWithToken(token);
+      } catch (error) {
+        if (error?.status !== 401 && error?.status !== 403) {
+          throw error;
+        }
+
+        const refreshed = await refreshAccessToken();
+        if (!refreshed) {
+          throw error;
+        }
+
+        token = readStoredToken();
+        if (!token) {
+          throw new Error("Not authenticated.");
+        }
+
+        data = await verifyWithToken(token);
+      }
+
       const user = data?.user || null;
       if (!user) {
         return null;
@@ -1433,4 +1480,3 @@ export const apiClient = {
     throw lastError;
   },
 };
-
