@@ -18,6 +18,4 @@ public sealed class PlannerSessionState : BaseEntity
 
     /// <summary>Whether the draft modal was open when state was last saved.</summary>
     public bool ModalOpen { get; set; }
-
-    public User? User { get; set; }
 }

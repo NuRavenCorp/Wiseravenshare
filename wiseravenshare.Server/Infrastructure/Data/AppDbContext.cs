@@ -179,7 +179,6 @@ public class AppDbContext : DbContext
     public DbSet<UserActivity> UserActivities => Set<UserActivity>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<Appointment> Appointments => Set<Appointment>();
-    public DbSet<PlannerSessionState> PlannerSessionStates => Set<PlannerSessionState>();
 
     // Studio
     public DbSet<Wiseravenshare.Server.Entities.Studio.StudioProject> StudioProjects => Set<Wiseravenshare.Server.Entities.Studio.StudioProject>();
@@ -1406,16 +1405,5 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<PlannerSessionState>(entity =>
-        {
-            entity.ToTable("PlannerSessionStates");
-            entity.Property(s => s.CurrentView).HasMaxLength(50);
-            entity.Property(s => s.DraftJson).HasColumnType("text");
-            entity.HasIndex(s => s.UserId).IsUnique();
-            entity.HasOne(s => s.User)
-                .WithMany()
-                .HasForeignKey(s => s.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
     }
 }

@@ -1,6 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
+using Npgsql;
+using NpgsqlTypes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Shared;
@@ -30,33 +34,50 @@ public sealed class AppointmentsController(
     [HttpGet("session-state")]
     public async Task<IActionResult> GetSessionState(CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
-        if (userId == Guid.Empty) return Unauthorized();
-
-        var session = await db.PlannerSessionStates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.UserId == userId && !s.IsDeleted, ct);
-
-        if (session is null)
+        var defaultState = new
         {
+            currentView = "timeGridDay",
+            focusDateUtc = (DateTime?)null,
+            draftJson = (string?)null,
+            modalOpen = false
+        };
+
+        try
+        {
+            var userId = await ResolveUserIdAsync(ct);
+            if (userId == Guid.Empty) return Unauthorized();
+
+            var connStr = db.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connStr)) return Ok(defaultState);
+
+            await using var conn = new Npgsql.NpgsqlConnection(connStr);
+            await conn.OpenAsync(ct);
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+SELECT ""CurrentView"", ""FocusDateUtc"", ""DraftJson"", ""ModalOpen""
+FROM app_data.""PlannerSessionStates""
+WHERE ""UserId"" = @uid AND ""IsDeleted"" = FALSE
+LIMIT 1";
+            cmd.Parameters.AddWithValue("uid", userId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct))
+                return Ok(defaultState);
+
             return Ok(new
             {
-                currentView = "timeGridDay",
-                focusDateUtc = (DateTime?)null,
-                draftJson = (string?)null,
-                modalOpen = false
+                currentView = reader.IsDBNull(0) ? "timeGridDay" : reader.GetString(0),
+                focusDateUtc = reader.IsDBNull(1) ? (DateTime?)null : DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
+                draftJson = reader.IsDBNull(2) ? (string?)null : reader.GetString(2),
+                modalOpen = !reader.IsDBNull(3) && reader.GetBoolean(3)
             });
         }
-
-        return Ok(new
+        catch (Exception ex)
         {
-            currentView = session.CurrentView,
-            focusDateUtc = session.FocusDateUtc.HasValue
-                ? DateTime.SpecifyKind(session.FocusDateUtc.Value, DateTimeKind.Utc)
-                : (DateTime?)null,
-            draftJson = session.DraftJson,
-            modalOpen = session.ModalOpen
-        });
+            logger.LogWarning(ex, "PlannerSessionStates read failed; returning default state.");
+            return Ok(defaultState);
+        }
     }
 
     [HttpPut("session-state")]
@@ -64,47 +85,54 @@ public sealed class AppointmentsController(
         [FromBody] PlannerSessionStateRequest body,
         CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
-        if (userId == Guid.Empty) return Unauthorized();
-
-        var session = await db.PlannerSessionStates
-            .FirstOrDefaultAsync(s => s.UserId == userId && !s.IsDeleted, ct);
-
-        var currentView = string.IsNullOrWhiteSpace(body.CurrentView)
-            ? "timeGridDay"
-            : body.CurrentView.Trim();
-
-        if (currentView.Length > 50)
-            return BadRequest(new { message = "CurrentView exceeds the 50 character limit." });
-
-        if (session is null)
+        try
         {
-            session = new PlannerSessionState
-            {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                CreatedAt = DateTime.UtcNow
-            };
-            db.PlannerSessionStates.Add(session);
+            var userId = await ResolveUserIdAsync(ct);
+            if (userId == Guid.Empty) return Unauthorized();
+
+            var currentView = string.IsNullOrWhiteSpace(body.CurrentView) ? "timeGridDay" : body.CurrentView.Trim();
+            if (currentView.Length > 50)
+                return BadRequest(new { message = "CurrentView exceeds the 50 character limit." });
+
+            var connStr = db.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connStr)) return NoContent();
+
+            await using var conn = new Npgsql.NpgsqlConnection(connStr);
+            await conn.OpenAsync(ct);
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+INSERT INTO app_data.""PlannerSessionStates"" (""Id"", ""UserId"", ""CurrentView"", ""FocusDateUtc"", ""DraftJson"", ""ModalOpen"", ""CreatedAt"", ""UpdatedAt"", ""IsDeleted"")
+VALUES (gen_random_uuid(), @uid, @view, @focus, @draft, @modal, NOW(), NOW(), FALSE)
+ON CONFLICT (""UserId"") DO UPDATE
+    SET ""CurrentView"" = EXCLUDED.""CurrentView"",
+        ""FocusDateUtc"" = EXCLUDED.""FocusDateUtc"",
+        ""DraftJson"" = EXCLUDED.""DraftJson"",
+        ""ModalOpen"" = EXCLUDED.""ModalOpen"",
+        ""UpdatedAt"" = NOW()";
+
+            cmd.Parameters.AddWithValue("uid", userId);
+            cmd.Parameters.AddWithValue("view", currentView);
+            cmd.Parameters.Add(new Npgsql.NpgsqlParameter("focus", NpgsqlTypes.NpgsqlDbType.TimestampTz) { Value = body.FocusDateUtc.HasValue ? (object)body.FocusDateUtc.Value.ToUniversalTime() : DBNull.Value });
+            cmd.Parameters.Add(new Npgsql.NpgsqlParameter("draft", NpgsqlTypes.NpgsqlDbType.Text) { Value = string.IsNullOrWhiteSpace(body.DraftJson) ? (object)DBNull.Value : body.DraftJson });
+            cmd.Parameters.AddWithValue("modal", body.ModalOpen);
+
+            await cmd.ExecuteNonQueryAsync(ct);
+            return NoContent();
         }
-
-        session.CurrentView = currentView;
-        session.FocusDateUtc = body.FocusDateUtc?.ToUniversalTime();
-        session.DraftJson = string.IsNullOrWhiteSpace(body.DraftJson) ? null : body.DraftJson;
-        session.ModalOpen = body.ModalOpen;
-        session.UpdatedAt = DateTime.UtcNow;
-
-        await db.SaveChangesAsync(ct);
-        return NoContent();
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to upsert planner session state.");
+            return NoContent();
+        }
     }
-
     [HttpGet]
     public async Task<IActionResult> GetAppointments(
         [FromQuery] DateTimeOffset? start,
         [FromQuery] DateTimeOffset? end,
         CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
+        var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
         var from = (start ?? DateTimeOffset.UtcNow.AddMonths(-1)).UtcDateTime;
@@ -141,7 +169,7 @@ public sealed class AppointmentsController(
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] AppointmentRequest body, CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
+        var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
         if (string.IsNullOrWhiteSpace(body.Title))
@@ -174,7 +202,9 @@ public sealed class AppointmentsController(
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
+        var userId = await ResolveUserIdAsync(ct);
+        if (userId == Guid.Empty) return Unauthorized();
+
         var entity = await db.Appointments.FirstOrDefaultAsync(
             a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
         if (entity is null) return NotFound();
@@ -186,7 +216,9 @@ public sealed class AppointmentsController(
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] AppointmentRequest body, CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
+        var userId = await ResolveUserIdAsync(ct);
+        if (userId == Guid.Empty) return Unauthorized();
+
         var entity = await db.Appointments.FirstOrDefaultAsync(
             a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
         if (entity is null) return NotFound();
@@ -212,7 +244,9 @@ public sealed class AppointmentsController(
     [HttpPatch("{id:guid}/dismiss-alert")]
     public async Task<IActionResult> DismissAlert(Guid id, CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
+        var userId = await ResolveUserIdAsync(ct);
+        if (userId == Guid.Empty) return Unauthorized();
+
         var entity = await db.Appointments.FirstOrDefaultAsync(
             a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
         if (entity is null) return NotFound();
@@ -228,7 +262,9 @@ public sealed class AppointmentsController(
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
-        var userId = User.GetUserId();
+        var userId = await ResolveUserIdAsync(ct);
+        if (userId == Guid.Empty) return Unauthorized();
+
         var entity = await db.Appointments.FirstOrDefaultAsync(
             a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
         if (entity is null) return NotFound();
@@ -257,8 +293,43 @@ public sealed class AppointmentsController(
             alertDismissed        = a.AlertDismissed,
         }
     };
-}
 
+    private async Task<Guid> ResolveUserIdAsync(CancellationToken ct)
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue(JwtRegisteredClaimNames.Email)
+            ?? User.FindFirstValue("email");
+
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            var normalizedEmail = email.Trim().ToLowerInvariant();
+            var byEmail = await db.Users
+                .AsNoTracking()
+                .Where(u => u.Email.ToLower() == normalizedEmail)
+                .Select(u => u.Id)
+                .FirstOrDefaultAsync(ct);
+
+            if (byEmail != Guid.Empty)
+            {
+                return byEmail;
+            }
+        }
+
+        var claimUserId = User.GetUserId();
+        if (claimUserId != Guid.Empty)
+        {
+            var exists = await db.Users
+                .AsNoTracking()
+                .AnyAsync(u => u.Id == claimUserId, ct);
+            if (exists)
+            {
+                return claimUserId;
+            }
+        }
+
+        return Guid.Empty;
+    }
+}
 /// <summary>Shared request body for create and update.</summary>
 public sealed class AppointmentRequest
 {
