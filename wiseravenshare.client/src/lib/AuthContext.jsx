@@ -159,9 +159,16 @@ export const AuthProvider = ({ children }) => {
       setIsAuthenticated(false);
       setUserRoles([]);
       setAuthChecked(true);
-      
-      // An expired saved token should not prevent access to public pages.
-      if (error.status === 401 || error.status === 403) {
+
+      // Only clear the stored token when it is definitively invalid (not just a
+      // transient 401 from an API call) — this prevents one noisy request from
+      // wiping a valid session. The token will be cleared on explicit logout.
+      const stillHasToken = Boolean(
+        typeof window !== "undefined" &&
+        window.localStorage &&
+        (window.localStorage.getItem("wiseravenshare_access_token") || window.localStorage.getItem("token"))
+      );
+      if ((error.status === 401 || error.status === 403) && !stillHasToken) {
         apiClient.auth.clearToken();
         setAuthError(null);
       }

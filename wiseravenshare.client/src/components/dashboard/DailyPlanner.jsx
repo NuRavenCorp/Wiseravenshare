@@ -66,9 +66,7 @@ export default function DailyPlanner() {
 
   const handlePlannerAuthError = useCallback((err) => {
     if (err?.status === 401 || err?.status === 403) {
-      apiClient.auth.clearToken();
-      setLoadError("Your planner session expired. Redirecting to sign in.");
-      apiClient.auth.redirectToLogin("/planner");
+      setLoadError("Session expired. Please refresh the page to sign in again.");
       return true;
     }
     return false;
