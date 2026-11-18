@@ -16,6 +16,7 @@ using Google.Apis.Auth;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Interfaces.Repositories;
 using Wiseravenshare.Server.Models;
+using Wiseravenshare.Server.Shared;
 using Wiseravenshare.Server.Services;
 using Wiseravenshare.Server.Services.Currency;
 using AppUserRecord = Wiseravenshare.Server.Models.UserRecord;
@@ -238,7 +239,7 @@ public class AuthController : ControllerBase
         var attemptKey = BuildAttemptKey(request.Email);
         AppUserRecord? user;
         var matchedStoreUser = _userStore.FindByLoginIdentifier(request.Email);
-        var hasValidStoredCredential = matchedStoreUser is not null && UserStore.VerifyPassword(request.Password, matchedStoreUser.PasswordHash);
+        var hasValidStoredCredential = matchedStoreUser is not null && VerifyPasswordCompat(request.Password, matchedStoreUser.PasswordHash);
         var hasValidConfiguredCredential = false;
         var hasValidDomainCredential = false;
         AppUserRecord? configuredUser = null;
@@ -254,7 +255,7 @@ public class AuthController : ControllerBase
                     domainUser = await _userRepository.GetByEmailAsync(loginEmail);
                     hasValidDomainCredential = domainUser is not null
                         && domainUser.IsActive
-                        && UserStore.VerifyPassword(request.Password, domainUser.PasswordHash);
+                        && VerifyPasswordCompat(request.Password, domainUser.PasswordHash);
                 }
             }
         }
@@ -527,7 +528,7 @@ public class AuthController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Access requires admin approval or an active team invite." });
         }
 
-        if (!UserStore.VerifyPassword(request.CurrentPassword, user.PasswordHash))
+        if (!VerifyPasswordCompat(request.CurrentPassword, user.PasswordHash))
         {
             return BadRequest(new { message = "Current password is incorrect." });
         }
@@ -2033,7 +2034,7 @@ public class AuthController : ControllerBase
 
         if (_userStore.TryGetByEmail(normalizedEmail, out var existingUser) && existingUser is not null)
         {
-            if (!UserStore.VerifyPassword(password, existingUser.PasswordHash))
+            if (!VerifyPasswordCompat(password, existingUser.PasswordHash))
             {
                 _userStore.UpdatePassword(normalizedEmail, password);
                 _userStore.TryGetByEmail(normalizedEmail, out existingUser);
@@ -3583,6 +3584,17 @@ public class AuthController : ControllerBase
         var normalizedIdentifier = (identifier ?? string.Empty).Trim().ToLowerInvariant();
         var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         return $"{remoteIp}|{normalizedIdentifier}";
+    }
+
+    private static bool VerifyPasswordCompat(string password, string storedHash)
+    {
+        if (string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(storedHash))
+        {
+            return false;
+        }
+
+        return UserStore.VerifyPassword(password, storedHash)
+            || PasswordHelper.VerifyPassword(password, storedHash);
     }
 
     private async Task EnsurePodcastSessionSnapshotSchemaAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
