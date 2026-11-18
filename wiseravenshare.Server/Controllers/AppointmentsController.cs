@@ -24,7 +24,7 @@ namespace Wiseravenshare.Server.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/appointments")]
-[Authorize]
+[Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
 public sealed class AppointmentsController(
     AppDbContext db,
     ILogger<AppointmentsController> logger) : ControllerBase
@@ -437,6 +437,5 @@ public sealed class PlannerSessionStateRequest
     public string? DraftJson { get; set; }
     public bool ModalOpen { get; set; }
 }
-
 
 

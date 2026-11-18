@@ -2377,8 +2377,18 @@ builder.Services
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Cookie.HttpOnly   = true;
-    options.Cookie.SameSite   = SameSiteMode.Strict;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest; // Always in prod, relaxed in dev
+    // Cross-origin frontend (separate port/domain) requires SameSite=None + Secure.
+    // In local HTTP development, browsers reject SameSite=None without HTTPS, so keep Lax.
+    if (builder.Environment.IsDevelopment())
+    {
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    }
+    else
+    {
+        options.Cookie.SameSite = SameSiteMode.None;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    }
     options.Cookie.Name       = "wr.identity";
     // Prevent MVC-style redirect to /Account/Login for API callers.
     options.Events.OnRedirectToLogin = ctx =>
