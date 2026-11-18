@@ -240,22 +240,60 @@ public class AuthController : ControllerBase
         var matchedStoreUser = _userStore.FindByLoginIdentifier(request.Email);
         var hasValidStoredCredential = matchedStoreUser is not null && UserStore.VerifyPassword(request.Password, matchedStoreUser.PasswordHash);
         var hasValidConfiguredCredential = false;
+        var hasValidDomainCredential = false;
         AppUserRecord? configuredUser = null;
+        Wiseravenshare.Server.Entities.User? domainUser = null;
         if (!hasValidStoredCredential)
         {
             hasValidConfiguredCredential = TryAuthenticateConfiguredCredential(request.Email, request.Password, out configuredUser) && configuredUser is not null;
+            if (!hasValidConfiguredCredential)
+            {
+                var loginEmail = request.Email.Trim();
+                if (!string.IsNullOrWhiteSpace(loginEmail) && loginEmail.Contains('@'))
+                {
+                    domainUser = await _userRepository.GetByEmailAsync(loginEmail);
+                    hasValidDomainCredential = domainUser is not null
+                        && domainUser.IsActive
+                        && UserStore.VerifyPassword(request.Password, domainUser.PasswordHash);
+                }
+            }
         }
 
         if (IsLockedOut(attemptKey, out var retryAfter))
         {
             // Let any valid credential recover immediately from lockout.
-            if (!hasValidStoredCredential && !hasValidConfiguredCredential)
+            if (!hasValidStoredCredential && !hasValidConfiguredCredential && !hasValidDomainCredential)
             {
                 Response.Headers["Retry-After"] = Math.Max((int)Math.Ceiling(retryAfter.TotalSeconds), 1).ToString();
                 return StatusCode(StatusCodes.Status429TooManyRequests, new { message = "Too many failed login attempts. Please try again later." });
             }
 
-            user = hasValidStoredCredential ? matchedStoreUser : configuredUser;
+            if (hasValidStoredCredential)
+            {
+                user = matchedStoreUser;
+            }
+            else if (hasValidConfiguredCredential)
+            {
+                user = configuredUser;
+            }
+            else
+            {
+                user = new AppUserRecord
+                {
+                    Id = domainUser!.Id.ToString("N"),
+                    Email = domainUser.Email,
+                    Name = string.IsNullOrWhiteSpace(domainUser.DisplayName) ? domainUser.Username : domainUser.DisplayName,
+                    Handle = domainUser.Username,
+                    PasswordHash = domainUser.PasswordHash,
+                    Bio = domainUser.Bio ?? string.Empty,
+                    Location = domainUser.Location ?? string.Empty,
+                    Website = domainUser.Website ?? string.Empty,
+                    Avatar = domainUser.AvatarUrl ?? string.Empty,
+                    EmailVerified = true,
+                    CreatedAtUtc = domainUser.CreatedAt,
+                    UpdatedAtUtc = domainUser.UpdatedAt
+                };
+            }
             ClearFailedLogins(attemptKey);
         }
         else
@@ -267,6 +305,24 @@ public class AuthController : ControllerBase
             else if (hasValidConfiguredCredential)
             {
                 user = configuredUser;
+            }
+            else if (hasValidDomainCredential)
+            {
+                user = new AppUserRecord
+                {
+                    Id = domainUser!.Id.ToString("N"),
+                    Email = domainUser.Email,
+                    Name = string.IsNullOrWhiteSpace(domainUser.DisplayName) ? domainUser.Username : domainUser.DisplayName,
+                    Handle = domainUser.Username,
+                    PasswordHash = domainUser.PasswordHash,
+                    Bio = domainUser.Bio ?? string.Empty,
+                    Location = domainUser.Location ?? string.Empty,
+                    Website = domainUser.Website ?? string.Empty,
+                    Avatar = domainUser.AvatarUrl ?? string.Empty,
+                    EmailVerified = true,
+                    CreatedAtUtc = domainUser.CreatedAt,
+                    UpdatedAtUtc = domainUser.UpdatedAt
+                };
             }
             else
             {
