@@ -11,26 +11,76 @@ export default function AiNews() {
   const [itemLimit, setItemLimit] = useState(20);
   const [news, setNews] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const autoLoaded = useRef(false);
 
+  const dedupeArticles = (articles) => {
+    const seen = new Set();
+    return (Array.isArray(articles) ? articles : []).filter((article) => {
+      const key = [
+        article?.sourceUrl || "",
+        article?.title || "",
+        article?.provider || "",
+        article?.publishedAtUtc || "",
+      ].join("|").toLowerCase();
+      if (!key.trim() || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  };
+
   const generate = async (opts = {}) => {
-    setLoading(true);
+    const append = opts.append === true;
+    const requestedOffset = Number.isFinite(opts.offset)
+      ? Math.max(0, opts.offset)
+      : (append ? (news?.nextOffset ?? (news?.articles?.length ?? 0)) : 0);
+
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
-    if (!opts.silent) setNews(null);
+    if (!opts.silent && !append) setNews(null);
+
     try {
-      const res = await apiClient.news.getBulletin({ region, topic, limit: itemLimit });
+      const res = await apiClient.news.getBulletin({
+        region,
+        topic,
+        limit: itemLimit,
+        offset: requestedOffset,
+      });
       if (res?.error) {
         setError(res.error);
       } else if (res && typeof res === "object") {
-        setNews(res);
+        if (!append) {
+          setNews(res);
+        } else {
+          setNews((prev) => {
+            const previousArticles = Array.isArray(prev?.articles) ? prev.articles : [];
+            const incomingArticles = Array.isArray(res.articles) ? res.articles : [];
+            return {
+              ...res,
+              headline: prev?.headline || res.headline,
+              summary: prev?.summary || res.summary,
+              articles: dedupeArticles([...previousArticles, ...incomingArticles]),
+            };
+          });
+        }
       } else {
         setError("Unexpected response format from news service.");
       }
     } catch (e) {
       setError(e?.data?.message || e?.message || "Failed to generate news.");
     } finally {
-      setLoading(false);
+      if (append) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
@@ -174,6 +224,18 @@ export default function AiNews() {
                 </div>
               ))}
             </div>
+            {news.hasMore && (
+              <div className="flex justify-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => generate({ append: true, silent: true })}
+                  disabled={loading || loadingMore}
+                >
+                  {loadingMore ? "Loading more…" : "More News"}
+                </Button>
+              </div>
+            )}
             {Array.isArray(news.providerStatuses) && news.providerStatuses.length > 0 && (
               <div className="rounded-2xl border border-border bg-card/40 p-4">
                 <h3 className="font-heading text-sm tracking-[0.18em] text-foreground mb-3">SOURCE STATUS</h3>

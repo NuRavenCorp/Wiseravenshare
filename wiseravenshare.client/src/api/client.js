@@ -93,8 +93,49 @@ const parseResponseBody = async (response) => {
   return text ? { message: text } : null;
 };
 
+let refreshInFlightPromise = null;
+
+const isAuthRouteRequest = (path = "") =>
+  typeof path === "string" && path.toLowerCase().startsWith("/api/auth/");
+
+const refreshAccessToken = async () => {
+  if (refreshInFlightPromise) {
+    return refreshInFlightPromise;
+  }
+
+  refreshInFlightPromise = (async () => {
+    const storedRefreshToken = readStoredRefreshToken();
+    try {
+      const response = await fetch(buildUrl("/api/auth/refresh-token"), {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(storedRefreshToken ? { refreshToken: storedRefreshToken } : {}),
+      });
+      if (!response.ok) return false;
+
+      const data = await parseResponseBody(response);
+      const newToken = data?.token || data?.access_token;
+      if (!newToken) return false;
+
+      writeStoredToken(newToken);
+      const newRefreshToken = data?.refreshToken || data?.refresh_token;
+      if (newRefreshToken) {
+        writeStoredRefreshToken(newRefreshToken);
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlightPromise = null;
+    }
+  })();
+
+  return refreshInFlightPromise;
+};
+
 const requestJson = async (path, options = {}) => {
-  const { omitAuth = false, ...fetchOptions } = options;
+  const { omitAuth = false, __retryAuth = false, ...fetchOptions } = options;
   const token = readStoredToken();
   const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   const headers = {
@@ -112,6 +153,16 @@ const requestJson = async (path, options = {}) => {
     headers,
   });
 
+  if (
+    response.status === 401 &&
+    !omitAuth &&
+    !__retryAuth &&
+    !isAuthRouteRequest(path) &&
+    (await refreshAccessToken())
+  ) {
+    return requestJson(path, { ...options, __retryAuth: true });
+  }
+
   const data = await parseResponseBody(response);
   if (!response.ok) {
     const error = new Error(data?.message || `Request failed with status ${response.status}`);
@@ -124,7 +175,7 @@ const requestJson = async (path, options = {}) => {
 };
 
 const request = async (path, options = {}) => {
-  const { omitAuth = false, ...fetchOptions } = options;
+  const { omitAuth = false, __retryAuth = false, ...fetchOptions } = options;
   const token = readStoredToken();
   const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   const headers = {
@@ -141,6 +192,16 @@ const request = async (path, options = {}) => {
     ...fetchOptions,
     headers,
   });
+
+  if (
+    response.status === 401 &&
+    !omitAuth &&
+    !__retryAuth &&
+    !isAuthRouteRequest(path) &&
+    (await refreshAccessToken())
+  ) {
+    return request(path, { ...options, __retryAuth: true });
+  }
 
   const data = await parseResponseBody(response);
   if (!response.ok) {
@@ -666,25 +727,7 @@ export const apiClient = {
       }
     },
     async tryRefreshToken() {
-      const storedRefreshToken = readStoredRefreshToken();
-      try {
-        const data = await fetch(buildUrl("/api/auth/refresh-token"), {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(storedRefreshToken ? { refreshToken: storedRefreshToken } : {}),
-        }).then((r) => (r.ok ? r.json() : Promise.reject(r)));
-        const newToken = data?.token || data?.access_token;
-        if (!newToken) return false;
-        writeStoredToken(newToken);
-        const newRefreshToken = data?.refreshToken || data?.refresh_token;
-        if (newRefreshToken) {
-          writeStoredRefreshToken(newRefreshToken);
-        }
-        return true;
-      } catch {
-        return false;
-      }
+      return refreshAccessToken();
     },
     redirectToLogin(nextUrl) {
       if (typeof window === "undefined") {
@@ -1160,6 +1203,9 @@ export const apiClient = {
       if (params.limit) {
         query.set("limit", String(params.limit));
       }
+      if (Number.isFinite(params.offset) && params.offset > 0) {
+        query.set("offset", String(params.offset));
+      }
 
       const suffix = query.toString();
       return requestJson(`/api/news/bulletin${suffix ? `?${suffix}` : ""}`, {
@@ -1387,4 +1433,3 @@ export const apiClient = {
     throw lastError;
   },
 };
-

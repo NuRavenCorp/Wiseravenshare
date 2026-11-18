@@ -54,14 +54,20 @@ public sealed class NewsController : ControllerBase
         [FromQuery] string? topic = null,
         [FromQuery] string? language = "en",
         [FromQuery] int limit = 20,
+        [FromQuery] int offset = 0,
         CancellationToken cancellationToken = default)
     {
         var normalizedRegion = region?.Trim() ?? string.Empty;
         var normalizedTopic = topic?.Trim() ?? string.Empty;
         var query = BuildBulletinQuery(normalizedRegion, normalizedTopic);
-        var normalizedLimit = Math.Clamp(limit, 1, 30);
-        var response = await _newsAggregationService.SearchNewsAsync(query, language, normalizedLimit, cancellationToken);
+        var normalizedLimit = Math.Clamp(limit, 1, 50);
+        var normalizedOffset = Math.Max(0, offset);
+        // Fetch one extra record so we can reliably detect whether more results exist.
+        var requestedCount = Math.Clamp(normalizedOffset + normalizedLimit + 1, normalizedLimit, 500);
+        var response = await _newsAggregationService.SearchNewsAsync(query, language, requestedCount, cancellationToken);
+        var totalAvailable = response.Articles.Count;
         var articles = response.Articles
+            .Skip(normalizedOffset)
             .Take(normalizedLimit)
             .Select(article => new NewsBulletinArticleDto
             {
@@ -85,6 +91,12 @@ public sealed class NewsController : ControllerBase
             Headline = BuildHeadline(normalizedRegion, normalizedTopic, articles),
             Summary = BuildSummary(normalizedRegion, normalizedTopic, articles),
             Articles = articles,
+            Offset = normalizedOffset,
+            Limit = normalizedLimit,
+            ReturnedCount = articles.Count,
+            TotalAvailable = totalAvailable,
+            HasMore = totalAvailable > normalizedOffset + normalizedLimit,
+            NextOffset = normalizedOffset + articles.Count,
             ProviderStatuses = response.ProviderStatuses
         });
     }
@@ -403,6 +415,12 @@ public sealed class NewsBulletinResponseDto
     public string Summary { get; set; } = string.Empty;
     public DateTimeOffset GeneratedAtUtc { get; set; }
     public List<NewsBulletinArticleDto> Articles { get; set; } = [];
+    public int Offset { get; set; }
+    public int Limit { get; set; }
+    public int ReturnedCount { get; set; }
+    public int TotalAvailable { get; set; }
+    public bool HasMore { get; set; }
+    public int NextOffset { get; set; }
     public List<NewsProviderStatus> ProviderStatuses { get; set; } = [];
 }
 

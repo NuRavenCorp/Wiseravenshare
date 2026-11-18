@@ -22,6 +22,25 @@ function localInputToUtcIso(localStr) {
   return new Date(localStr).toISOString();
 }
 
+function isValidDateInput(value) {
+  return typeof value === "string" && value.trim().length > 0 && !Number.isNaN(Date.parse(value));
+}
+
+function normalizeDateTimeLocalValue(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return toLocalInputFormat(parsed);
+}
+
 const REMINDER_OPTIONS = [
   { value: 0,  label: "At time of event" },
   { value: 5,  label: "5 minutes before" },
@@ -52,6 +71,7 @@ const DEFAULT_FORM = {
 export default function DailyPlanner() {
   const calendarRef = useRef(null);
   const sessionSaveTimeoutRef = useRef(null);
+  const authBannerTimeoutRef = useRef(null);
 
   const [events, setEvents]           = useState([]);
   const [activeAlert, setActiveAlert] = useState(null);
@@ -63,14 +83,33 @@ export default function DailyPlanner() {
   const [saving, setSaving]           = useState(false);
   const [deleting, setDeleting]       = useState(false);
   const [formData, setFormData]       = useState(DEFAULT_FORM);
+  const [formError, setFormError]     = useState("");
+
+  const isAuthError = useCallback((err) => err?.status === 401 || err?.status === 403, []);
+  const authExpiredMessage = "Session expired. Please refresh the page to sign in again.";
+
+  const clearAuthBanner = useCallback(() => {
+    if (authBannerTimeoutRef.current) {
+      clearTimeout(authBannerTimeoutRef.current);
+      authBannerTimeoutRef.current = null;
+    }
+    setLoadError((prev) => (prev === authExpiredMessage ? "" : prev));
+  }, []);
 
   const handlePlannerAuthError = useCallback((err) => {
-    if (err?.status === 401 || err?.status === 403) {
-      setLoadError("Session expired. Please refresh the page to sign in again.");
+    if (isAuthError(err)) {
+      if (authBannerTimeoutRef.current) {
+        clearTimeout(authBannerTimeoutRef.current);
+      }
+      setLoadError(authExpiredMessage);
+      authBannerTimeoutRef.current = setTimeout(() => {
+        setLoadError((prev) => (prev === authExpiredMessage ? "" : prev));
+        authBannerTimeoutRef.current = null;
+      }, 5000);
       return true;
     }
     return false;
-  }, []);
+  }, [isAuthError]);
 
   const queueSessionSave = useCallback((overrides = {}) => {
     if (!sessionHydrated) return;
@@ -108,11 +147,15 @@ export default function DailyPlanner() {
             modalOpen: modalIsOpen,
           }),
         });
+        clearAuthBanner();
       } catch (err) {
-        handlePlannerAuthError(err);
+        // Session-state persistence is best-effort; do not surface sticky auth banners for it.
+        if (!isAuthError(err)) {
+          console.error("Failed to persist planner session state:", err);
+        }
       }
     }, 350);
-  }, [formData, handlePlannerAuthError, initialView, modalOpen, sessionHydrated]);
+  }, [clearAuthBanner, formData, initialView, isAuthError, modalOpen, sessionHydrated]);
 
   useEffect(() => {
     let mounted = true;
@@ -131,7 +174,15 @@ export default function DailyPlanner() {
           try {
             const parsed = JSON.parse(state.draftJson);
             if (parsed && typeof parsed === "object") {
-              setFormData((prev) => ({ ...prev, ...parsed }));
+              setFormData((prev) => ({
+                ...prev,
+                ...parsed,
+                title: typeof parsed.title === "string" ? parsed.title : prev.title,
+                description: typeof parsed.description === "string" ? parsed.description : prev.description,
+                start: normalizeDateTimeLocalValue(parsed.start),
+                end: normalizeDateTimeLocalValue(parsed.end),
+                color: typeof parsed.color === "string" && parsed.color.trim() ? parsed.color : prev.color,
+              }));
             }
           } catch {
             // Ignore invalid persisted drafts and continue with defaults.
@@ -141,8 +192,12 @@ export default function DailyPlanner() {
         if (state.modalOpen === true) {
           setModalOpen(true);
         }
+        clearAuthBanner();
       } catch (err) {
-        handlePlannerAuthError(err);
+        // Hydration should not block planner usage; ignore auth noise from optional state endpoint.
+        if (!isAuthError(err)) {
+          console.error("Failed to load planner session state:", err);
+        }
       } finally {
         if (mounted) {
           setSessionHydrated(true);
@@ -156,8 +211,11 @@ export default function DailyPlanner() {
       if (sessionSaveTimeoutRef.current) {
         clearTimeout(sessionSaveTimeoutRef.current);
       }
+      if (authBannerTimeoutRef.current) {
+        clearTimeout(authBannerTimeoutRef.current);
+      }
     };
-  }, [handlePlannerAuthError]);
+  }, [clearAuthBanner, isAuthError]);
 
   useEffect(() => {
     if (!sessionHydrated) return;
@@ -214,6 +272,7 @@ export default function DailyPlanner() {
     );
     try {
       await apiClient.requestJson(`/api/appointments/${id}/dismiss-alert`, { method: "PATCH" });
+      clearAuthBanner();
     } catch (err) {
       handlePlannerAuthError(err);
     }
@@ -227,6 +286,7 @@ export default function DailyPlanner() {
       );
       setEvents(Array.isArray(data) ? data : []);
       setLoadError("");
+      clearAuthBanner();
       queueSessionSave({
         currentView: dateInfo?.view?.type,
         focusDateUtc: dateInfo?.startStr ?? null,
@@ -238,7 +298,7 @@ export default function DailyPlanner() {
       setLoadError("Failed to load appointments.");
       console.error("Failed to load appointments:", err);
     }
-  }, [handlePlannerAuthError, queueSessionSave]);
+  }, [clearAuthBanner, handlePlannerAuthError, queueSessionSave]);
 
   // ── Drag-drop / resize ────────────────────────────────────────────────────
   const handleEventChange = async (changeInfo) => {
@@ -256,6 +316,7 @@ export default function DailyPlanner() {
         method: "PUT",
         body: JSON.stringify(payload),
       });
+      clearAuthBanner();
     } catch (err) {
       handlePlannerAuthError(err);
       changeInfo.revert();
@@ -264,6 +325,7 @@ export default function DailyPlanner() {
 
   // ── Date select (drag to create slot) ─────────────────────────────────────
   const handleDateSelect = (selectInfo) => {
+    setFormError("");
     setFormData({
       ...DEFAULT_FORM,
       start: toLocalInputFormat(selectInfo.start),
@@ -274,6 +336,7 @@ export default function DailyPlanner() {
 
   // ── Click existing event ──────────────────────────────────────────────────
   const handleEventClick = (clickInfo) => {
+    setFormError("");
     const ev = clickInfo.event;
     setFormData({
       id:                    ev.id,
@@ -290,16 +353,36 @@ export default function DailyPlanner() {
   // ── Save (create or update) ───────────────────────────────────────────────
   const handleSave = async (e) => {
     e.preventDefault();
-    setSaving(true);
+    const title = typeof formData.title === "string" ? formData.title.trim() : "";
+    if (!title) {
+      setFormError("Title is required.");
+      return;
+    }
+    if (!isValidDateInput(formData.start) || !isValidDateInput(formData.end)) {
+      setFormError("Start and end times are required.");
+      return;
+    }
+
+    const startDate = new Date(formData.start);
+    const endDate = new Date(formData.end);
+    if (endDate < startDate) {
+      setFormError("End time must be after start time.");
+      return;
+    }
+
     const payload = {
-      title:                 formData.title.trim(),
-      description:           formData.description,
+      title,
+      description:           typeof formData.description === "string" ? formData.description : "",
       startUtc:              localInputToUtcIso(formData.start),
       endUtc:                localInputToUtcIso(formData.end),
       reminderMinutesBefore: parseInt(formData.reminderMinutesBefore, 10),
       color:                 formData.color,
     };
-    try {
+
+    setFormError("");
+    setSaving(true);
+
+    const saveAppointment = async () => {
       if (formData.id) {
         await apiClient.requestJson(`/api/appointments/${formData.id}`, {
           method: "PUT",
@@ -311,14 +394,40 @@ export default function DailyPlanner() {
           body: JSON.stringify(payload),
         });
       }
+    };
+
+    try {
+      await saveAppointment();
+      clearAuthBanner();
       setModalOpen(false);
       queueSessionSave({ modalOpen: false, draftJson: null });
       refreshCalendar();
     } catch (err) {
+      if (err?.status === 401 || err?.status === 403) {
+        const refreshed = await apiClient.auth.tryRefreshToken();
+        if (refreshed) {
+          try {
+            await saveAppointment();
+            clearAuthBanner();
+            setModalOpen(false);
+            queueSessionSave({ modalOpen: false, draftJson: null });
+            refreshCalendar();
+            return;
+          } catch (retryErr) {
+            if (handlePlannerAuthError(retryErr)) {
+              setFormError("Session expired. Please sign in again.");
+              return;
+            }
+            setFormError(retryErr?.message || "Failed to save appointment.");
+            return;
+          }
+        }
+      }
       if (handlePlannerAuthError(err)) {
+        setFormError("Session expired. Please sign in again.");
         return;
       }
-      alert(err?.message || "Failed to save appointment.");
+      setFormError(err?.message || "Failed to save appointment.");
     } finally {
       setSaving(false);
     }
@@ -330,6 +439,7 @@ export default function DailyPlanner() {
     setDeleting(true);
     try {
       await apiClient.requestJson(`/api/appointments/${formData.id}`, { method: "DELETE" });
+      clearAuthBanner();
       setModalOpen(false);
       queueSessionSave({ modalOpen: false, draftJson: null });
       setEvents((prev) => prev.filter((ev) => ev.id !== formData.id));
@@ -426,6 +536,7 @@ export default function DailyPlanner() {
         >
           <form
             onSubmit={handleSave}
+            noValidate
             className="w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl p-6 space-y-4"
           >
             {/* Modal header */}
@@ -449,7 +560,6 @@ export default function DailyPlanner() {
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Title *</label>
               <Input
-                required
                 placeholder="e.g. Studio session, Go-live stream…"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
@@ -463,7 +573,6 @@ export default function DailyPlanner() {
                   <Clock className="w-3 h-3" /> Start
                 </label>
                 <Input
-                  required
                   type="datetime-local"
                   value={formData.start}
                   onChange={(e) => setFormData({ ...formData, start: e.target.value })}
@@ -475,7 +584,6 @@ export default function DailyPlanner() {
                   <Clock className="w-3 h-3" /> End
                 </label>
                 <Input
-                  required
                   type="datetime-local"
                   value={formData.end}
                   min={formData.start}
@@ -539,6 +647,12 @@ export default function DailyPlanner() {
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
               />
             </div>
+
+            {formError && (
+              <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                {formError}
+              </div>
+            )}
 
             {/* Actions */}
             <div className="flex items-center justify-between pt-1">

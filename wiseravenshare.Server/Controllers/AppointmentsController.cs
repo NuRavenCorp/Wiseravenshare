@@ -174,6 +174,10 @@ ON CONFLICT (""UserId"") DO UPDATE
 
         if (string.IsNullOrWhiteSpace(body.Title))
             return BadRequest(new { message = "Title is required." });
+        if (body.EndUtc <= body.StartUtc)
+            return BadRequest(new { message = "End time must be after start time." });
+        if (body.ReminderMinutesBefore < 0)
+            return BadRequest(new { message = "Reminder must be zero or greater." });
 
         var entity = new Appointment
         {
@@ -190,8 +194,19 @@ ON CONFLICT (""UserId"") DO UPDATE
             UpdatedAt             = DateTime.UtcNow,
         };
 
-        db.Appointments.Add(entity);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            db.Appointments.Add(entity);
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            logger.LogError(ex, "Failed to create appointment for user {UserId}", userId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Unable to create appointment right now."
+            });
+        }
 
         logger.LogInformation("Appointment {Id} created by user {UserId}", entity.Id, userId);
         return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
@@ -302,16 +317,72 @@ ON CONFLICT (""UserId"") DO UPDATE
 
         if (!string.IsNullOrWhiteSpace(email))
         {
-            var normalizedEmail = email.Trim().ToLowerInvariant();
-            var byEmail = await db.Users
-                .AsNoTracking()
-                .Where(u => u.Email.ToLower() == normalizedEmail)
-                .Select(u => u.Id)
+            var normalizedEmail = email.Trim();
+            var lowerEmail = normalizedEmail.ToLowerInvariant();
+
+            var existingByEmail = await db.Users
+                .Where(u => u.Email.ToLower() == lowerEmail)
+                .Select(u => new { u.Id, u.Username })
                 .FirstOrDefaultAsync(ct);
 
-            if (byEmail != Guid.Empty)
+            if (existingByEmail is not null)
             {
-                return byEmail;
+                return existingByEmail.Id;
+            }
+
+            // Some auth flows can issue valid JWTs before a matching domain user row
+            // exists. Provision a minimal row so planner CRUD has a durable owner.
+            var preferredId = User.GetUserId();
+            var userId = preferredId != Guid.Empty ? preferredId : Guid.NewGuid();
+            var baseUsernameRaw = normalizedEmail.Split('@')[0];
+            var baseUsername = new string(baseUsernameRaw.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(baseUsername))
+            {
+                baseUsername = $"user{userId.ToString("N")[..8]}";
+            }
+
+            var username = baseUsername;
+            var suffix = 0;
+            while (await db.Users.AnyAsync(u => u.Username == username, ct))
+            {
+                suffix++;
+                username = $"{baseUsername}{suffix}";
+            }
+
+            var displayName = string.IsNullOrWhiteSpace(baseUsernameRaw) ? username : baseUsernameRaw.Trim();
+            var newUser = new User
+            {
+                Id = userId,
+                Email = normalizedEmail,
+                Username = username,
+                DisplayName = displayName,
+                PasswordHash = string.Empty,
+                IsActive = true,
+                TruthScore = 50.00m,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+
+            try
+            {
+                db.Users.Add(newUser);
+                await db.SaveChangesAsync(ct);
+                return newUser.Id;
+            }
+            catch (DbUpdateException)
+            {
+                // Another request may have created the row concurrently.
+                var recovered = await db.Users
+                    .AsNoTracking()
+                    .Where(u => u.Email.ToLower() == lowerEmail)
+                    .Select(u => u.Id)
+                    .FirstOrDefaultAsync(ct);
+                if (recovered != Guid.Empty)
+                {
+                    return recovered;
+                }
+
+                throw;
             }
         }
 
