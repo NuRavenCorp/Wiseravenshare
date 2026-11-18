@@ -1919,7 +1919,7 @@ public class AuthController : ControllerBase
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
         var expiresMinutes = int.TryParse(_configuration["Authentication:Jwt:ExpiresMinutes"], out var minutes)
             ? Math.Clamp(minutes, 5, 1440)
-            : 60;
+            : 1440; // Default 24h so users are not silently kicked out mid-session
 
         var token = new JwtSecurityToken(
             issuer: _configuration["Authentication:Jwt:Issuer"],

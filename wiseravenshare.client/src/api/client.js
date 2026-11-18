@@ -27,6 +27,8 @@ const KNOWLEDGE_SYNC_ENTITIES = new Set([
   "MediaItem",
 ]);
 
+const REFRESH_TOKEN_KEY = "wiseravenshare_refresh_token";
+
 let inMemoryToken = null;
 
 const readStoredToken = () => {
@@ -35,6 +37,20 @@ const readStoredToken = () => {
   }
 
   return window.localStorage.getItem(ACCESS_TOKEN_KEY) || window.localStorage.getItem("token");
+};
+
+const readStoredRefreshToken = () => {
+  if (typeof window === "undefined" || !window.localStorage) return null;
+  return window.localStorage.getItem(REFRESH_TOKEN_KEY) || null;
+};
+
+const writeStoredRefreshToken = (token) => {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  if (token) {
+    window.localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  } else {
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
 };
 
 const readNuRavenToken = () => {
@@ -60,6 +76,7 @@ const writeStoredToken = (token) => {
   } else {
     window.localStorage.removeItem(ACCESS_TOKEN_KEY);
     window.localStorage.removeItem("token");
+    writeStoredRefreshToken(null);
   }
 };
 
@@ -588,6 +605,10 @@ export const apiClient = {
       if (token) {
         writeStoredToken(token);
       }
+      const refreshToken = data?.refreshToken || data?.refresh_token;
+      if (refreshToken) {
+        writeStoredRefreshToken(refreshToken);
+      }
       return {
         access_token: token,
         user: data?.user || null,
@@ -640,6 +661,27 @@ export const apiClient = {
       try {
         const user = await this.me();
         return Boolean(user);
+      } catch {
+        return false;
+      }
+    },
+    async tryRefreshToken() {
+      const storedRefreshToken = readStoredRefreshToken();
+      try {
+        const data = await fetch(buildUrl("/api/auth/refresh-token"), {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(storedRefreshToken ? { refreshToken: storedRefreshToken } : {}),
+        }).then((r) => (r.ok ? r.json() : Promise.reject(r)));
+        const newToken = data?.token || data?.access_token;
+        if (!newToken) return false;
+        writeStoredToken(newToken);
+        const newRefreshToken = data?.refreshToken || data?.refresh_token;
+        if (newRefreshToken) {
+          writeStoredRefreshToken(newRefreshToken);
+        }
+        return true;
       } catch {
         return false;
       }

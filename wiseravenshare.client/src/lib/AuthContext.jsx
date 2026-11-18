@@ -46,6 +46,22 @@ export const AuthProvider = ({ children }) => {
     checkAppState();
   }, []);
 
+  // Proactively refresh the access token every 45 minutes so it never expires mid-session.
+  useEffect(() => {
+    const REFRESH_INTERVAL_MS = 45 * 60 * 1000;
+    const interval = setInterval(async () => {
+      if (isAuthenticated) {
+        const refreshed = await apiClient.auth.tryRefreshToken();
+        if (!refreshed) {
+          // Refresh failed — re-verify to give a last chance before marking as logged out.
+          checkUserAuth();
+        }
+      }
+    }, REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
   const checkAppState = async () => {
     try {
       setIsLoadingPublicSettings(true);
@@ -108,7 +124,6 @@ export const AuthProvider = ({ children }) => {
 
   const checkUserAuth = async () => {
     try {
-      // Now check if the user is authenticated
       setIsLoadingAuth(true);
       const currentUser = await apiClient.auth.me();
       setUser(currentUser);
@@ -117,6 +132,28 @@ export const AuthProvider = ({ children }) => {
       setIsLoadingAuth(false);
       setAuthChecked(true);
     } catch (error) {
+      // Token expired or invalid — attempt a silent refresh before giving up.
+      if (error.status === 401 || error.status === 403 || error.message === "Not authenticated.") {
+        try {
+          const refreshed = await apiClient.auth.tryRefreshToken();
+          if (refreshed) {
+            try {
+              const refreshedUser = await apiClient.auth.me();
+              setUser(refreshedUser);
+              setUserRoles(deriveRoles(refreshedUser));
+              setIsAuthenticated(true);
+              setIsLoadingAuth(false);
+              setAuthChecked(true);
+              return;
+            } catch {
+              // fall through to logout below
+            }
+          }
+        } catch {
+          // fall through to logout below
+        }
+      }
+
       console.error('User auth check failed:', error);
       setIsLoadingAuth(false);
       setIsAuthenticated(false);
