@@ -132,46 +132,13 @@ export const AuthProvider = ({ children }) => {
       setIsLoadingAuth(false);
       setAuthChecked(true);
     } catch (error) {
-      // Token expired or invalid — attempt a silent refresh before giving up.
-      if (error.status === 401 || error.status === 403 || error.message === "Not authenticated.") {
-        try {
-          const refreshed = await apiClient.auth.tryRefreshToken();
-          if (refreshed) {
-            try {
-              const refreshedUser = await apiClient.auth.me();
-              setUser(refreshedUser);
-              setUserRoles(deriveRoles(refreshedUser));
-              setIsAuthenticated(true);
-              setIsLoadingAuth(false);
-              setAuthChecked(true);
-              return;
-            } catch {
-              // fall through to logout below
-            }
-          }
-        } catch {
-          // fall through to logout below
-        }
-      }
-
+      // apiClient.requestJson already attempts one silent token refresh before
+      // throwing, so we don't need to retry here — just mark unauthenticated.
       console.error('User auth check failed:', error);
       setIsLoadingAuth(false);
       setIsAuthenticated(false);
       setUserRoles([]);
       setAuthChecked(true);
-
-      // Only clear the stored token when it is definitively invalid (not just a
-      // transient 401 from an API call) — this prevents one noisy request from
-      // wiping a valid session. The token will be cleared on explicit logout.
-      const stillHasToken = Boolean(
-        typeof window !== "undefined" &&
-        window.localStorage &&
-        (window.localStorage.getItem("wiseravenshare_access_token") || window.localStorage.getItem("token"))
-      );
-      if ((error.status === 401 || error.status === 403) && !stillHasToken) {
-        apiClient.auth.clearToken();
-        setAuthError(null);
-      }
     }
   };
 
@@ -239,3 +206,4 @@ export const useAuth = () => {
   }
   return context;
 };
+

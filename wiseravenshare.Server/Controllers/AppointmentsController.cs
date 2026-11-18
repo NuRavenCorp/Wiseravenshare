@@ -185,8 +185,8 @@ ON CONFLICT (""UserId"") DO UPDATE
             UserId                = userId,
             Title                 = body.Title.Trim(),
             Description           = body.Description?.Trim(),
-            StartUtc              = body.StartUtc.ToUniversalTime(),
-            EndUtc                = body.EndUtc.ToUniversalTime(),
+            StartUtc              = ToUtcDt(body.StartUtc),
+            EndUtc                = ToUtcDt(body.EndUtc),
             ReminderMinutesBefore = body.ReminderMinutesBefore,
             Color                 = string.IsNullOrWhiteSpace(body.Color) ? "#3788d8" : body.Color,
             AlertDismissed        = false,
@@ -240,8 +240,8 @@ ON CONFLICT (""UserId"") DO UPDATE
 
         entity.Title                 = body.Title.Trim();
         entity.Description           = body.Description?.Trim();
-        entity.StartUtc              = body.StartUtc.ToUniversalTime();
-        entity.EndUtc                = body.EndUtc.ToUniversalTime();
+        entity.StartUtc              = ToUtcDt(body.StartUtc);
+        entity.EndUtc                = ToUtcDt(body.EndUtc);
         entity.ReminderMinutesBefore = body.ReminderMinutesBefore;
         entity.Color                 = string.IsNullOrWhiteSpace(body.Color) ? entity.Color : body.Color;
         entity.UpdatedAt             = DateTime.UtcNow;
@@ -292,6 +292,9 @@ ON CONFLICT (""UserId"") DO UPDATE
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
+
+    private static DateTime ToUtcDt(DateTimeOffset dto) =>
+        DateTime.SpecifyKind(dto.UtcDateTime, DateTimeKind.Utc);
 
     private static object MapDto(Appointment a) => new
     {
@@ -421,8 +424,8 @@ public sealed class AppointmentRequest
 {
     public string   Title                 { get; set; } = string.Empty;
     public string?  Description           { get; set; }
-    public DateTime StartUtc              { get; set; }
-    public DateTime EndUtc                { get; set; }
+    public DateTimeOffset StartUtc { get; set; }
+    public DateTimeOffset EndUtc { get; set; }
     public int      ReminderMinutesBefore { get; set; } = 15;
     public string   Color                 { get; set; } = "#3788d8";
 }
@@ -434,4 +437,6 @@ public sealed class PlannerSessionStateRequest
     public string? DraftJson { get; set; }
     public bool ModalOpen { get; set; }
 }
+
+
 
