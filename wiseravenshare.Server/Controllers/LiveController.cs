@@ -8,6 +8,7 @@ using System.Text.Json;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Hubs;
 using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Shared;
 using Wiseravenshare.Server.Services;
 using System.Globalization;
@@ -1062,43 +1063,126 @@ SELECT EXISTS (
         if (!IsOwner(stream, userId))
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Not your stream." });
 
-        var bucketsRoot = _configuration["Persistence:BucketsRoot"] ?? "/app/Buckets";
         var ext = Path.GetExtension(file.FileName ?? "recording.webm").ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(ext)) ext = ".webm";
-        var relKey  = Path.Combine("live", streamId, $"recording{ext}").Replace('\\', '/');
-        var fullPath = Path.Combine(bucketsRoot, relKey);
+        if (string.IsNullOrWhiteSpace(ext))
+        {
+            ext = ".webm";
+        }
 
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        await using (var dest = System.IO.File.Create(fullPath))
-        await using (var src  = file.OpenReadStream())
+        var mime = string.IsNullOrWhiteSpace(file.ContentType)
+            ? ext switch
+            {
+                ".mp4" => "video/mp4",
+                ".mov" => "video/quicktime",
+                ".ogg" => "video/ogg",
+                _ => "video/webm"
+            }
+            : file.ContentType;
+
+        string? persistedBlobKey = null;
+        var playbackUrl = $"/api/live/{streamId}/playback";
+
+        if (_blobStorageService.IsConfigured)
+        {
+            try
+            {
+                var finalKey = $"live/{streamId}/final{ext}";
+                await using var blobInput = file.OpenReadStream();
+                var uploaded = await _blobStorageService.UploadAsync(finalKey, blobInput, mime, cancellationToken);
+                persistedBlobKey = uploaded.ObjectKey;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Blob upload failed for stream {StreamId}; falling back to local recording persistence.", streamId);
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(persistedBlobKey))
+        {
+            var bucketsRoot = _configuration["Persistence:BucketsRoot"] ?? "/app/Buckets";
+            var relKey = Path.Combine("live", streamId, $"recording{ext}").Replace('\\', '/');
+            var fullPath = Path.Combine(bucketsRoot, relKey);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            await using var dest = System.IO.File.Create(fullPath);
+            await using var src = file.OpenReadStream();
             await src.CopyToAsync(dest, cancellationToken);
+        }
+
+        var finalVideoId = stream.final_video_id;
+        if (string.IsNullOrWhiteSpace(finalVideoId))
+        {
+            try
+            {
+                var title = string.IsNullOrWhiteSpace(stream.title) ? "Live recording" : stream.title.Trim();
+                var createdVideo = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+                {
+                    UserId = userId,
+                    Title = $"Live: {title}",
+                    Description = "Auto-saved live recording",
+                    Tags = new[] { "live", "auto-saved" },
+                    VideoUrl = playbackUrl,
+                    Status = "published",
+                    PrivacyStatus = "unlisted",
+                    StorageMode = "temporary",
+                    IsPermanent = true
+                }, cancellationToken);
+                finalVideoId = createdVideo.Id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Recording saved for stream {StreamId} but video library insertion failed.", streamId);
+            }
+        }
 
         _liveStreamStateStore.Update(streamId, s =>
         {
-            s.final_recording_uri = $"/api/live/{streamId}/playback";
-            s.kept_permanently    = true;
-            s.kept_at             = DateTime.UtcNow;
-            s.ended_at          ??= DateTime.UtcNow;
-            s.status              = "ended";
+            s.final_recording_key = persistedBlobKey;
+            s.final_recording_uri = playbackUrl;
+            s.final_video_id = finalVideoId;
+            s.kept_permanently = true;
+            s.kept_at = DateTime.UtcNow;
+            s.ended_at ??= DateTime.UtcNow;
+            s.status = "ended";
+            s.expires_at = null;
         });
 
         _logger.LogInformation("Recording saved for stream {StreamId}: {Bytes} bytes", streamId, file.Length);
         return Ok(new
         {
-            stream_id     = streamId,
-            recording_key = relKey,
-            playback_url  = $"/api/live/{streamId}/playback",
-            size_bytes    = file.Length,
+            stream_id = streamId,
+            recording_key = persistedBlobKey,
+            playback_url = playbackUrl,
+            size_bytes = file.Length,
+            persisted_to_blob = !string.IsNullOrWhiteSpace(persistedBlobKey)
         });
     }
 
     /// <summary>Serve the locally stored recording with range support.</summary>
     [HttpGet("{streamId}/playback")]
     [AllowAnonymous]
-    public IActionResult Playback([FromRoute] string streamId)
+    public async Task<IActionResult> Playback([FromRoute] string streamId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(streamId))
             return BadRequest(new { message = "streamId is required." });
+
+        if (_liveStreamStateStore.TryGet(streamId, out var stream)
+            && !string.IsNullOrWhiteSpace(stream.final_recording_key))
+        {
+            var signedBlobPath = AppendBlobSignatureIfNeeded(
+                StreamingUrlHelper.StreamByBlobPath(stream.final_recording_key),
+                stream.final_recording_key);
+            if (!string.IsNullOrWhiteSpace(signedBlobPath))
+            {
+                return Redirect(signedBlobPath);
+            }
+
+            var blobStream = await _blobStorageService.OpenReadAsync(stream.final_recording_key, cancellationToken);
+            if (blobStream is not null)
+            {
+                return File(blobStream, "video/webm");
+            }
+        }
 
         var bucketsRoot = _configuration["Persistence:BucketsRoot"] ?? "/app/Buckets";
         foreach (var ext in new[] { ".webm", ".mp4", ".mov", ".ogg" })

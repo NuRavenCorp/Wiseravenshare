@@ -19,37 +19,86 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Convert AssemblyAI words[] (start/end in seconds) to LRC format.
- * Groups words into lines by silence gap or max word count.
- */
-function wordsToLrc(words = [], { maxWordsPerLine = 7, silenceGapSeconds = 1.5 } = {}) {
-  if (!Array.isArray(words) || words.length === 0) return "";
-  const lines = [];
-  let lineWords = [];
-  let lineStart = words[0].start;
+function toSeconds(value) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  // Some providers return milliseconds; normalize to seconds.
+  return n > 1000 ? n / 1000 : n;
+}
 
-  for (let i = 0; i < words.length; i++) {
-    const w = words[i];
-    const prev = words[i - 1];
-    const gap = prev ? (w.start - prev.end) : 0;
-    if (lineWords.length > 0 && (gap >= silenceGapSeconds || lineWords.length >= maxWordsPerLine)) {
-      const mm = String(Math.floor(lineStart / 60)).padStart(2, "0");
-      const ss = String(Math.floor(lineStart % 60)).padStart(2, "0");
-      const ms = String(Math.round((lineStart % 1) * 100)).padStart(2, "0");
-      lines.push(`[${mm}:${ss}.${ms}]${lineWords.join(" ")}`);
-      lineWords = [];
-      lineStart = w.start;
+function toLrcTimestamp(seconds) {
+  const safe = Math.max(0, Number(seconds) || 0);
+  const mm = String(Math.floor(safe / 60)).padStart(2, "0");
+  const ss = String(Math.floor(safe % 60)).padStart(2, "0");
+  const cs = String(Math.floor((safe % 1) * 100)).padStart(2, "0");
+  return `${mm}:${ss}.${cs}`;
+}
+
+/**
+ * Group word timestamps into karaoke lines for synced playback/highlighting.
+ */
+function wordsToKaraokeLines(words = [], { maxWordsPerLine = 7, silenceGapSeconds = 1.5 } = {}) {
+  if (!Array.isArray(words) || words.length === 0) return [];
+
+  const normalized = words
+    .map((w) => {
+      const startSec = toSeconds(w?.start);
+      const endSecRaw = toSeconds(w?.end);
+      const text = String(w?.word || w?.text || "").trim();
+      if (!text || !Number.isFinite(startSec)) return null;
+      const endSec = Number.isFinite(endSecRaw) && endSecRaw > startSec ? endSecRaw : (startSec + 0.3);
+      return { text, startSec, endSec };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.startSec - b.startSec);
+
+  if (normalized.length === 0) return [];
+
+  const lines = [];
+  let current = [normalized[0]];
+  for (let i = 1; i < normalized.length; i += 1) {
+    const word = normalized[i];
+    const prev = normalized[i - 1];
+    const gap = word.startSec - prev.endSec;
+    if (current.length >= maxWordsPerLine || gap >= silenceGapSeconds) {
+      lines.push(current);
+      current = [word];
+    } else {
+      current.push(word);
     }
-    lineWords.push(w.word);
   }
-  if (lineWords.length > 0) {
-    const mm = String(Math.floor(lineStart / 60)).padStart(2, "0");
-    const ss = String(Math.floor(lineStart % 60)).padStart(2, "0");
-    const ms = String(Math.round((lineStart % 1) * 100)).padStart(2, "0");
-    lines.push(`[${mm}:${ss}.${ms}]${lineWords.join(" ")}`);
-  }
-  return lines.join("\n");
+  if (current.length > 0) lines.push(current);
+
+  return lines.map((group) => ({
+    start: Math.round(group[0].startSec * 1000),
+    end: Math.round(group[group.length - 1].endSec * 1000),
+    text: group.map((w) => w.text).join(" "),
+    words: group.map((w) => ({
+      text: w.text,
+      word: w.text,
+      start: Math.round(w.startSec * 1000),
+      end: Math.round(w.endSec * 1000),
+    })),
+  }));
+}
+
+/**
+ * Convert words[] to enhanced LRC with per-word timestamps:
+ * [mm:ss.xx]<mm:ss.xx>word1 <mm:ss.xx>word2
+ */
+function wordsToLrc(words = [], opts = {}) {
+  const karaokeLines = wordsToKaraokeLines(words, opts);
+  if (karaokeLines.length === 0) return "";
+
+  return karaokeLines
+    .map((line) => {
+      const lineTs = toLrcTimestamp(line.start / 1000);
+      const wordPart = (line.words || [])
+        .map((w) => `<${toLrcTimestamp((w.start || 0) / 1000)}>${w.text || w.word || ""}`)
+        .join(" ");
+      return `[${lineTs}]${wordPart}`.trim();
+    })
+    .join("\n");
 }
 
 /** Normalize any transcription response into { text, lrc, vtt, words, word_count, karaokeLines, vocals_isolated }. */
@@ -57,12 +106,13 @@ function normalizeTranscriptResult(result) {
   if (!result) return { text: "", lrc: "", vtt: "", words: [], word_count: 0, karaokeLines: null, vocals_isolated: false };
   const words = Array.isArray(result.words) ? result.words : [];
   const lrcFromWords = words.length > 0 ? wordsToLrc(words) : "";
-  const lrc = result.lrc || lrcFromWords;
+  const lrc = lrcFromWords || result.lrc || "";
   const vtt = result.vtt || "";
-  const text = result.text || result.lyrics || result.transcript || words.map((w) => w.word).join(" ").trim();
+  const text = result.text || result.lyrics || result.transcript || words.map((w) => w?.word || w?.text || "").join(" ").trim();
+  const karaokeLinesFromWords = words.length > 0 ? wordsToKaraokeLines(words) : null;
   const karaokeLines = Array.isArray(result.karaoke_lines) && result.karaoke_lines.length > 0
     ? result.karaoke_lines
-    : null;
+    : karaokeLinesFromWords;
   return {
     text,
     lrc,
