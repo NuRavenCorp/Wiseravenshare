@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Loader2, Upload, X, Sparkles, Send, Image as ImageIcon, Video, FileText, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Loader2, Upload, X, Sparkles, Send, Image as ImageIcon, Video, FileText } from "lucide-react";
 
 const FIELDS = [
   { key: "who", label: "Who", placeholder: "Who is involved? Names, groups, organizations..." },
@@ -26,8 +26,6 @@ export default function JournalismReportForm({ onPublished }) {
   const [draftBody, setDraftBody] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState(null);
-  const [scoring, setScoring] = useState(false);
-  const [integrityResult, setIntegrityResult] = useState(null);
 
   const buildJournalismPrompt = () => {
     const lines = [
@@ -57,23 +55,6 @@ export default function JournalismReportForm({ onPublished }) {
     const headline = (lines[0] || "Journalism Report").replace(/^#+\s*/, "");
     const body = lines.slice(1).join("\n").trim() || text;
     return { headline, body };
-  };
-
-  const runIntegrityScoring = async (postId) => {
-    setPublishing(false);
-    setScoring(true);
-    try {
-      const res = await apiClient.functions.invoke("ScoreTruth", {
-        postId,
-      });
-      setIntegrityResult(res.data);
-    } catch {
-      setError(
-        "Report published, but the integrity filter failed. You can score it manually from TruthSeeker."
-      );
-    } finally {
-      setScoring(false);
-    }
   };
 
   const handleFileChange = async (e) => {
@@ -174,9 +155,10 @@ export default function JournalismReportForm({ onPublished }) {
       } catch (e) {
         console.error("Failed to create journalism report tracker:", e?.message || e);
       }
-      await runIntegrityScoring(post?.id || post?.Id);
+      handleDone();
     } catch (err) {
       setError(err?.data?.message || err?.message || "Failed to publish report.");
+    } finally {
       setPublishing(false);
     }
   };
@@ -187,7 +169,6 @@ export default function JournalismReportForm({ onPublished }) {
     setShowGuidedNotes(false);
     setDraftHeadline("");
     setDraftBody("");
-    setIntegrityResult(null);
     if (onPublished) onPublished();
   };
 
@@ -349,98 +330,6 @@ export default function JournalismReportForm({ onPublished }) {
         </Button>
       </div>
 
-      {scoring && (
-        <div className="rounded-xl border border-accent/30 bg-accent/5 p-6 flex items-center gap-3">
-          <Loader2 className="w-5 h-5 animate-spin text-accent" />
-          <div>
-            <p className="text-sm font-medium text-foreground">
-              Running AI integrity filters...
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Analyzing truth score, AI detection, and verifiability.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {integrityResult && (
-        <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-primary" />
-            <span className="text-sm font-medium text-foreground">
-              AI Integrity Report
-            </span>
-          </div>
-          <div className="flex items-center gap-6">
-            <div className="text-center shrink-0">
-              <div
-                className={`text-4xl font-heading ${
-                  integrityResult.truth_score >= 70
-                    ? "text-green-500"
-                    : integrityResult.truth_score >= 50
-                    ? "text-accent"
-                    : "text-destructive"
-                }`}
-              >
-                {integrityResult.truth_score}
-              </div>
-              <div className="text-xs text-muted-foreground">Truth Score</div>
-            </div>
-            <div className="flex-1">
-              <span
-                className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full capitalize ${
-                  integrityResult.status === "verified"
-                    ? "bg-green-500/15 text-green-500"
-                    : integrityResult.status === "flagged"
-                    ? "bg-destructive/15 text-destructive"
-                    : "bg-accent/15 text-accent"
-                }`}
-              >
-                {integrityResult.status === "verified" ? (
-                  <ShieldCheck className="w-3 h-3" />
-                ) : (
-                  <ShieldAlert className="w-3 h-3" />
-                )}
-                {integrityResult.status}
-              </span>
-              <span className="ml-2 text-xs text-muted-foreground">
-                {Math.round((integrityResult.confidence || 0) * 100)}%
-                confidence
-              </span>
-            </div>
-          </div>
-          {integrityResult.factors?.length > 0 && (
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
-                Factors
-              </p>
-              <ul className="space-y-1.5">
-                {integrityResult.factors.map((f, i) => (
-                  <li
-                    key={i}
-                    className="text-sm text-foreground/80 flex items-start gap-2"
-                  >
-                    <span className="text-primary mt-0.5">•</span> {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {integrityResult.ai_detection_flags?.length > 0 && (
-            <div className="p-3 rounded-lg border border-destructive/30 bg-destructive/5">
-              <p className="text-xs text-destructive font-medium mb-1 flex items-center gap-1">
-                <ShieldAlert className="w-3.5 h-3.5" /> AI Detection Flags
-              </p>
-              <p className="text-sm text-destructive/80">
-                {integrityResult.ai_detection_flags.join(", ")}
-              </p>
-            </div>
-          )}
-          <Button onClick={handleDone} className="w-full">
-            Done
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
