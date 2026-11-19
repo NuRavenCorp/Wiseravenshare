@@ -228,6 +228,16 @@ export default function LiveStreamBroadcaster({ onEnd }) {
     onEnd?.();
   };
 
+  const handleSave = () => {
+    void stopStream(false);
+  };
+
+  const handleDiscard = () => {
+    const confirmed = window.confirm("Discard this live stream recording? This will end the stream and delete saved segments.");
+    if (!confirmed) return;
+    void stopStream(true);
+  };
+
   useEffect(() => {
     if (!streaming || audioOnly || !previewRef.current || !streamRef.current) {
       return;
@@ -357,15 +367,15 @@ export default function LiveStreamBroadcaster({ onEnd }) {
           <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
             <span className="text-xs text-muted-foreground">
               {saving
-                ? "Finalizing stream for auto-save..."
+                ? "Finalizing stream..."
                 : `Live recording in progress (5s auto segments) · ${viewerCount} viewer${viewerCount === 1 ? "" : "s"}`}
             </span>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => stopStream(true)} disabled={saving}>
-                <StopCircle className="w-4 h-4" /> Stop & Delete
+              <Button variant="outline" size="sm" onClick={handleDiscard} disabled={saving}>
+                <StopCircle className="w-4 h-4" /> Discard
               </Button>
-              <Button variant="destructive" size="sm" onClick={() => stopStream(false)} disabled={saving}>
-                <StopCircle className="w-4 h-4" /> Stop & Save
+              <Button variant="destructive" size="sm" onClick={handleSave} disabled={saving}>
+                <StopCircle className="w-4 h-4" /> Save
               </Button>
             </div>
           </div>

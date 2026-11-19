@@ -331,11 +331,11 @@ export default function KaraokePlayer({ song, onClose, onSaved, karaokeLines: ka
 
   // Auto-scroll active line into view
   useEffect(() => {
-    if (activeLineRef.current && lyricsContainerRef.current) {
-      activeLineRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
+    const activeLine = activeLineRef.current;
+    const container = lyricsContainerRef.current;
+    if (activeLine && container) {
+      const top = Math.max(0, activeLine.offsetTop - 72);
+      container.scrollTo({ top, behavior: "smooth" });
     }
   }, [activeLineIdx]);
 

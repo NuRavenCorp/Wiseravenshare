@@ -238,8 +238,10 @@ export default function KaraokeSingView({
   // Auto-scroll the active lyric line into view centre
   useEffect(() => {
     const el = lineRefs.current[activeIndex];
-    if (el && lyricsRef.current) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    const container = lyricsRef.current;
+    if (el && container) {
+      const top = Math.max(0, el.offsetTop - 72);
+      container.scrollTo({ top, behavior: "smooth" });
     }
   }, [activeIndex]);
 
@@ -425,13 +427,10 @@ export default function KaraokeSingView({
     return `${m}:${sec}`;
   };
 
-  // Context window: show 2 before + current + 3 after
-  const windowLines = activeLines.length > 0 ? activeLines : (
+  // Top-anchored feed: render the full line list and scroll downward as words progress.
+  const displayLines = activeLines.length > 0 ? activeLines : (
     lyrics ? lyrics.split(/\r?\n+/).filter(Boolean).map((text, i) => ({ text, timeSeconds: i * 3 })) : []
   );
-
-  const windowStart = Math.max(0, activeIndex - 2);
-  const windowEnd   = Math.min(windowLines.length - 1, activeIndex + 3);
 
   return (
     <div
@@ -494,22 +493,24 @@ export default function KaraokeSingView({
       {/* ── Lyrics display ──────────────────────────────────────────── */}
       <div
         ref={lyricsRef}
-        className="flex-1 flex flex-col items-center justify-center overflow-hidden px-4 py-8"
+        className="flex-1 overflow-y-auto px-4 py-8"
       >
-        {windowLines.length === 0 ? (
-          <p className="text-white/30 text-sm">No lyrics available for this track.</p>
+        {displayLines.length === 0 ? (
+          <div className="h-full flex items-center justify-center">
+            <p className="text-white/30 text-sm">No lyrics available for this track.</p>
+          </div>
         ) : (
           <div className="w-full max-w-2xl space-y-4 text-center">
-            {windowLines.slice(windowStart, windowEnd + 1).map((line, relIdx) => {
-              const absIdx   = windowStart + relIdx;
+            {displayLines.map((line, absIdx) => {
               const isCurrent = absIdx === activeIndex;
-              const isPrev    = absIdx < activeIndex;
+              const isPrev = absIdx < activeIndex;
               return (
                 <p
                   key={`${line.timeSeconds}-${absIdx}`}
                   ref={(el) => { lineRefs.current[absIdx] = el; }}
                   className="transition-all duration-300 leading-snug select-none"
                   style={{
+                    scrollMarginTop: "5rem",
                     fontSize: isCurrent ? "2rem" : "1.1rem",
                     fontWeight: isCurrent ? 700 : 400,
                     color: isCurrent

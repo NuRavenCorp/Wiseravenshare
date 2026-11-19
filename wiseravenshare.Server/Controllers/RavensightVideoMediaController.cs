@@ -415,8 +415,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
         VideoLibraryVideo persistedVideo;
         try
         {
-            persistedVideo = await RavensightPersistenceGuard.RunWithTimeoutAsync(
-                async ct => await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
+            persistedVideo = await _videoLibraryStore.CreateVideoAsync(new CreateVideoLibraryEntryRequest
                 {
                     UserId = userId.ToString(),
                     Title = string.IsNullOrWhiteSpace(dto.Title) ? Path.GetFileNameWithoutExtension(dto.File.FileName) : dto.Title.Trim(),
@@ -433,9 +432,7 @@ public sealed class RavensightVideoMediaController : ControllerBase
                     MusicTrackArtist = string.IsNullOrWhiteSpace(dto.MusicTrackArtist) ? null : dto.MusicTrackArtist.Trim(),
                     MusicTrackAlbum = string.IsNullOrWhiteSpace(dto.MusicTrackAlbum) ? null : dto.MusicTrackAlbum.Trim(),
                     MusicTrackGenre = string.IsNullOrWhiteSpace(dto.MusicTrackGenre) ? null : dto.MusicTrackGenre.Trim()
-                }, ct),
-                BuildFallbackVideo(userId, dto, mediaUrl, resolvedStorageMode, hasActiveSubscription),
-                TimeSpan.FromSeconds(5));
+                }, cancellationToken);
             persistenceStatus = "ready";
         }
         catch (PostgresException ex)
