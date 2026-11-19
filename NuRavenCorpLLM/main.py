@@ -4,6 +4,7 @@ NuRavenCorpLLM — front-facing conversation service for WiseRavenShare.
 Exposes the REST API that NuRavenCorpLlmChatService.cs bridges to:
   POST /api/assistant/conversations
   POST /api/assistant/conversations/{id}/messages
+  POST /v1/generate
   GET  /api/assistant/conversations/{id}
   GET  /health
 
@@ -172,6 +173,12 @@ class SendMessageRequest(BaseModel):
     text: str
     isVoice: bool = False
 
+class GenerateRequest(BaseModel):
+    prompt: str
+    max_new_tokens: int = 600
+    temperature: float = 0.3
+    response_format: str = "text"
+
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 app = FastAPI(title="NuRavenCorpLLM", version="1.0.0")
@@ -318,6 +325,49 @@ async def send_message(conversation_id: str, req: SendMessageRequest):
         "Content": reply_text,
         "createdAt": assistant_msg.created_at,
         "conversationId": conversation_id,
+    }
+
+@app.post("/v1/generate")
+async def generate(req: GenerateRequest):
+    """
+    Backward-compatible endpoint used by RavenAssistantController defaults.
+    Returns both `text` and OpenAI-like `choices[0].message.content` fields.
+    """
+    global _llm_ready
+
+    prompt = req.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required.")
+
+    if not _llm_ready:
+        ready, _ = await _probe_llm_ready()
+        _llm_ready = ready
+        if not _llm_ready:
+            raise HTTPException(status_code=503, detail="LLM backend is still initializing. Please retry shortly.")
+
+    chat_messages: list[dict[str, str]] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
+    reply_text = (await _call_llm(chat_messages)).strip()
+    if not reply_text:
+        raise HTTPException(status_code=503, detail="Unable to reach LLM backend.")
+
+    return {
+        "text": reply_text,
+        "content": reply_text,
+        "model": LLM_MODEL,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": reply_text,
+                },
+                "finish_reason": "stop",
+            }
+        ],
     }
 
 # ── Entry point ───────────────────────────────────────────────────────────────
