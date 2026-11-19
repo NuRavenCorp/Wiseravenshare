@@ -7,7 +7,7 @@ import MediaUpload from "@/components/media/MediaUpload";
 import FMRadioPage from "@/pages/FMRadioPage";
 import KaraokeExtractor from "@/components/media/KaraokeExtractor";
 import JamSessionPanel from "@/components/media/JamSessionPanel";
-import JamCalendar from "@/components/media/JamCalendar";
+import DailyPlanner from "@/components/dashboard/DailyPlanner";
 import LiveStreamPanel from "@/components/media/LiveStreamPanel";
 import RightsManager from "@/components/media/RightsManager";
 import DRMManager from "@/components/media/DRMManager";
@@ -219,7 +219,7 @@ export default function Media() {
                 <h2 className="text-xl font-semibold text-foreground">Jam Sessions</h2>
                 <p className="mt-1 text-sm text-muted-foreground">Plan upcoming sessions and connect with other musicians.</p>
               </header>
-              <JamCalendar />
+              <DailyPlanner />
               <JamSessionPanel />
             </section>
           </div>
