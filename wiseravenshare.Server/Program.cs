@@ -3315,6 +3315,13 @@ var frontendDistExists = Directory.Exists(frontendDistPath);
 var frontendIndexFile = frontendDistExists
     ? ResolvePreferredFrontendIndex(frontendDistPath)
     : "index.html";
+var frontendAssetsPath = Path.Combine(frontendDistPath, "assets");
+var latestEntryCssAsset = frontendDistExists
+    ? ResolveLatestFrontendAsset(frontendAssetsPath, "index-*.css")
+    : null;
+var latestEntryJsAsset = frontendDistExists
+    ? ResolveLatestFrontendAsset(frontendAssetsPath, "index-*.js")
+    : null;
 
 static string ResolvePreferredFrontendIndex(string distPath)
 {
@@ -3332,6 +3339,19 @@ static string ResolvePreferredFrontendIndex(string distPath)
 
     var caseInsensitive = fileNames.FirstOrDefault(name => string.Equals(name, "index.html", StringComparison.OrdinalIgnoreCase));
     return string.IsNullOrWhiteSpace(caseInsensitive) ? "index.html" : caseInsensitive;
+}
+
+static string? ResolveLatestFrontendAsset(string assetsPath, string searchPattern)
+{
+    if (string.IsNullOrWhiteSpace(assetsPath) || !Directory.Exists(assetsPath))
+    {
+        return null;
+    }
+
+    return Directory.EnumerateFiles(assetsPath, searchPattern, SearchOption.TopDirectoryOnly)
+        .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
+        .Select(Path.GetFileName)
+        .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name));
 }
 
 static bool IsSensitiveRequestPath(PathString requestPath)
@@ -3373,6 +3393,56 @@ app.Use(async (context, next) =>
     }
 
     await next();
+});
+
+app.Use(async (context, next) =>
+{
+    if (!frontendDistExists)
+    {
+        await next();
+        return;
+    }
+
+    if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+    {
+        await next();
+        return;
+    }
+
+    var requestPath = context.Request.Path.Value ?? string.Empty;
+    if (!requestPath.StartsWith("/assets/index-", StringComparison.OrdinalIgnoreCase))
+    {
+        await next();
+        return;
+    }
+
+    var relativePath = requestPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+    var absolutePath = Path.GetFullPath(Path.Combine(frontendDistPath, relativePath));
+    if (!absolutePath.StartsWith(frontendDistPath, StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    if (File.Exists(absolutePath))
+    {
+        await next();
+        return;
+    }
+
+    var fallbackAsset = requestPath.EndsWith(".css", StringComparison.OrdinalIgnoreCase)
+        ? latestEntryCssAsset
+        : requestPath.EndsWith(".js", StringComparison.OrdinalIgnoreCase)
+            ? latestEntryJsAsset
+            : null;
+
+    if (string.IsNullOrWhiteSpace(fallbackAsset))
+    {
+        await next();
+        return;
+    }
+
+    context.Response.Redirect($"/assets/{fallbackAsset}", permanent: false);
 });
 
 app.Use(async (context, next) =>

@@ -1,27 +1,30 @@
 import React, { useState, useEffect } from "react";
 import { apiClient } from "@/api/client";
 import { useAuth } from "@/lib/AuthContext";
+import { useNavigate } from "react-router-dom";
 import {
   Award,
   TrendingUp,
   Loader2,
   Coins,
   Zap,
+  ArrowUpRight,
 } from "lucide-react";
 import { getTier, getNextTier } from "@/lib/wiseCoinTiers";
 
 const EARNING_RATES = [
-  { action: "Publish a post", rate: 5, icon: "✍️", category: "Productivity" },
-  { action: "Write a comment", rate: 2, icon: "💬", category: "Participation" },
-  { action: "Like a post", rate: 2, icon: "❤️", category: "Participation" },
-  { action: "Gain a follower", rate: 3, icon: "👥", category: "Promotion" },
-  { action: "Get a share", rate: 3, icon: "🔄", category: "Promotion" },
-  { action: "High truth score", rate: "up to 100", icon: "🛡️", category: "Value" },
-  { action: "Invite a friend who joins", rate: 25, icon: "📨", category: "Promotion" },
+  { action: "Publish a post", rate: 5, icon: "✍️", category: "Productivity", targetSection: "create" },
+  { action: "Write a comment", rate: 2, icon: "💬", category: "Participation", targetPath: "/social" },
+  { action: "Like a post", rate: 2, icon: "❤️", category: "Participation", targetPath: "/social" },
+  { action: "Gain a follower", rate: 3, icon: "👥", category: "Promotion", targetPath: "/social" },
+  { action: "Get a share", rate: 3, icon: "🔄", category: "Promotion", targetPath: "/social" },
+  { action: "High truth score", rate: "up to 100", icon: "🛡️", category: "Value", targetPath: "/truthseeker" },
+  { action: "Invite a friend who joins", rate: 25, icon: "📨", category: "Promotion", targetSection: "invite" },
 ];
 
-export default function IncentivesSection() {
+export default function IncentivesSection({ onNavigateSection }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [balance, setBalance] = useState(0);
   const [transactions, setTransactions] = useState([]);
   const [badges, setBadges] = useState([]);
@@ -54,6 +57,15 @@ export default function IncentivesSection() {
   const tier = getTier(balance);
   const nextTier = getNextTier(balance);
   const earnedBadgeIds = new Set(userBadges.map((ub) => ub.badge_id));
+  const launchAction = (entry) => {
+    if (entry.targetSection && typeof onNavigateSection === "function") {
+      onNavigateSection(entry.targetSection);
+      return;
+    }
+    if (entry.targetPath) {
+      navigate(entry.targetPath);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -105,17 +117,20 @@ export default function IncentivesSection() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {EARNING_RATES.map((e, i) => (
-            <div
+            <button
               key={i}
-              className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card"
+              type="button"
+              onClick={() => launchAction(e)}
+              className="w-full text-left flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:border-primary/40 hover:bg-primary/5 transition-colors"
             >
               <span className="text-lg">{e.icon}</span>
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-foreground truncate">{e.action}</p>
                 <p className="text-xs text-muted-foreground">{e.category}</p>
               </div>
+              <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground" />
               <p className="text-sm font-mono text-accent">+{e.rate}</p>
-            </div>
+            </button>
           ))}
         </div>
       </div>

@@ -81,7 +81,7 @@ export default function Dashboard() {
             {active === "scratchboard" && <ScratchboardSection />}
             {active === "teams" && <TeamsSection />}
             {active === "invite" && <InviteSection />}
-            {active === "incentives" && <IncentivesSection />}
+            {active === "incentives" && <IncentivesSection onNavigateSection={setActive} />}
             {active === "analytics" && <AnalyticsSection />}
             {active === "content" && <ContentPerformance />}
             {active === "subscriptions" && <SubscriptionPlans />}

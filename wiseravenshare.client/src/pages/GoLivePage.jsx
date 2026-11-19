@@ -32,6 +32,19 @@ function buildHub(path) {
 
 const REACTION_EMOJIS = ["👍", "❤️", "🔥", "😂", "🎉", "🎤", "🎶", "⭐"];
 
+function generateStreamId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  // RFC4122-ish fallback for older runtimes
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const val = char === "x" ? rand : ((rand & 0x3) | 0x8);
+    return val.toString(16);
+  });
+}
+
 // ── HLS Video ──────────────────────────────────────────────────────────────────
 function HlsVideo({ src, className = "" }) {
   const videoRef = useRef(null);
@@ -230,7 +243,7 @@ export default function GoLivePage() {
   const startRecording = useCallback(async () => {
     if (!mediaStreamRef.current) return;
 
-    const sId = `wrs-${roomId.toLowerCase()}-${Date.now()}`;
+    let sId = generateStreamId();
     currentStreamIdRef.current = sId;
     chunksRef.current = [];
     setUploadErr("");
@@ -239,7 +252,12 @@ export default function GoLivePage() {
     setRecPhase("starting");
 
     try {
-      await apiClient.live.start(sId, { title: `Go Live — ${roomId}`, is_audio_only: false });
+      const started = await apiClient.live.start(sId, { title: `Go Live — ${roomId}`, is_audio_only: false });
+      const canonicalId = started?.stream_id || started?.streamId || "";
+      if (canonicalId && typeof canonicalId === "string") {
+        sId = canonicalId;
+        currentStreamIdRef.current = canonicalId;
+      }
     } catch { /* non-fatal; recording still works */ }
 
     const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
