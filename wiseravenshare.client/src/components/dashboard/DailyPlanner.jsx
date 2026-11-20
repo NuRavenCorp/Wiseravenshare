@@ -101,21 +101,12 @@ export default function DailyPlanner() {
 
   const handlePlannerAuthError = useCallback((err) => {
     if (isAuthError(err)) {
-      if (isAuthenticated) {
-        // AuthContext says user IS logged in. The planner got a 401 likely due to
-        // a stale/refreshing token. Attempt one silent token refresh through the
-        // shared auth context — this re-validates the session without any visible
-        // disruption. The 30-second retry interval will then reload appointments.
-        apiClient.auth.tryRefreshToken().then(() => {
-          checkUserAuth(false);
-        }).catch(() => {});
-      }
       setAuthFailed(true);
       setLoadError(authExpiredMessage);
       return true;
     }
     return false;
-  }, [isAuthError, authExpiredMessage, isAuthenticated, checkUserAuth]);
+  }, [isAuthError, authExpiredMessage]);
 
   const queueSessionSave = useCallback((overrides = {}) => {
     if (!sessionHydrated) return;
@@ -256,9 +247,10 @@ export default function DailyPlanner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
 
-  // ── Retry while auth-failed: attempt reload every 30s ─────────────────────
+  // ── Retry while auth-failed: attempt reload every 30s ONLY if user IS authenticated ─────
   useEffect(() => {
-    if (!authFailed) return;
+    // If the user is not authenticated at all, don't poll — it would just flood 401s.
+    if (!authFailed || !isAuthenticated) return;
     const interval = setInterval(() => {
       const api = calendarRef.current?.getApi();
       if (!api) return;
@@ -276,7 +268,7 @@ export default function DailyPlanner() {
       })();
     }, 30_000);
     return () => clearInterval(interval);
-  }, [authFailed, clearAuthBanner]);
+  }, [authFailed, isAuthenticated, clearAuthBanner]);
 
   const triggerAlert = (ev) => {
     setActiveAlert(ev);
@@ -321,30 +313,32 @@ export default function DailyPlanner() {
       });
     } catch (err) {
       if (handlePlannerAuthError(err)) {
-        // Schedule one automatic retry after the refresh back-off window clears
-        // so the calendar recovers silently if the token refreshes in time.
-        if (authRetryTimeoutRef.current) clearTimeout(authRetryTimeoutRef.current);
-        authRetryTimeoutRef.current = setTimeout(() => {
-          authRetryTimeoutRef.current = null;
-          void (async () => {
-            try {
-              const retryData = await apiClient.requestJson(
-                `/api/appointments?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
-              );
-              setEvents(Array.isArray(retryData) ? retryData : []);
-              setLoadError("");
-              clearAuthBanner();
-            } catch {
-              // Still failing — the persistent banner will guide the user.
-            }
-          })();
-        }, 20_000);
+        // Only schedule a silent retry if the user IS authenticated — a genuine
+        // 401 for an unauthenticated user should not cause an infinite retry loop.
+        if (isAuthenticated) {
+          if (authRetryTimeoutRef.current) clearTimeout(authRetryTimeoutRef.current);
+          authRetryTimeoutRef.current = setTimeout(() => {
+            authRetryTimeoutRef.current = null;
+            void (async () => {
+              try {
+                const retryData = await apiClient.requestJson(
+                  `/api/appointments?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
+                );
+                setEvents(Array.isArray(retryData) ? retryData : []);
+                setLoadError("");
+                clearAuthBanner();
+              } catch {
+                // Still failing — the persistent banner will guide the user.
+              }
+            })();
+          }, 20_000);
+        }
         return;
       }
       setLoadError(err?.message || "Failed to load appointments.");
       console.error("Failed to load appointments:", err);
     }
-  }, [clearAuthBanner, handlePlannerAuthError, queueSessionSave]);
+  }, [clearAuthBanner, handlePlannerAuthError, isAuthenticated, queueSessionSave]);
 
   // ── Drag-drop / resize ────────────────────────────────────────────────────
   const handleEventChange = async (changeInfo) => {
