@@ -407,13 +407,7 @@ public sealed class AuthV2Service : IAuthV2Service
 
     private string GetJwtKey()
     {
-        var key = ResolveJwtKeyFromConfiguration();
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            throw new InvalidOperationException("Authentication:Jwt:Key or JWT_highentropykey is not configured.");
-        }
-
-        return key;
+        return UnifiedAuthExtensions.ResolveJwtKey(_configuration);
     }
 
     private string ResolveJwtKeyFromConfiguration()

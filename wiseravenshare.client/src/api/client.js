@@ -730,33 +730,41 @@ export const apiClient = {
     async me() {
       const verifyWithToken = async (token) => requestJson("/api/auth/verify", {
         method: "POST",
-        body: JSON.stringify({ token }),
+        body: JSON.stringify(token ? { token } : {}),
       });
 
       let token = readStoredToken();
-      if (!token) {
-        throw new Error("Not authenticated.");
+      let data = null;
+
+      if (token) {
+        try {
+          data = await verifyWithToken(token);
+        } catch (error) {
+          if (error?.status === 401 || error?.status === 403) {
+            const refreshed = await refreshAccessToken();
+            if (refreshed) {
+              token = readStoredToken();
+              if (token) {
+                try {
+                  data = await verifyWithToken(token);
+                } catch {
+                  // Fall through to cookie check
+                }
+              }
+            }
+          } else {
+            throw error;
+          }
+        }
       }
 
-      let data;
-      try {
-        data = await verifyWithToken(token);
-      } catch (error) {
-        if (error?.status !== 401 && error?.status !== 403) {
-          throw error;
+      // If token verification was not successful, check active cookie session
+      if (!data) {
+        try {
+          data = await verifyWithToken(null);
+        } catch (cookieErr) {
+          throw cookieErr;
         }
-
-        const refreshed = await refreshAccessToken();
-        if (!refreshed) {
-          throw error;
-        }
-
-        token = readStoredToken();
-        if (!token) {
-          throw new Error("Not authenticated.");
-        }
-
-        data = await verifyWithToken(token);
       }
 
       const user = data?.user || null;

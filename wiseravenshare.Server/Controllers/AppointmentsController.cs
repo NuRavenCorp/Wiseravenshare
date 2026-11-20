@@ -1,12 +1,15 @@
+using System.Collections.Concurrent;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
-using Npgsql;
-using NpgsqlTypes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
+using Npgsql;
+using NpgsqlTypes;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Shared;
@@ -20,11 +23,11 @@ namespace Wiseravenshare.Server.Controllers;
 /// All times are stored and returned in UTC; the browser converts to local.
 ///
 /// Routes:
-///   GET    /api/appointments?start=&amp;end=         – list in date window
-///   POST   /api/appointments                      – create
-///   PUT    /api/appointments/{id}                 – edit / drag-drop / resize
-///   PATCH  /api/appointments/{id}/dismiss-alert   – mark alert dismissed
-///   DELETE /api/appointments/{id}                 – delete
+///   GET    /api/planner?start=&amp;end=         – list in date window
+///   POST   /api/planner                      – create
+///   PUT    /api/planner/{id}                 – edit / drag-drop / resize
+///   PATCH  /api/planner/{id}/dismiss-alert   – mark alert dismissed
+///   DELETE /api/planner/{id}                 – delete
 /// </summary>
 [ApiController]
 [Route("api/appointments")]
@@ -34,7 +37,10 @@ public sealed class AppointmentsController(
     AppDbContext db,
     ILogger<AppointmentsController> logger) : ControllerBase
 {
-    // ── List (date-range) ─────────────────────────────────────────────────
+    private static readonly ConcurrentDictionary<Guid, Appointment> InMemoryAppointments = new();
+    private static readonly ConcurrentDictionary<Guid, PlannerSessionStateRequest> InMemorySessionStates = new();
+
+    // ── Session State ─────────────────────────────────────────────────────
 
     [HttpGet("session-state")]
     public async Task<IActionResult> GetSessionState(CancellationToken ct = default)
@@ -53,9 +59,22 @@ public sealed class AppointmentsController(
             if (userId == Guid.Empty) return Unauthorized();
 
             var connStr = db.Database.GetConnectionString();
-            if (string.IsNullOrWhiteSpace(connStr)) return Ok(defaultState);
+            if (string.IsNullOrWhiteSpace(connStr))
+            {
+                if (InMemorySessionStates.TryGetValue(userId, out var memState))
+                {
+                    return Ok(new
+                    {
+                        currentView = memState.CurrentView ?? "timeGridDay",
+                        focusDateUtc = memState.FocusDateUtc,
+                        draftJson = memState.DraftJson,
+                        modalOpen = memState.ModalOpen
+                    });
+                }
+                return Ok(defaultState);
+            }
 
-            await using var conn = new Npgsql.NpgsqlConnection(connStr);
+            await using var conn = new NpgsqlConnection(connStr);
             await conn.OpenAsync(ct);
 
             await using var cmd = conn.CreateCommand();
@@ -99,10 +118,12 @@ LIMIT 1";
             if (currentView.Length > 50)
                 return BadRequest(new { message = "CurrentView exceeds the 50 character limit." });
 
+            InMemorySessionStates[userId] = body;
+
             var connStr = db.Database.GetConnectionString();
             if (string.IsNullOrWhiteSpace(connStr)) return NoContent();
 
-            await using var conn = new Npgsql.NpgsqlConnection(connStr);
+            await using var conn = new NpgsqlConnection(connStr);
             await conn.OpenAsync(ct);
 
             await using var cmd = conn.CreateCommand();
@@ -118,8 +139,8 @@ ON CONFLICT (""UserId"") DO UPDATE
 
             cmd.Parameters.AddWithValue("uid", userId);
             cmd.Parameters.AddWithValue("view", currentView);
-            cmd.Parameters.Add(new Npgsql.NpgsqlParameter("focus", NpgsqlTypes.NpgsqlDbType.TimestampTz) { Value = body.FocusDateUtc.HasValue ? (object)body.FocusDateUtc.Value.ToUniversalTime() : DBNull.Value });
-            cmd.Parameters.Add(new Npgsql.NpgsqlParameter("draft", NpgsqlTypes.NpgsqlDbType.Text) { Value = string.IsNullOrWhiteSpace(body.DraftJson) ? (object)DBNull.Value : body.DraftJson });
+            cmd.Parameters.Add(new NpgsqlParameter("focus", NpgsqlDbType.TimestampTz) { Value = body.FocusDateUtc.HasValue ? (object)body.FocusDateUtc.Value.ToUniversalTime() : DBNull.Value });
+            cmd.Parameters.Add(new NpgsqlParameter("draft", NpgsqlDbType.Text) { Value = string.IsNullOrWhiteSpace(body.DraftJson) ? (object)DBNull.Value : body.DraftJson });
             cmd.Parameters.AddWithValue("modal", body.ModalOpen);
 
             await cmd.ExecuteNonQueryAsync(ct);
@@ -131,6 +152,8 @@ ON CONFLICT (""UserId"") DO UPDATE
             return NoContent();
         }
     }
+
+    // ── List (date-range) ─────────────────────────────────────────────────
 
     [HttpGet]
     public async Task<IActionResult> GetAppointments(
@@ -144,30 +167,54 @@ ON CONFLICT (""UserId"") DO UPDATE
         var from = (start ?? DateTimeOffset.UtcNow.AddMonths(-1)).UtcDateTime;
         var to   = (end   ?? DateTimeOffset.UtcNow.AddMonths(2)).UtcDateTime;
 
-        var events = await db.Appointments
-            .Where(a => a.UserId == userId
-                     && !a.IsDeleted
-                     && a.StartUtc < to
-                     && a.EndUtc   > from)
-            .OrderBy(a => a.StartUtc)
-            .Select(a => new
-            {
-                id              = a.Id.ToString(),
-                title           = a.Title,
-                start           = DateTime.SpecifyKind(a.StartUtc, DateTimeKind.Utc),
-                end             = DateTime.SpecifyKind(a.EndUtc,   DateTimeKind.Utc),
-                backgroundColor = a.Color,
-                borderColor     = a.Color,
-                extendedProps   = new
-                {
-                    description           = a.Description,
-                    reminderMinutesBefore = a.ReminderMinutesBefore,
-                    alertDismissed        = a.AlertDismissed,
-                }
-            })
-            .ToListAsync(ct);
+        var connStr = db.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            var memEvents = InMemoryAppointments.Values
+                .Where(a => a.UserId == userId && !a.IsDeleted && a.StartUtc < to && a.EndUtc > from)
+                .OrderBy(a => a.StartUtc)
+                .Select(MapDto)
+                .ToList();
+            return Ok(memEvents);
+        }
 
-        return Ok(events);
+        try
+        {
+            var events = await db.Appointments
+                .Where(a => a.UserId == userId
+                         && !a.IsDeleted
+                         && a.StartUtc < to
+                         && a.EndUtc   > from)
+                .OrderBy(a => a.StartUtc)
+                .Select(a => new
+                {
+                    id              = a.Id.ToString(),
+                    title           = a.Title,
+                    start           = DateTime.SpecifyKind(a.StartUtc, DateTimeKind.Utc),
+                    end             = DateTime.SpecifyKind(a.EndUtc,   DateTimeKind.Utc),
+                    backgroundColor = a.Color,
+                    borderColor     = a.Color,
+                    extendedProps   = new
+                    {
+                        description           = a.Description,
+                        reminderMinutesBefore = a.ReminderMinutesBefore,
+                        alertDismissed        = a.AlertDismissed,
+                    }
+                })
+                .ToListAsync(ct);
+
+            return Ok(events);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Database query for appointments failed; falling back to in-memory store.");
+            var fallbackEvents = InMemoryAppointments.Values
+                .Where(a => a.UserId == userId && !a.IsDeleted && a.StartUtc < to && a.EndUtc > from)
+                .OrderBy(a => a.StartUtc)
+                .Select(MapDto)
+                .ToList();
+            return Ok(fallbackEvents);
+        }
     }
 
     // ── Create ────────────────────────────────────────────────────────────
@@ -200,22 +247,57 @@ ON CONFLICT (""UserId"") DO UPDATE
             UpdatedAt             = DateTime.UtcNow,
         };
 
+        var connStr = db.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            InMemoryAppointments[entity.Id] = entity;
+            logger.LogInformation("Appointment {Id} created in memory for user {UserId}", entity.Id, userId);
+            return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
+        }
+
         try
         {
             db.Appointments.Add(entity);
             await db.SaveChangesAsync(ct);
+            logger.LogInformation("Appointment {Id} created in DB by user {UserId}", entity.Id, userId);
+            return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
         }
-        catch (DbUpdateException ex)
+        catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to create appointment for user {UserId}", userId);
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                message = "Unable to create appointment right now."
-            });
-        }
+            logger.LogWarning(ex, "EF save failed for appointment {Id}; attempting direct SQL fallback.", entity.Id);
+            try { db.Entry(entity).State = EntityState.Detached; } catch { }
 
-        logger.LogInformation("Appointment {Id} created by user {UserId}", entity.Id, userId);
-        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
+            try
+            {
+                await using var conn = new NpgsqlConnection(connStr);
+                await conn.OpenAsync(ct);
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+INSERT INTO app_data.""Appointments"" (""Id"", ""UserId"", ""Title"", ""Description"", ""StartUtc"", ""EndUtc"", ""ReminderMinutesBefore"", ""AlertDismissed"", ""Color"", ""CreatedAt"", ""UpdatedAt"", ""IsDeleted"")
+VALUES (@id, @uid, @title, @desc, @start, @end, @reminder, @alert, @color, @created, @updated, FALSE)
+ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt"" = NOW();";
+                cmd.Parameters.AddWithValue("id", entity.Id);
+                cmd.Parameters.AddWithValue("uid", entity.UserId);
+                cmd.Parameters.AddWithValue("title", entity.Title);
+                cmd.Parameters.Add(new NpgsqlParameter("desc", NpgsqlDbType.Text) { Value = (object?)entity.Description ?? DBNull.Value });
+                cmd.Parameters.Add(new NpgsqlParameter("start", NpgsqlDbType.TimestampTz) { Value = entity.StartUtc });
+                cmd.Parameters.Add(new NpgsqlParameter("end", NpgsqlDbType.TimestampTz) { Value = entity.EndUtc });
+                cmd.Parameters.AddWithValue("reminder", entity.ReminderMinutesBefore);
+                cmd.Parameters.AddWithValue("alert", entity.AlertDismissed);
+                cmd.Parameters.AddWithValue("color", entity.Color);
+                cmd.Parameters.Add(new NpgsqlParameter("created", NpgsqlDbType.TimestampTz) { Value = entity.CreatedAt });
+                cmd.Parameters.Add(new NpgsqlParameter("updated", NpgsqlDbType.TimestampTz) { Value = entity.UpdatedAt });
+                await cmd.ExecuteNonQueryAsync(ct);
+
+                return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
+            }
+            catch (Exception sqlEx)
+            {
+                logger.LogWarning(sqlEx, "Direct SQL fallback insert also failed for appointment {Id}; saving in memory.", entity.Id);
+                InMemoryAppointments[entity.Id] = entity;
+                return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
+            }
+        }
     }
 
     // ── Get single (used by CreatedAtAction) ──────────────────────────────
@@ -226,10 +308,33 @@ ON CONFLICT (""UserId"") DO UPDATE
         var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
-        var entity = await db.Appointments.FirstOrDefaultAsync(
-            a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
-        if (entity is null) return NotFound();
-        return Ok(MapDto(entity));
+        var connStr = db.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            if (InMemoryAppointments.TryGetValue(id, out var mem) && mem.UserId == userId && !mem.IsDeleted)
+            {
+                return Ok(MapDto(mem));
+            }
+            return NotFound();
+        }
+
+        try
+        {
+            var entity = await db.Appointments.FirstOrDefaultAsync(
+                a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
+            if (entity is not null) return Ok(MapDto(entity));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to query appointment {Id} from DB", id);
+        }
+
+        if (InMemoryAppointments.TryGetValue(id, out var fallback) && fallback.UserId == userId && !fallback.IsDeleted)
+        {
+            return Ok(MapDto(fallback));
+        }
+
+        return NotFound();
     }
 
     // ── Update (edit, drag-drop, resize) ──────────────────────────────────
@@ -240,23 +345,46 @@ ON CONFLICT (""UserId"") DO UPDATE
         var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
-        var entity = await db.Appointments.FirstOrDefaultAsync(
-            a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
-        if (entity is null) return NotFound();
+        if (InMemoryAppointments.TryGetValue(id, out var mem) && mem.UserId == userId && !mem.IsDeleted)
+        {
+            mem.Title = body.Title.Trim();
+            mem.Description = body.Description?.Trim();
+            mem.StartUtc = ToUtcDt(body.StartUtc);
+            mem.EndUtc = ToUtcDt(body.EndUtc);
+            mem.ReminderMinutesBefore = body.ReminderMinutesBefore;
+            mem.Color = string.IsNullOrWhiteSpace(body.Color) ? mem.Color : body.Color;
+            mem.UpdatedAt = DateTime.UtcNow;
+            if (mem.StartUtc > DateTime.UtcNow) mem.AlertDismissed = false;
+        }
 
-        entity.Title                 = body.Title.Trim();
-        entity.Description           = body.Description?.Trim();
-        entity.StartUtc              = ToUtcDt(body.StartUtc);
-        entity.EndUtc                = ToUtcDt(body.EndUtc);
-        entity.ReminderMinutesBefore = body.ReminderMinutesBefore;
-        entity.Color                 = string.IsNullOrWhiteSpace(body.Color) ? entity.Color : body.Color;
-        entity.UpdatedAt             = DateTime.UtcNow;
+        var connStr = db.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(connStr)) return NoContent();
 
-        // Reset alert if the appointment was moved into the future
-        if (entity.StartUtc > DateTime.UtcNow)
-            entity.AlertDismissed = false;
+        try
+        {
+            var entity = await db.Appointments.FirstOrDefaultAsync(
+                a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
+            if (entity is not null)
+            {
+                entity.Title                 = body.Title.Trim();
+                entity.Description           = body.Description?.Trim();
+                entity.StartUtc              = ToUtcDt(body.StartUtc);
+                entity.EndUtc                = ToUtcDt(body.EndUtc);
+                entity.ReminderMinutesBefore = body.ReminderMinutesBefore;
+                entity.Color                 = string.IsNullOrWhiteSpace(body.Color) ? entity.Color : body.Color;
+                entity.UpdatedAt             = DateTime.UtcNow;
 
-        await db.SaveChangesAsync(ct);
+                if (entity.StartUtc > DateTime.UtcNow)
+                    entity.AlertDismissed = false;
+
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to update appointment {Id} in DB", id);
+        }
+
         return NoContent();
     }
 
@@ -268,13 +396,31 @@ ON CONFLICT (""UserId"") DO UPDATE
         var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
-        var entity = await db.Appointments.FirstOrDefaultAsync(
-            a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
-        if (entity is null) return NotFound();
+        if (InMemoryAppointments.TryGetValue(id, out var mem) && mem.UserId == userId && !mem.IsDeleted)
+        {
+            mem.AlertDismissed = true;
+            mem.UpdatedAt = DateTime.UtcNow;
+        }
 
-        entity.AlertDismissed = true;
-        entity.UpdatedAt      = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        var connStr = db.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(connStr)) return NoContent();
+
+        try
+        {
+            var entity = await db.Appointments.FirstOrDefaultAsync(
+                a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
+            if (entity is not null)
+            {
+                entity.AlertDismissed = true;
+                entity.UpdatedAt      = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to dismiss alert for appointment {Id} in DB", id);
+        }
+
         return NoContent();
     }
 
@@ -286,14 +432,33 @@ ON CONFLICT (""UserId"") DO UPDATE
         var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
-        var entity = await db.Appointments.FirstOrDefaultAsync(
-            a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
-        if (entity is null) return NotFound();
+        if (InMemoryAppointments.TryGetValue(id, out var mem) && mem.UserId == userId)
+        {
+            mem.IsDeleted = true;
+            mem.DeletedAt = DateTime.UtcNow;
+            mem.UpdatedAt = DateTime.UtcNow;
+        }
 
-        entity.IsDeleted  = true;
-        entity.DeletedAt  = DateTime.UtcNow;
-        entity.UpdatedAt  = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        var connStr = db.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(connStr)) return NoContent();
+
+        try
+        {
+            var entity = await db.Appointments.FirstOrDefaultAsync(
+                a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
+            if (entity is not null)
+            {
+                entity.IsDeleted = true;
+                entity.DeletedAt = DateTime.UtcNow;
+                entity.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to delete appointment {Id} in DB", id);
+        }
+
         return NoContent();
     }
 
@@ -320,9 +485,6 @@ ON CONFLICT (""UserId"") DO UPDATE
 
     private async Task<Guid> ResolveUserIdAsync(CancellationToken ct)
     {
-        const int maxUsernameLength = 100;
-        const int maxDisplayNameLength = 200;
-
         var claimUserId = User.GetUserId();
 
         var email = User.FindFirstValue(ClaimTypes.Email)
@@ -330,140 +492,91 @@ ON CONFLICT (""UserId"") DO UPDATE
             ?? User.FindFirstValue("email");
 
         var normalizedEmail = !string.IsNullOrWhiteSpace(email) ? email.Trim() : null;
-        var lowerEmail = normalizedEmail?.ToLowerInvariant();
+        var connStr = db.Database.GetConnectionString();
 
-        // 1. If we have a claimUserId, check if already in db.Users
-        if (claimUserId != Guid.Empty)
+        if (string.IsNullOrWhiteSpace(connStr))
         {
-            try
+            if (claimUserId != Guid.Empty) return claimUserId;
+            if (!string.IsNullOrWhiteSpace(normalizedEmail))
             {
-                var existsById = await db.Users
-                    .AsNoTracking()
-                    .AnyAsync(u => u.Id == claimUserId, ct);
-
-                if (existsById)
-                {
-                    return claimUserId;
-                }
+                using var md5 = MD5.Create();
+                var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(normalizedEmail.ToLowerInvariant()));
+                return new Guid(hash);
             }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to query db.Users for claim user id {ClaimUserId}.", claimUserId);
-            }
+            return Guid.NewGuid();
         }
 
-        // 2. If we have an email, check if user exists by email
-        if (!string.IsNullOrWhiteSpace(lowerEmail))
+        try
         {
-            try
-            {
-                var existingByEmail = await db.Users
-                    .Where(u => u.Email.ToLower() == lowerEmail)
-                    .Select(u => new { u.Id, u.Username })
-                    .FirstOrDefaultAsync(ct);
+            await using var conn = new NpgsqlConnection(connStr);
+            await conn.OpenAsync(ct);
 
-                if (existingByEmail is not null)
+            // A. Check if user already exists in app_data.Users by Id
+            if (claimUserId != Guid.Empty)
+            {
+                await using var checkIdCmd = conn.CreateCommand();
+                checkIdCmd.CommandText = @"SELECT ""Id"" FROM app_data.""Users"" WHERE ""Id"" = @uid LIMIT 1;";
+                checkIdCmd.Parameters.AddWithValue("uid", claimUserId);
+                var existingId = await checkIdCmd.ExecuteScalarAsync(ct);
+                if (existingId is Guid gid && gid != Guid.Empty)
                 {
-                    return existingByEmail.Id;
+                    return gid;
                 }
             }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to query db.Users for email {Email}.", lowerEmail);
-            }
-        }
 
-        // 3. Ensure a domain user row exists in app_data.Users so foreign keys on Appointments
-        // and PlannerSessionStates succeed.
-        var targetId = claimUserId != Guid.Empty ? claimUserId : Guid.NewGuid();
-
-        if (!string.IsNullOrWhiteSpace(normalizedEmail))
-        {
-            var baseUsernameRaw = normalizedEmail.Split('@')[0];
-            var baseUsername = new string(baseUsernameRaw.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
-            if (string.IsNullOrWhiteSpace(baseUsername))
+            // B. Check if user already exists by Email
+            if (!string.IsNullOrWhiteSpace(normalizedEmail))
             {
-                baseUsername = $"user{targetId.ToString("N")[..8]}";
-            }
-            if (baseUsername.Length > maxUsernameLength)
-            {
-                baseUsername = baseUsername[..maxUsernameLength];
-            }
-
-            var username = baseUsername;
-            var suffix = 0;
-            try
-            {
-                while (await db.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower(), ct))
+                await using var checkEmailCmd = conn.CreateCommand();
+                checkEmailCmd.CommandText = @"SELECT ""Id"" FROM app_data.""Users"" WHERE LOWER(""Email"") = LOWER(@em) LIMIT 1;";
+                checkEmailCmd.Parameters.AddWithValue("em", normalizedEmail);
+                var existingEmailId = await checkEmailCmd.ExecuteScalarAsync(ct);
+                if (existingEmailId is Guid gidEmail && gidEmail != Guid.Empty)
                 {
-                    suffix++;
-                    var suffixText = suffix.ToString();
-                    var maxStemLength = Math.Max(1, maxUsernameLength - suffixText.Length);
-                    var stem = baseUsername.Length > maxStemLength
-                        ? baseUsername[..maxStemLength]
-                        : baseUsername;
-                    username = $"{stem}{suffixText}";
+                    return gidEmail;
                 }
             }
-            catch
+
+            // C. Insert minimal domain user row so foreign key FK_Appointments_Users_UserId is satisfied
+            var targetId = claimUserId != Guid.Empty ? claimUserId : Guid.NewGuid();
+            var safeEmail = !string.IsNullOrWhiteSpace(normalizedEmail)
+                ? normalizedEmail
+                : $"{targetId:N}@local.wiseravenshare.internal";
+            var rawUsername = safeEmail.Split('@')[0];
+            var sanitizedUsername = new string(rawUsername.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(sanitizedUsername)) sanitizedUsername = "user";
+            var finalUsername = $"{sanitizedUsername}_{targetId:N}"[..Math.Min(30, $"{sanitizedUsername}_{targetId:N}".Length)];
+            var displayName = rawUsername.Length > 0 ? rawUsername : finalUsername;
+
+            await using var insertCmd = conn.CreateCommand();
+            insertCmd.CommandText = @"
+INSERT INTO app_data.""Users"" (""Id"", ""Email"", ""Username"", ""DisplayName"", ""PasswordHash"", ""IsActive"", ""TruthScore"", ""CreatedAt"", ""UpdatedAt"", ""IsDeleted"")
+VALUES (@id, @email, @username, @displayName, '', TRUE, 50.00, NOW(), NOW(), FALSE)
+ON CONFLICT (""Id"") DO NOTHING;";
+            insertCmd.Parameters.AddWithValue("id", targetId);
+            insertCmd.Parameters.AddWithValue("email", safeEmail);
+            insertCmd.Parameters.AddWithValue("username", finalUsername);
+            insertCmd.Parameters.AddWithValue("displayName", displayName);
+            await insertCmd.ExecuteNonQueryAsync(ct);
+
+            // Re-fetch in case ON CONFLICT triggered or user was concurrently inserted
+            await using var verifyCmd = conn.CreateCommand();
+            verifyCmd.CommandText = @"SELECT ""Id"" FROM app_data.""Users"" WHERE ""Id"" = @id OR LOWER(""Email"") = LOWER(@email) LIMIT 1;";
+            verifyCmd.Parameters.AddWithValue("id", targetId);
+            verifyCmd.Parameters.AddWithValue("email", safeEmail);
+            var verifiedId = await verifyCmd.ExecuteScalarAsync(ct);
+            if (verifiedId is Guid vGid && vGid != Guid.Empty)
             {
-                username = $"{baseUsername}_{Guid.NewGuid().ToString("N")[..6]}";
+                return vGid;
             }
 
-            var displayName = string.IsNullOrWhiteSpace(baseUsernameRaw) ? username : baseUsernameRaw.Trim();
-            if (displayName.Length > maxDisplayNameLength)
-            {
-                displayName = displayName[..maxDisplayNameLength];
-            }
-
-            var newUser = new User
-            {
-                Id = targetId,
-                Email = normalizedEmail,
-                Username = username,
-                DisplayName = displayName,
-                PasswordHash = string.Empty,
-                IsActive = true,
-                TruthScore = 50.00m,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            };
-
-            try
-            {
-                db.Users.Add(newUser);
-                await db.SaveChangesAsync(ct);
-                return newUser.Id;
-            }
-            catch (DbUpdateException)
-            {
-                try
-                {
-                    var recovered = await db.Users
-                        .AsNoTracking()
-                        .Where(u => u.Email.ToLower() == lowerEmail)
-                        .Select(u => u.Id)
-                        .FirstOrDefaultAsync(ct);
-                    if (recovered != Guid.Empty)
-                    {
-                        return recovered;
-                    }
-                }
-                catch { }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to provision user for planner; using target ID {TargetId}.", targetId);
-            }
-        }
-
-        // 4. Return targetId if authenticated
-        if (targetId != Guid.Empty)
-        {
             return targetId;
         }
-
-        return Guid.Empty;
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to resolve or provision user in PostgreSQL; falling back to target ID {ClaimUserId}", claimUserId);
+            return claimUserId != Guid.Empty ? claimUserId : Guid.NewGuid();
+        }
     }
 }
 

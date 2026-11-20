@@ -437,60 +437,102 @@ public class AuthController : ControllerBase
             }
         }
 
-        if (string.IsNullOrWhiteSpace(providedToken))
+        // 1. If a JWT token was provided, validate it
+        if (!string.IsNullOrWhiteSpace(providedToken))
         {
-            return Unauthorized(new { valid = false, message = "Token is required." });
+            var tokenHandler = new JwtSecurityTokenHandler();
+            try
+            {
+                var claimsPrincipal = tokenHandler.ValidateToken(providedToken, BuildTokenValidationParameters(), out _);
+                var email = claimsPrincipal.FindFirstValue(ClaimTypes.Email)
+                    ?? claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Email)
+                    ?? claimsPrincipal.FindFirstValue("email");
+
+                if (!string.IsNullOrWhiteSpace(email))
+                {
+                    if (!_userStore.TryGetByEmail(email, out var user) || user is null)
+                    {
+                        var nameFromClaims = claimsPrincipal.FindFirstValue(ClaimTypes.Name)
+                            ?? claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Name)
+                            ?? claimsPrincipal.FindFirstValue("name")
+                            ?? email.Split('@')[0];
+                        var subFromClaims = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier)
+                            ?? claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                            ?? claimsPrincipal.FindFirstValue("sub")
+                            ?? string.Empty;
+                        user = _userStore.UpsertFromToken(subFromClaims, email, nameFromClaims);
+                    }
+
+                    if (!IsAuthenticationAllowed(user.Email))
+                    {
+                        return StatusCode(StatusCodes.Status403Forbidden, new { valid = false, message = "Access requires admin approval or an active team invite." });
+                    }
+
+                    var domainUserId = await EnsureDomainUserAsync(user);
+                    var responseUser = UserStore.ToResponse(user);
+                    responseUser.Id = domainUserId.ToString("N");
+                    var accessScope = ResolveAccessScope(user.Email);
+                    var teamRole = ResolveTeamRole(user.Email);
+                    return Ok(new
+                    {
+                        valid = true,
+                        user = responseUser,
+                        adminPassActive = string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase),
+                        accessScope,
+                        teamRole
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Provided token validation failed; falling back to HttpContext identity check.");
+            }
         }
 
-        var tokenHandler = new JwtSecurityTokenHandler();
-
-        try
+        // 2. Check active authenticated session on HttpContext (cookies, Identity, UnifiedAuthScheme)
+        if (User.Identity?.IsAuthenticated == true)
         {
-            var claimsPrincipal = tokenHandler.ValidateToken(providedToken, BuildTokenValidationParameters(), out _);
-            var email = claimsPrincipal.FindFirstValue(ClaimTypes.Email)
-                ?? claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Email)
-                ?? claimsPrincipal.FindFirstValue("email");
-            if (string.IsNullOrWhiteSpace(email))
-            {
-                return Unauthorized(new { valid = false, message = "Invalid token claims." });
-            }
+            var email = User.FindFirstValue(ClaimTypes.Email)
+                ?? User.FindFirstValue(JwtRegisteredClaimNames.Email)
+                ?? User.FindFirstValue("email");
 
-            if (!_userStore.TryGetByEmail(email, out var user) || user is null)
+            if (!string.IsNullOrWhiteSpace(email))
             {
-                var nameFromClaims = claimsPrincipal.FindFirstValue(ClaimTypes.Name)
-                    ?? claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Name)
-                    ?? claimsPrincipal.FindFirstValue("name")
-                    ?? email.Split('@')[0];
-                var subFromClaims = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier)
-                    ?? claimsPrincipal.FindFirstValue(JwtRegisteredClaimNames.Sub)
-                    ?? claimsPrincipal.FindFirstValue("sub")
-                    ?? string.Empty;
-                user = _userStore.UpsertFromToken(subFromClaims, email, nameFromClaims);
-            }
+                if (!_userStore.TryGetByEmail(email, out var user) || user is null)
+                {
+                    var nameFromClaims = User.FindFirstValue(ClaimTypes.Name)
+                        ?? User.FindFirstValue(JwtRegisteredClaimNames.Name)
+                        ?? User.FindFirstValue("name")
+                        ?? email.Split('@')[0];
+                    var subFromClaims = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                        ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                        ?? User.FindFirstValue("sub")
+                        ?? string.Empty;
+                    user = _userStore.UpsertFromToken(subFromClaims, email, nameFromClaims);
+                }
 
-            if (!IsAuthenticationAllowed(user.Email))
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, new { valid = false, message = "Access requires admin approval or an active team invite." });
-            }
+                if (!IsAuthenticationAllowed(user.Email))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new { valid = false, message = "Access requires admin approval or an active team invite." });
+                }
 
-            var domainUserId = await EnsureDomainUserAsync(user);
-            var responseUser = UserStore.ToResponse(user);
-            responseUser.Id = domainUserId.ToString("N");
-            var accessScope = ResolveAccessScope(user.Email);
-            var teamRole = ResolveTeamRole(user.Email);
-            return Ok(new
-            {
-                valid = true,
-                user = responseUser,
-                adminPassActive = string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase),
-                accessScope,
-                teamRole
-            });
+                var domainUserId = await EnsureDomainUserAsync(user);
+                var responseUser = UserStore.ToResponse(user);
+                responseUser.Id = domainUserId.ToString("N");
+                var accessScope = ResolveAccessScope(user.Email);
+                var teamRole = ResolveTeamRole(user.Email);
+                return Ok(new
+                {
+                    valid = true,
+                    user = responseUser,
+                    adminPassActive = string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase),
+                    accessScope,
+                    teamRole
+                });
+            }
         }
-        catch
-        {
-            return Unauthorized(new { valid = false, message = "Invalid token." });
-        }
+
+        return Unauthorized(new { valid = false, message = "Valid authentication session or token is required." });
     }
 
     [HttpPost("logout")]
@@ -1919,19 +1961,30 @@ public class AuthController : ControllerBase
 
     private TokenValidationParameters BuildTokenValidationParameters()
     {
-        var configuredIssuer = _configuration["Authentication:Jwt:Issuer"];
-        var configuredAudience = _configuration["Authentication:Jwt:Audience"];
+        var configuredIssuer = _configuration["Authentication:Jwt:Issuer"] ?? _configuration["Jwt:Issuer"];
+        var configuredAudience = _configuration["Authentication:Jwt:Audience"] ?? _configuration["Jwt:Audience"];
+        var jwtKey = GetJwtKey();
+
+        var validIssuers = new[] { "Wiseravenshare.Server", "WiseRavenShare", configuredIssuer }
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var validAudiences = new[] { "Wiseravenshare.Client", "WiseRavenShare_Clients", configuredAudience }
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         return new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(GetJwtKey())),
-            ValidateIssuer = !string.IsNullOrWhiteSpace(configuredIssuer),
-            ValidIssuer = configuredIssuer,
-            ValidateAudience = !string.IsNullOrWhiteSpace(configuredAudience),
-            ValidAudience = configuredAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ValidateIssuer = validIssuers.Length > 0,
+            ValidIssuers = validIssuers,
+            ValidateAudience = validAudiences.Length > 0,
+            ValidAudiences = validAudiences,
             ValidateLifetime = true,
-            ClockSkew = TimeSpan.FromMinutes(1)
+            ClockSkew = TimeSpan.FromMinutes(5)
         };
     }
 
@@ -2008,13 +2061,7 @@ public class AuthController : ControllerBase
 
     private string GetJwtKey()
     {
-        var key = ResolveJwtKeyFromConfiguration();
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            throw new InvalidOperationException("Authentication:Jwt:Key or JWT_highentropykey is not configured.");
-        }
-
-        return key;
+        return UnifiedAuthExtensions.ResolveJwtKey(_configuration);
     }
 
     private string ResolveJwtKeyFromConfiguration()
