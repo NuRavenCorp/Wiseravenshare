@@ -1872,6 +1872,79 @@ CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PlannerSessionStates_UserId""
     await command.ExecuteNonQueryAsync(cancellationToken);
 }
 
+static async Task EnsureRssFeedTablesAsync(string connectionString, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+    const string sql = @"
+CREATE SCHEMA IF NOT EXISTS app_data;
+
+CREATE TABLE IF NOT EXISTS app_data.""RssFeedSubscriptions"" (
+    ""Id""               UUID         NOT NULL DEFAULT gen_random_uuid(),
+    ""UserId""           UUID         NOT NULL,
+    ""FeedUrl""          VARCHAR(2048) NOT NULL,
+    ""DisplayName""      VARCHAR(200) NOT NULL DEFAULT '',
+    ""Platform""         VARCHAR(30)  NOT NULL DEFAULT 'rss',
+    ""FaviconUrl""       VARCHAR(500) NULL,
+    ""LastFetchedAt""    TIMESTAMPTZ  NULL,
+    ""LastItemAt""       TIMESTAMPTZ  NULL,
+    ""ConsecutiveErrors"" INTEGER     NOT NULL DEFAULT 0,
+    ""IsActive""         BOOLEAN      NOT NULL DEFAULT TRUE,
+    ""CreatedAt""        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    ""UpdatedAt""        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    ""IsDeleted""        BOOLEAN      NOT NULL DEFAULT FALSE,
+    ""DeletedAt""        TIMESTAMPTZ  NULL,
+    CONSTRAINT ""PK_RssFeedSubscriptions"" PRIMARY KEY (""Id""),
+    CONSTRAINT ""FK_RssFeedSubscriptions_Users""
+        FOREIGN KEY (""UserId"")
+        REFERENCES app_data.""Users""(""Id"")
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS ""IX_RssFeedSubscriptions_UserId""
+    ON app_data.""RssFeedSubscriptions""(""UserId"");
+
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_RssFeedSubscriptions_UserId_FeedUrl""
+    ON app_data.""RssFeedSubscriptions""(""UserId"", ""FeedUrl"");
+
+CREATE TABLE IF NOT EXISTS app_data.""RssFeedItems"" (
+    ""Id""               UUID         NOT NULL DEFAULT gen_random_uuid(),
+    ""SubscriptionId""   UUID         NOT NULL,
+    ""UserId""           UUID         NOT NULL,
+    ""ExternalId""       VARCHAR(512) NOT NULL,
+    ""Platform""         VARCHAR(30)  NOT NULL DEFAULT 'rss',
+    ""Title""            VARCHAR(500) NULL,
+    ""BodyText""         TEXT         NULL,
+    ""ImageUrl""         VARCHAR(2048) NULL,
+    ""PermalinkUrl""     VARCHAR(2048) NULL,
+    ""SourceName""       VARCHAR(200) NULL,
+    ""FaviconUrl""       VARCHAR(500) NULL,
+    ""PublishedAt""      TIMESTAMPTZ  NULL,
+    ""IsRead""           BOOLEAN      NOT NULL DEFAULT FALSE,
+    ""CreatedAt""        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    ""UpdatedAt""        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    ""IsDeleted""        BOOLEAN      NOT NULL DEFAULT FALSE,
+    ""DeletedAt""        TIMESTAMPTZ  NULL,
+    CONSTRAINT ""PK_RssFeedItems"" PRIMARY KEY (""Id""),
+    CONSTRAINT ""FK_RssFeedItems_Subscriptions""
+        FOREIGN KEY (""SubscriptionId"")
+        REFERENCES app_data.""RssFeedSubscriptions""(""Id"")
+        ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_RssFeedItems_SubscriptionId_ExternalId""
+    ON app_data.""RssFeedItems""(""SubscriptionId"", ""ExternalId"");
+
+CREATE INDEX IF NOT EXISTS ""IX_RssFeedItems_UserId_PublishedAt""
+    ON app_data.""RssFeedItems""(""UserId"", ""PublishedAt"" DESC NULLS LAST);
+";
+
+    await using var connection = new NpgsqlConnection(connectionString);
+    await connection.OpenAsync(cancellationToken);
+    await using var command = new NpgsqlCommand(sql, connection);
+    await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
 static async Task EnsureKaraokeScoringTablesAsync(string connectionString, CancellationToken cancellationToken = default)
 {
     if (string.IsNullOrWhiteSpace(connectionString)) return;
@@ -2531,6 +2604,8 @@ builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
 builder.Services.AddHttpClient<ITikTokAggregatorService, TikTokAggregatorService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
+builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
+builder.Services.AddScoped<IRssFeedIngestService, RssFeedIngestService>();
 if (enableHostedServices)
 {
     builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.TikTokTokenRefreshBackgroundService>();
@@ -2740,6 +2815,7 @@ builder.Services.AddSingleton<IReminderNotificationService, ReminderNotification
 if (enableHostedServices)
 {
     builder.Services.AddHostedService<RavensightMediaRetentionCleanupService>();
+    builder.Services.AddHostedService<RssFeedIngestBackgroundService>();
 }
 
 // RavenCommuniqué — Twilio voice/SMS/WhatsApp + WebRTC call hub
@@ -3137,6 +3213,15 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "Planner session state table bootstrap failed during startup.");
+    }
+
+    try
+    {
+        await EnsureRssFeedTablesAsync(defaultConnectionString);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "RSS feed tables bootstrap failed during startup.");
     }
 
     // Seed default badge catalog (badge-first currency system)

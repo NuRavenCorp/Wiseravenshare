@@ -180,6 +180,10 @@ public class AppDbContext : DbContext
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<Appointment> Appointments => Set<Appointment>();
 
+    // RSS / Social Feed Aggregation
+    public DbSet<RssFeedSubscription> RssFeedSubscriptions => Set<RssFeedSubscription>();
+    public DbSet<RssFeedItem> RssFeedItems => Set<RssFeedItem>();
+
     // Studio
     public DbSet<Wiseravenshare.Server.Entities.Studio.StudioProject> StudioProjects => Set<Wiseravenshare.Server.Entities.Studio.StudioProject>();
     public DbSet<Wiseravenshare.Server.Entities.Studio.StudioTrack> StudioTracks => Set<Wiseravenshare.Server.Entities.Studio.StudioTrack>();
@@ -1402,6 +1406,41 @@ public class AppDbContext : DbContext
             entity.HasOne(a => a.User)
                 .WithMany()
                 .HasForeignKey(a => a.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // RSS / Social Feed Aggregation
+        modelBuilder.Entity<RssFeedSubscription>(entity =>
+        {
+            entity.ToTable("RssFeedSubscriptions");
+            entity.Property(s => s.FeedUrl).HasMaxLength(2048);
+            entity.Property(s => s.DisplayName).HasMaxLength(200);
+            entity.Property(s => s.Platform).HasMaxLength(30);
+            entity.Property(s => s.FaviconUrl).HasMaxLength(500);
+            entity.HasIndex(s => s.UserId);
+            entity.HasIndex(s => new { s.UserId, s.FeedUrl }).IsUnique();
+            entity.HasOne(s => s.User)
+                .WithMany()
+                .HasForeignKey(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RssFeedItem>(entity =>
+        {
+            entity.ToTable("RssFeedItems");
+            entity.Property(i => i.ExternalId).HasMaxLength(512);
+            entity.Property(i => i.Platform).HasMaxLength(30);
+            entity.Property(i => i.Title).HasMaxLength(500);
+            entity.Property(i => i.ImageUrl).HasMaxLength(2048);
+            entity.Property(i => i.PermalinkUrl).HasMaxLength(2048);
+            entity.Property(i => i.SourceName).HasMaxLength(200);
+            entity.Property(i => i.FaviconUrl).HasMaxLength(500);
+            entity.Property(i => i.BodyText).HasColumnType("text");
+            entity.HasIndex(i => new { i.SubscriptionId, i.ExternalId }).IsUnique();
+            entity.HasIndex(i => new { i.UserId, i.PublishedAt });
+            entity.HasOne(i => i.Subscription)
+                .WithMany()
+                .HasForeignKey(i => i.SubscriptionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

@@ -157,7 +157,7 @@ const refreshAccessToken = async () => {
 };
 
 const requestJson = async (path, options = {}) => {
-  const { omitAuth = false, __retryAuth = false, ...fetchOptions } = options;
+  const { omitAuth = false, __retryAuth = false, __retryWithoutAuth = false, ...fetchOptions } = options;
   const token = readStoredToken();
   const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   const headers = {
@@ -165,7 +165,7 @@ const requestJson = async (path, options = {}) => {
     ...(fetchOptions.headers || {}),
   };
 
-  if (token && !omitAuth) {
+  if (token && !omitAuth && !__retryWithoutAuth) {
     headers.Authorization = `Bearer ${token}`;
   }
 
@@ -180,10 +180,22 @@ const requestJson = async (path, options = {}) => {
     token &&
     !omitAuth &&
     !__retryAuth &&
+    !__retryWithoutAuth &&
     !isAuthRouteRequest(path) &&
     (await refreshAccessToken())
   ) {
     return requestJson(path, { ...options, __retryAuth: true });
+  }
+
+  if (
+    response.status === 401 &&
+    token &&
+    !omitAuth &&
+    !__retryWithoutAuth
+  ) {
+    // Retry once without bearer header so valid cookie auth can proceed
+    // when local storage has a stale token.
+    return requestJson(path, { ...options, __retryWithoutAuth: true });
   }
 
   const data = await parseResponseBody(response);
@@ -198,7 +210,7 @@ const requestJson = async (path, options = {}) => {
 };
 
 const request = async (path, options = {}) => {
-  const { omitAuth = false, __retryAuth = false, ...fetchOptions } = options;
+  const { omitAuth = false, __retryAuth = false, __retryWithoutAuth = false, ...fetchOptions } = options;
   const token = readStoredToken();
   const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   const headers = {
@@ -206,7 +218,7 @@ const request = async (path, options = {}) => {
     ...(fetchOptions.headers || {}),
   };
 
-  if (token && !omitAuth) {
+  if (token && !omitAuth && !__retryWithoutAuth) {
     headers.Authorization = `Bearer ${token}`;
   }
 
@@ -221,10 +233,20 @@ const request = async (path, options = {}) => {
     token &&
     !omitAuth &&
     !__retryAuth &&
+    !__retryWithoutAuth &&
     !isAuthRouteRequest(path) &&
     (await refreshAccessToken())
   ) {
     return request(path, { ...options, __retryAuth: true });
+  }
+
+  if (
+    response.status === 401 &&
+    token &&
+    !omitAuth &&
+    !__retryWithoutAuth
+  ) {
+    return request(path, { ...options, __retryWithoutAuth: true });
   }
 
   const data = await parseResponseBody(response);
@@ -239,20 +261,30 @@ const request = async (path, options = {}) => {
 };
 
 const requestBlob = async (path, options = {}) => {
-  const { omitAuth = false, __retryAuth = false, ...fetchOptions } = options;
+  const { omitAuth = false, __retryAuth = false, __retryWithoutAuth = false, ...fetchOptions } = options;
   const token = readStoredToken();
   const headers = { Accept: "audio/mpeg, application/json;q=0.9, */*;q=0.8", ...(fetchOptions.headers || {}) };
   if (token && !omitAuth) headers.Authorization = `Bearer ${token}`;
+  if (__retryWithoutAuth && headers.Authorization) delete headers.Authorization;
   const response = await fetch(buildUrl(path), { credentials: "include", ...fetchOptions, headers });
   if (
     response.status === 401 &&
     token &&
     !omitAuth &&
     !__retryAuth &&
+    !__retryWithoutAuth &&
     !isAuthRouteRequest(path) &&
     (await refreshAccessToken())
   ) {
     return requestBlob(path, { ...options, __retryAuth: true });
+  }
+  if (
+    response.status === 401 &&
+    token &&
+    !omitAuth &&
+    !__retryWithoutAuth
+  ) {
+    return requestBlob(path, { ...options, __retryWithoutAuth: true });
   }
   if (!response.ok) {
     const data = await parseResponseBody(response);
