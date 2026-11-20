@@ -9,28 +9,33 @@ import Navbar from "@/components/landing/Navbar";
 import Footer from "@/components/landing/Footer";
 import TodaysVibe from "@/components/vibe/TodaysVibe";
 import LimitationsNotice from "@/components/social/LimitationsNotice";
-import { Share2, Download, Feather, Link2 } from "lucide-react";
+import { Share2, Download, Feather, Link2, CheckCircle2, Circle } from "lucide-react";
 import PostComposer from "@/components/feed/PostComposer";
 import PostsFeed from "@/components/feed/PostsFeed";
 
-const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube"];
+// All supported platforms — order determines display sequence
+const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky"];
 
 export default function SocialHub() {
-  const [accounts, setAccounts] = useState(null);
+  const [platformStatuses, setPlatformStatuses] = useState({});
   const [loading, setLoading] = useState(true);
 
-  const fetchAccounts = useCallback(async () => {
+  const fetchStatuses = useCallback(async () => {
     try {
-      const res = await apiClient.functions.invoke("SocialGetAccounts", {});
-      setAccounts(res.data);
+      const data = await apiClient.social.getAllPlatformStatuses();
+      setPlatformStatuses(data || {});
     } catch {
-      setAccounts(null);
+      setPlatformStatuses({});
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchAccounts().then(() => setLoading(false));
-  }, [fetchAccounts]);
+    fetchStatuses();
+  }, [fetchStatuses]);
+
+  const connectedCount = Object.values(platformStatuses).filter(s => s?.connected).length;
 
   if (loading) {
     return (
@@ -57,8 +62,13 @@ export default function SocialHub() {
             <TabsTrigger value="feed" className="flex items-center gap-2">
               <Feather className="w-4 h-4" /> Feed
             </TabsTrigger>
-            <TabsTrigger value="connect" className="flex items-center gap-2">
+            <TabsTrigger value="connect" className="flex items-center gap-2 relative">
               <Link2 className="w-4 h-4" /> Connect
+              {connectedCount > 0 && (
+                <span className="ml-0.5 inline-flex items-center justify-center h-4 min-w-4 rounded-full bg-primary text-primary-foreground text-[10px] font-bold px-1">
+                  {connectedCount}
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger value="create" className="flex items-center gap-2">
               <Feather className="w-4 h-4" /> Create
@@ -76,18 +86,51 @@ export default function SocialHub() {
             <SystemFeedSection />
           </TabsContent>
 
-          <TabsContent value="rss">
-            <RssFeedManager />
-          </TabsContent>
-
           <TabsContent value="connect">
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Click <strong>Connect</strong> on each platform to link your account via OAuth. Instagram, TikTok, and YouTube all support the same connect flow.
-              </p>
+            <div className="space-y-5">
+              {/* Summary banner */}
+              <div className="rounded-xl border border-border bg-card p-4">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5">
+                    {connectedCount > 0
+                      ? <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                      : <Circle className="w-5 h-5 text-muted-foreground shrink-0" />
+                    }
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">
+                      {connectedCount === 0
+                        ? "No accounts connected yet"
+                        : `${connectedCount} of ${PLATFORMS.length} platform${connectedCount !== 1 ? "s" : ""} connected`}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Connect your social accounts to <strong>post text, images &amp; video</strong> across all platforms
+                      from one place — and import your existing content into WiseRavenShare.
+                    </p>
+                    {connectedCount > 0 && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {PLATFORMS.map(p => {
+                          const s = platformStatuses[p];
+                          return s?.connected ? (
+                            <span key={p} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              <CheckCircle2 className="w-3 h-3" />
+                              {p.charAt(0).toUpperCase() + p.slice(1)}
+                            </span>
+                          ) : null;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                 {PLATFORMS.map((platform) => (
-                  <ConnectionCard key={platform} platform={platform} />
+                  <ConnectionCard
+                    key={platform}
+                    platform={platform}
+                    onStatusChange={fetchStatuses}
+                  />
                 ))}
               </div>
             </div>
@@ -97,7 +140,7 @@ export default function SocialHub() {
             <PostComposer />
           </TabsContent>
           <TabsContent value="push">
-            <CrossPostComposer accounts={accounts} />
+            <CrossPostComposer platformStatuses={platformStatuses} />
           </TabsContent>
           <TabsContent value="pull">
             <ImportPanel />

@@ -1462,6 +1462,9 @@ export const apiClient = {
         method: "GET",
       });
     },
+    getAllPlatformStatuses() {
+      return requestJson("/api/auth/platforms", { method: "GET" });
+    },
     saveDetails(platform, userId, fields) {
       return requestJson(`/api/auth/${encodeURIComponent(platform)}/complete`, {
         method: "POST",

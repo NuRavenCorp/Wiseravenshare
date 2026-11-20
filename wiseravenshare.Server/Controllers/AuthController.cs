@@ -766,6 +766,44 @@ public class AuthController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Returns connection status for all supported social platforms in one call.
+    /// Used by the Social Hub connect page to show a summary without 6 round-trips.
+    /// </summary>
+    [HttpGet("platforms")]
+    [Authorize]
+    public IActionResult GetAllPlatformStatuses()
+    {
+        EnsureConfiguredUsersSeeded();
+
+        var requestedUserId = ResolveRequestedSocialConnectUserId(null);
+        if (string.IsNullOrWhiteSpace(requestedUserId) || !_userStore.TryGetById(requestedUserId, out var user) || user is null)
+        {
+            return Ok(new Dictionary<string, object>());
+        }
+
+        var allPlatforms = new[] { "facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky" };
+        var result = new Dictionary<string, object>();
+
+        foreach (var p in allPlatforms)
+        {
+            var cfg = ReadOAuthProviderConfig(p);
+            var connection = GetSocialConnection(user, p);
+            var connected = connection is not null && IsConnected(connection);
+            result[p] = new
+            {
+                connected,
+                oauthConfigured = cfg.IsEnabled || p == "bluesky", // bluesky uses manual app-password
+                username = connection?.Username,
+                profileUrl = connection?.ProfileUrl,
+                designation = connection?.Designation,
+                tokenExpiresAt = connection?.TokenExpiresAt,
+            };
+        }
+
+        return Ok(result);
+    }
+
     [HttpPost("{platform}/complete")]
     [Authorize]
     public IActionResult CompleteSocialConnect(
@@ -2354,6 +2392,9 @@ public class AuthController : ControllerBase
             "instagram" => "instagram",
             "tiktok" => "tiktok",
             "youtube" => "youtube",
+            "twitter" => "twitter",
+            "x" => "twitter",         // X is the rebrand of Twitter
+            "bluesky" => "bluesky",
             _ => string.Empty
         };
     }
@@ -2368,6 +2409,8 @@ public class AuthController : ControllerBase
             "instagram" => "Instagram",
             "tiktok" => "TikTok",
             "youtube" => "YouTube",
+            "twitter" => "Twitter",
+            "bluesky" => "Bluesky",
             _ => string.Empty
         };
 
@@ -2401,6 +2444,10 @@ public class AuthController : ControllerBase
                 _configuration["Authentication:OAuthProviders:Google:ClientId"],
                 _configuration["GOOGLE_OAUTH_CLIENT_ID"],
                 _configuration["GOOGLE_CLIENT_ID"]),
+            "twitter" => ResolveOAuthSettingValue(
+                _configuration["TWITTER_CLIENT_ID"],
+                _configuration["X_CLIENT_ID"],
+                _configuration["Social:Twitter:ClientId"]),
             _ => string.Empty
         };
         var fallbackClientSecret = provider switch
@@ -2424,6 +2471,10 @@ public class AuthController : ControllerBase
                 _configuration["Authentication:OAuthProviders:Google:ClientSecret"],
                 _configuration["GOOGLE_OAUTH_CLIENT_SECRET"],
                 _configuration["GOOGLE_CLIENT_SECRET"]),
+            "twitter" => ResolveOAuthSettingValue(
+                _configuration["TWITTER_CLIENT_SECRET"],
+                _configuration["X_CLIENT_SECRET"],
+                _configuration["Social:Twitter:ClientSecret"]),
             _ => string.Empty
         };
         var fallbackRedirectUri = provider switch
@@ -2783,6 +2834,17 @@ public class AuthController : ControllerBase
                 ["include_granted_scopes"] = "true",
                 ["code_challenge"] = string.IsNullOrWhiteSpace(codeChallenge) ? null : codeChallenge,
                 ["code_challenge_method"] = string.IsNullOrWhiteSpace(codeChallenge) ? null : "S256"
+            }),
+            // X / Twitter — OAuth 2.0 with PKCE (required by X API v2)
+            "twitter" => BuildUrl("https://twitter.com/i/oauth2/authorize", new Dictionary<string, string?>
+            {
+                ["client_id"] = config.ClientId,
+                ["redirect_uri"] = callbackUrl,
+                ["response_type"] = "code",
+                ["scope"] = "tweet.read tweet.write users.read offline.access",
+                ["state"] = state,
+                ["code_challenge"] = string.IsNullOrWhiteSpace(codeChallenge) ? "challenge" : codeChallenge,
+                ["code_challenge_method"] = "S256"
             }),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
         };
