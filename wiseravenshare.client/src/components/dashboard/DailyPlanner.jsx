@@ -28,7 +28,7 @@ function isValidDateInput(value) {
 }
 
 function normalizeDateTimeLocalValue(value) {
-  if (typeof value !== "string" || !value.trim()) return "";
+  if (!value || typeof value !== "string" || !value.trim()) return "";
   const trimmed = value.trim();
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed)) {
     return trimmed;
@@ -70,46 +70,26 @@ const DEFAULT_FORM = {
 // ─── DailyPlanner ─────────────────────────────────────────────────────────────
 
 export default function DailyPlanner() {
-  // Share the same auth session as the rest of the app.
-  const { isAuthenticated, checkUserAuth } = useAuth();
+  // Knitted directly to WiseRavenShare authentication flow.
+  const { isAuthenticated, isLoadingAuth, checkUserAuth } = useAuth();
 
   const calendarRef = useRef(null);
   const sessionSaveTimeoutRef = useRef(null);
-  const authRetryTimeoutRef = useRef(null);
 
   const [events, setEvents]           = useState([]);
   const [activeAlert, setActiveAlert] = useState(null);
   const [loadError, setLoadError]     = useState("");
-  const [authFailed, setAuthFailed]   = useState(false);
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [initialView, setInitialView] = useState("timeGridDay");
   const [initialDate, setInitialDate] = useState(null);
   const [modalOpen, setModalOpen]     = useState(false);
   const [saving, setSaving]           = useState(false);
-  const [retrying, setRetrying]       = useState(false);
   const [deleting, setDeleting]       = useState(false);
   const [formData, setFormData]       = useState(DEFAULT_FORM);
   const [formError, setFormError]     = useState("");
 
-  const isAuthError = useCallback((err) => err?.status === 401 || err?.status === 403, []);
-  const authExpiredMessage = "Session expired — please sign in again to use the planner.";
-
-  const clearAuthBanner = useCallback(() => {
-    setAuthFailed(false);
-    setLoadError((prev) => (prev === authExpiredMessage ? "" : prev));
-  }, [authExpiredMessage]);
-
-  const handlePlannerAuthError = useCallback((err) => {
-    if (isAuthError(err)) {
-      setAuthFailed(true);
-      setLoadError(authExpiredMessage);
-      return true;
-    }
-    return false;
-  }, [isAuthError, authExpiredMessage]);
-
   const queueSessionSave = useCallback((overrides = {}) => {
-    if (!sessionHydrated) return;
+    if (!sessionHydrated || !isAuthenticated) return;
 
     const api = calendarRef.current?.getApi();
     const currentView = overrides.currentView ?? api?.view?.type ?? initialView;
@@ -118,11 +98,11 @@ export default function DailyPlanner() {
 
     const hasDraft =
       modalIsOpen && (
-      formData.id ||
-      formData.title.trim().length > 0 ||
-      formData.description.trim().length > 0 ||
-      formData.start ||
-      formData.end
+        formData.id ||
+        formData.title.trim().length > 0 ||
+        formData.description.trim().length > 0 ||
+        formData.start ||
+        formData.end
       );
 
     const draftJson = Object.prototype.hasOwnProperty.call(overrides, "draftJson")
@@ -144,17 +124,20 @@ export default function DailyPlanner() {
             modalOpen: modalIsOpen,
           }),
         });
-        clearAuthBanner();
       } catch (err) {
-        // Session-state persistence is best-effort; do not surface sticky auth banners for it.
-        if (!isAuthError(err)) {
-          console.error("Failed to persist planner session state:", err);
-        }
+        // Session-state persistence is best-effort.
+        console.warn("Failed to persist planner session state:", err?.message);
       }
     }, 350);
-  }, [clearAuthBanner, formData, initialView, isAuthError, modalOpen, sessionHydrated]);
+  }, [formData, initialView, isAuthenticated, modalOpen, sessionHydrated]);
 
+  // ── Hydrate session state once authenticated ──────────────────────────────
   useEffect(() => {
+    if (!isAuthenticated) {
+      setSessionHydrated(false);
+      return;
+    }
+
     let mounted = true;
     const loadSessionState = async () => {
       try {
@@ -189,12 +172,8 @@ export default function DailyPlanner() {
         if (state.modalOpen === true) {
           setModalOpen(true);
         }
-        clearAuthBanner();
       } catch (err) {
-        // Hydration should not block planner usage; ignore auth noise from optional state endpoint.
-        if (!isAuthError(err)) {
-          console.error("Failed to load planner session state:", err);
-        }
+        console.warn("Planner session state hydration note:", err?.message);
       } finally {
         if (mounted) {
           setSessionHydrated(true);
@@ -208,16 +187,13 @@ export default function DailyPlanner() {
       if (sessionSaveTimeoutRef.current) {
         clearTimeout(sessionSaveTimeoutRef.current);
       }
-      if (authRetryTimeoutRef.current) {
-        clearTimeout(authRetryTimeoutRef.current);
-      }
     };
-  }, [clearAuthBanner, isAuthError]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
-    if (!sessionHydrated) return;
+    if (!sessionHydrated || !isAuthenticated) return;
     queueSessionSave();
-  }, [sessionHydrated, modalOpen, formData, queueSessionSave]);
+  }, [sessionHydrated, isAuthenticated, modalOpen, formData, queueSessionSave]);
 
   // ── Browser notification permission ───────────────────────────────────────
   useEffect(() => {
@@ -244,31 +220,7 @@ export default function DailyPlanner() {
     const interval = setInterval(checkAlerts, 30_000);
     checkAlerts();
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
-
-  // ── Retry while auth-failed: attempt reload every 30s ONLY if user IS authenticated ─────
-  useEffect(() => {
-    // If the user is not authenticated at all, don't poll — it would just flood 401s.
-    if (!authFailed || !isAuthenticated) return;
-    const interval = setInterval(() => {
-      const api = calendarRef.current?.getApi();
-      if (!api) return;
-      void (async () => {
-        try {
-          const data = await apiClient.requestJson(
-            `/api/planner?start=${encodeURIComponent(api.view.activeStart.toISOString())}&end=${encodeURIComponent(api.view.activeEnd.toISOString())}`
-          );
-          setEvents(Array.isArray(data) ? data : []);
-          setLoadError("");
-          clearAuthBanner();
-        } catch {
-          // Still failing — keep interval running.
-        }
-      })();
-    }, 30_000);
-    return () => clearInterval(interval);
-  }, [authFailed, isAuthenticated, clearAuthBanner]);
 
   const triggerAlert = (ev) => {
     setActiveAlert(ev);
@@ -292,53 +244,36 @@ export default function DailyPlanner() {
     );
     try {
       await apiClient.requestJson(`/api/planner/${id}/dismiss-alert`, { method: "PATCH" });
-      clearAuthBanner();
     } catch (err) {
-      handlePlannerAuthError(err);
+      if (err?.status === 401 || err?.status === 403) {
+        checkUserAuth(false);
+      }
     }
   };
 
   // ── Fetch when calendar view changes ──────────────────────────────────────
   const handleDatesSet = useCallback(async (dateInfo) => {
+    if (!isAuthenticated) return;
     try {
       const data = await apiClient.requestJson(
         `/api/planner?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
       );
       setEvents(Array.isArray(data) ? data : []);
       setLoadError("");
-      clearAuthBanner();
       queueSessionSave({
         currentView: dateInfo?.view?.type,
         focusDateUtc: dateInfo?.startStr ?? null,
       });
     } catch (err) {
-      if (handlePlannerAuthError(err)) {
-        // Only schedule a silent retry if the user IS authenticated — a genuine
-        // 401 for an unauthenticated user should not cause an infinite retry loop.
-        if (isAuthenticated) {
-          if (authRetryTimeoutRef.current) clearTimeout(authRetryTimeoutRef.current);
-          authRetryTimeoutRef.current = setTimeout(() => {
-            authRetryTimeoutRef.current = null;
-            void (async () => {
-              try {
-                const retryData = await apiClient.requestJson(
-                  `/api/planner?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
-                );
-                setEvents(Array.isArray(retryData) ? retryData : []);
-                setLoadError("");
-                clearAuthBanner();
-              } catch {
-                // Still failing — the persistent banner will guide the user.
-              }
-            })();
-          }, 20_000);
-        }
+      if (err?.status === 401 || err?.status === 403) {
+        // Unified auth session expired; let AuthContext sync
+        checkUserAuth(false);
         return;
       }
       setLoadError(err?.message || "Failed to load appointments.");
       console.error("Failed to load appointments:", err);
     }
-  }, [clearAuthBanner, handlePlannerAuthError, isAuthenticated, queueSessionSave]);
+  }, [checkUserAuth, isAuthenticated, queueSessionSave]);
 
   // ── Drag-drop / resize ────────────────────────────────────────────────────
   const handleEventChange = async (changeInfo) => {
@@ -356,9 +291,13 @@ export default function DailyPlanner() {
         method: "PUT",
         body: JSON.stringify(payload),
       });
-      clearAuthBanner();
+      setLoadError("");
     } catch (err) {
-      handlePlannerAuthError(err);
+      if (err?.status === 401 || err?.status === 403) {
+        checkUserAuth(false);
+      } else {
+        setLoadError(err?.message || "Failed to update appointment.");
+      }
       changeInfo.revert();
     }
   };
@@ -422,7 +361,7 @@ export default function DailyPlanner() {
     setFormError("");
     setSaving(true);
 
-    const saveAppointment = async () => {
+    try {
       if (formData.id) {
         await apiClient.requestJson(`/api/planner/${formData.id}`, {
           method: "PUT",
@@ -434,40 +373,16 @@ export default function DailyPlanner() {
           body: JSON.stringify(payload),
         });
       }
-    };
-
-    try {
-      await saveAppointment();
-      clearAuthBanner();
       setModalOpen(false);
       queueSessionSave({ modalOpen: false, draftJson: null });
       refreshCalendar();
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) {
-        const refreshed = await apiClient.auth.tryRefreshToken();
-        if (refreshed) {
-          try {
-            await saveAppointment();
-            clearAuthBanner();
-            setModalOpen(false);
-            queueSessionSave({ modalOpen: false, draftJson: null });
-            refreshCalendar();
-            return;
-          } catch (retryErr) {
-            if (handlePlannerAuthError(retryErr)) {
-              setFormError("Session expired. Please sign in again.");
-              return;
-            }
-            setFormError(retryErr?.message || "Failed to save appointment.");
-            return;
-          }
-        }
-      }
-      if (handlePlannerAuthError(err)) {
+        checkUserAuth(false);
         setFormError("Session expired. Please sign in again.");
-        return;
+      } else {
+        setFormError(err?.message || "Failed to save appointment.");
       }
-      setFormError(err?.message || "Failed to save appointment.");
     } finally {
       setSaving(false);
     }
@@ -479,15 +394,15 @@ export default function DailyPlanner() {
     setDeleting(true);
     try {
       await apiClient.requestJson(`/api/planner/${formData.id}`, { method: "DELETE" });
-      clearAuthBanner();
       setModalOpen(false);
       queueSessionSave({ modalOpen: false, draftJson: null });
       setEvents((prev) => prev.filter((ev) => ev.id !== formData.id));
     } catch (err) {
-      if (handlePlannerAuthError(err)) {
-        return;
+      if (err?.status === 401 || err?.status === 403) {
+        checkUserAuth(false);
+      } else {
+        alert(err?.message || "Failed to delete appointment.");
       }
-      alert(err?.message || "Failed to delete appointment.");
     } finally {
       setDeleting(false);
     }
@@ -502,21 +417,42 @@ export default function DailyPlanner() {
     });
   };
 
-  const handleRetry = async () => {
-    setRetrying(true);
-    try {
-      // Re-sync auth through the shared AuthContext first so both the planner
-      // and the rest of the app agree on the session state.
-      await checkUserAuth(false);
-      await apiClient.auth.tryRefreshToken();
-    } catch {
-      // best-effort — refreshCalendar will expose any remaining error
-    }
-    clearAuthBanner();
-    refreshCalendar();
-    setRetrying(false);
-  };
+  // ── Auth Loading State ──────────────────────────────────────────────────
+  if (isLoadingAuth) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-12 flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+        <span className="text-xs text-muted-foreground">Connecting to your WiseRavenShare session…</span>
+      </div>
+    );
+  }
 
+  // ── Unauthenticated State (Unified Prompt) ──────────────────────────────
+  if (!isAuthenticated) {
+    const returnPath = typeof window !== "undefined"
+      ? `${window.location.pathname}${window.location.search}`
+      : "/planner";
+    return (
+      <div className="rounded-xl border border-border bg-card p-8 flex flex-col items-center justify-center gap-4 text-center">
+        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+          <Calendar className="w-6 h-6 text-primary" />
+        </div>
+        <div>
+          <h3 className="font-semibold text-foreground text-base">Sign In Required</h3>
+          <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+            Sign in to WiseRavenShare to view, schedule, and sync your planner sessions.
+          </p>
+        </div>
+        <Button asChild size="sm">
+          <a href={`/login?returnTo=${encodeURIComponent(returnPath)}`}>
+            Sign In to WiseRavenShare
+          </a>
+        </Button>
+      </div>
+    );
+  }
+
+  // ── Session Hydration State ─────────────────────────────────────────────
   if (!sessionHydrated) {
     return (
       <div className="rounded-xl border border-border bg-card p-6 flex items-center justify-center">
@@ -548,40 +484,29 @@ export default function DailyPlanner() {
           </Button>
         </div>
       )}
+
+      {/* Operational error banner */}
       {loadError && (
-        <div className={`rounded-lg border px-4 py-3 text-sm flex items-start justify-between gap-3 ${
-          authFailed
-            ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
-            : "border-red-500/40 bg-red-500/10 text-red-200"
-        }`}>
-          <span>
-            {authFailed && isAuthenticated
-              ? "Reconnecting planner to your session…"
-              : loadError}
-          </span>
-          {authFailed && (
-            <div className="flex items-center gap-2 shrink-0">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleRetry}
-                disabled={retrying}
-                className="h-7 px-2 py-0 text-xs border-amber-500/50 text-amber-200 hover:bg-amber-500/20"
-              >
-                <RefreshCw className={`w-3 h-3 mr-1 ${retrying ? "animate-spin" : ""}`} />
-                Retry
-              </Button>
-              {/* Only show Sign in link if the AuthContext also says we're not authenticated */}
-              {!isAuthenticated && (
-                <a
-                  href="/login"
-                  className="underline underline-offset-2 font-medium hover:opacity-80 text-xs"
-                >
-                  Sign in
-                </a>
-              )}
-            </div>
-          )}
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-center justify-between gap-3">
+          <span>{loadError}</span>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={refreshCalendar}
+              className="h-7 px-2.5 py-0 text-xs border-red-500/50 text-red-200 hover:bg-red-500/20"
+            >
+              <RefreshCw className="w-3 h-3 mr-1" />
+              Reload
+            </Button>
+            <button
+              type="button"
+              onClick={() => setLoadError("")}
+              className="text-red-300 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -773,4 +698,3 @@ export default function DailyPlanner() {
     </div>
   );
 }
-

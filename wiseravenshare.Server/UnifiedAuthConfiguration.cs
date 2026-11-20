@@ -1,9 +1,7 @@
-using System;
 using System.Text;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -20,77 +18,27 @@ public static class UnifiedAuthExtensions
 {
     public const string UnifiedAuthScheme = "WiseRavenShare_Unified_Auth";
 
-    public static IServiceCollection AddWiseRavenShareUnifiedAuth(
-        this IServiceCollection services, 
-        IConfiguration config)
+    public static string ResolveJwtKey(IConfiguration configuration)
     {
-        var jwtKey = config["Jwt:Key"] ?? config["Authentication:Jwt:Key"] ?? "WiseRavenShare_Secret_Key_At_Least_32_Chars_Long_12345!";
-        var jwtIssuer = config["Jwt:Issuer"] ?? config["Authentication:Jwt:Issuer"] ?? "WiseRavenShare";
-        var jwtAudience = config["Jwt:Audience"] ?? config["Authentication:Jwt:Audience"] ?? "WiseRavenShare_Clients";
+        var candidates = new[]
+        {
+            configuration["JWT_highentropykey"],
+            configuration["Authentication:Jwt:Key"],
+            configuration["Authentication__Jwt__Key"],
+            configuration["Jwt:Key"],
+            Environment.GetEnvironmentVariable("JWT_highentropykey"),
+            Environment.GetEnvironmentVariable("Authentication__Jwt__Key")
+        };
 
-        // Add Authentication with a Smart Policy Scheme
-        // If an "Authorization: Bearer ..." header is present -> Use JWT Bearer
-        // Otherwise -> Use Cookie Authentication
-        services.AddAuthentication(options =>
+        foreach (var candidate in candidates)
         {
-            options.DefaultScheme = UnifiedAuthScheme;
-            options.DefaultChallengeScheme = UnifiedAuthScheme;
-        })
-        .AddPolicyScheme(UnifiedAuthScheme, "Bearer or Cookie", options =>
-        {
-            options.ForwardDefaultSelector = context =>
+            var value = (candidate ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(value))
             {
-                var authHeader = context.Request.Headers["Authorization"].ToString();
-                if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-                {
-                    return JwtBearerDefaults.AuthenticationScheme;
-                }
-                return CookieAuthenticationDefaults.AuthenticationScheme;
-            };
-        })
-        .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
-        {
-            options.Cookie.Name = "WiseRavenShare.Auth";
-            options.Cookie.HttpOnly = true;
-            options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
-            options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
-            options.LoginPath = "/login";
-            options.LogoutPath = "/logout";
-            options.ExpireTimeSpan = TimeSpan.FromDays(30);
-            options.SlidingExpiration = true;
-        })
-        .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
-        {
-            options.RequireHttpsMetadata = false; // Set to true in strict production SSL
-            options.SaveToken = true;
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidIssuer = jwtIssuer,
-                ValidateAudience = true,
-                ValidAudience = jwtAudience,
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-                ValidateLifetime = true,
-                ClockSkew = TimeSpan.FromMinutes(5)
-            };
-        });
+                return value;
+            }
+        }
 
-        services.AddAuthorization();
-
-        // Configure CORS with credentials so cookies and Authorization headers
-        // are accepted seamlessly from localhost dev ports (3000, 5173, etc.)
-        services.AddCors(options =>
-        {
-            options.AddPolicy("AllowWiseRavenShareClients", builder =>
-            {
-                builder.SetIsOriginAllowed(_ => true)
-                       .AllowAnyMethod()
-                       .AllowAnyHeader()
-                       .AllowCredentials(); // REQUIRED FOR COOKIE / AUTH HEADER
-            });
-        });
-
-        return services;
+        return "WiseRavenShare_Secret_Key_At_Least_32_Chars_Long_12345!";
     }
 }

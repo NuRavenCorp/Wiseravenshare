@@ -2916,8 +2916,62 @@ static string ResolveJwtKey(IConfiguration configuration)
     return string.Empty;
 }
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = Wiseravenshare.Server.Shared.UnifiedAuthExtensions.UnifiedAuthScheme;
+    options.DefaultChallengeScheme = Wiseravenshare.Server.Shared.UnifiedAuthExtensions.UnifiedAuthScheme;
+})
+.AddPolicyScheme(Wiseravenshare.Server.Shared.UnifiedAuthExtensions.UnifiedAuthScheme, "Bearer or Cookie or Identity", options =>
+{
+    options.ForwardDefaultSelector = context =>
+    {
+        var authHeader = context.Request.Headers["Authorization"].ToString();
+        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            return JwtBearerDefaults.AuthenticationScheme;
+        }
+
+        var queryToken = context.Request.Query["access_token"].ToString();
+        if (!string.IsNullOrWhiteSpace(queryToken))
+        {
+            return JwtBearerDefaults.AuthenticationScheme;
+        }
+
+        if (context.Request.Cookies.ContainsKey("wr.identity"))
+        {
+            return "Identity.Application";
+        }
+
+        if (context.Request.Cookies.ContainsKey("WiseRavenShare.Auth"))
+        {
+            return Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme;
+        }
+
+        return JwtBearerDefaults.AuthenticationScheme;
+    };
+})
+.AddCookie(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme, options =>
+{
+    options.Cookie.Name = "WiseRavenShare.Auth";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = builder.Environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+    options.LoginPath = "/login";
+    options.LogoutPath = "/logout";
+    options.ExpireTimeSpan = TimeSpan.FromDays(30);
+    options.SlidingExpiration = true;
+    options.Events.OnRedirectToLogin = ctx =>
+    {
+        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return Task.CompletedTask;
+    };
+    options.Events.OnRedirectToAccessDenied = ctx =>
+    {
+        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return Task.CompletedTask;
+    };
+})
+.AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
     {
         var configuredIssuer = builder.Configuration["Authentication:Jwt:Issuer"];
         var configuredAudience = builder.Configuration["Authentication:Jwt:Audience"];

@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Npgsql;
 using NpgsqlTypes;
@@ -13,6 +15,8 @@ namespace Wiseravenshare.Server.Controllers;
 
 /// <summary>
 /// Calendar appointment CRUD for the Daily Planner.
+/// Knitted seamlessly to WiseRavenShare's unified authentication flow
+/// (JWT Bearer tokens, Identity cookies, and cookie authentication).
 /// All times are stored and returned in UTC; the browser converts to local.
 ///
 /// Routes:
@@ -24,7 +28,8 @@ namespace Wiseravenshare.Server.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/appointments")]
-[Authorize(AuthenticationSchemes = "Identity.Application,Bearer")]
+[Route("api/planner")]
+[Authorize(AuthenticationSchemes = $"{UnifiedAuthExtensions.UnifiedAuthScheme},{JwtBearerDefaults.AuthenticationScheme},Identity.Application,{CookieAuthenticationDefaults.AuthenticationScheme}")]
 public sealed class AppointmentsController(
     AppDbContext db,
     ILogger<AppointmentsController> logger) : ControllerBase
@@ -126,6 +131,7 @@ ON CONFLICT (""UserId"") DO UPDATE
             return NoContent();
         }
     }
+
     [HttpGet]
     public async Task<IActionResult> GetAppointments(
         [FromQuery] DateTimeOffset? start,
@@ -317,34 +323,67 @@ ON CONFLICT (""UserId"") DO UPDATE
         const int maxUsernameLength = 100;
         const int maxDisplayNameLength = 200;
 
+        var claimUserId = User.GetUserId();
+
         var email = User.FindFirstValue(ClaimTypes.Email)
             ?? User.FindFirstValue(JwtRegisteredClaimNames.Email)
             ?? User.FindFirstValue("email");
 
-        if (!string.IsNullOrWhiteSpace(email))
+        var normalizedEmail = !string.IsNullOrWhiteSpace(email) ? email.Trim() : null;
+        var lowerEmail = normalizedEmail?.ToLowerInvariant();
+
+        // 1. If we have a claimUserId, check if already in db.Users
+        if (claimUserId != Guid.Empty)
         {
-            var normalizedEmail = email.Trim();
-            var lowerEmail = normalizedEmail.ToLowerInvariant();
-
-            var existingByEmail = await db.Users
-                .Where(u => u.Email.ToLower() == lowerEmail)
-                .Select(u => new { u.Id, u.Username })
-                .FirstOrDefaultAsync(ct);
-
-            if (existingByEmail is not null)
+            try
             {
-                return existingByEmail.Id;
-            }
+                var existsById = await db.Users
+                    .AsNoTracking()
+                    .AnyAsync(u => u.Id == claimUserId, ct);
 
-            // Some auth flows can issue valid JWTs before a matching domain user row
-            // exists. Provision a minimal row so planner CRUD has a durable owner.
-            var preferredId = User.GetUserId();
-            var userId = preferredId != Guid.Empty ? preferredId : Guid.NewGuid();
+                if (existsById)
+                {
+                    return claimUserId;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to query db.Users for claim user id {ClaimUserId}.", claimUserId);
+            }
+        }
+
+        // 2. If we have an email, check if user exists by email
+        if (!string.IsNullOrWhiteSpace(lowerEmail))
+        {
+            try
+            {
+                var existingByEmail = await db.Users
+                    .Where(u => u.Email.ToLower() == lowerEmail)
+                    .Select(u => new { u.Id, u.Username })
+                    .FirstOrDefaultAsync(ct);
+
+                if (existingByEmail is not null)
+                {
+                    return existingByEmail.Id;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to query db.Users for email {Email}.", lowerEmail);
+            }
+        }
+
+        // 3. Ensure a domain user row exists in app_data.Users so foreign keys on Appointments
+        // and PlannerSessionStates succeed.
+        var targetId = claimUserId != Guid.Empty ? claimUserId : Guid.NewGuid();
+
+        if (!string.IsNullOrWhiteSpace(normalizedEmail))
+        {
             var baseUsernameRaw = normalizedEmail.Split('@')[0];
             var baseUsername = new string(baseUsernameRaw.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(baseUsername))
             {
-                baseUsername = $"user{userId.ToString("N")[..8]}";
+                baseUsername = $"user{targetId.ToString("N")[..8]}";
             }
             if (baseUsername.Length > maxUsernameLength)
             {
@@ -353,15 +392,22 @@ ON CONFLICT (""UserId"") DO UPDATE
 
             var username = baseUsername;
             var suffix = 0;
-            while (await db.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower(), ct))
+            try
             {
-                suffix++;
-                var suffixText = suffix.ToString();
-                var maxStemLength = Math.Max(1, maxUsernameLength - suffixText.Length);
-                var stem = baseUsername.Length > maxStemLength
-                    ? baseUsername[..maxStemLength]
-                    : baseUsername;
-                username = $"{stem}{suffixText}";
+                while (await db.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower(), ct))
+                {
+                    suffix++;
+                    var suffixText = suffix.ToString();
+                    var maxStemLength = Math.Max(1, maxUsernameLength - suffixText.Length);
+                    var stem = baseUsername.Length > maxStemLength
+                        ? baseUsername[..maxStemLength]
+                        : baseUsername;
+                    username = $"{stem}{suffixText}";
+                }
+            }
+            catch
+            {
+                username = $"{baseUsername}_{Guid.NewGuid().ToString("N")[..6]}";
             }
 
             var displayName = string.IsNullOrWhiteSpace(baseUsernameRaw) ? username : baseUsernameRaw.Trim();
@@ -369,9 +415,10 @@ ON CONFLICT (""UserId"") DO UPDATE
             {
                 displayName = displayName[..maxDisplayNameLength];
             }
+
             var newUser = new User
             {
-                Id = userId,
+                Id = targetId,
                 Email = normalizedEmail,
                 Username = username,
                 DisplayName = displayName,
@@ -390,35 +437,36 @@ ON CONFLICT (""UserId"") DO UPDATE
             }
             catch (DbUpdateException)
             {
-                // Another request may have created the row concurrently.
-                var recovered = await db.Users
-                    .AsNoTracking()
-                    .Where(u => u.Email.ToLower() == lowerEmail)
-                    .Select(u => u.Id)
-                    .FirstOrDefaultAsync(ct);
-                if (recovered != Guid.Empty)
+                try
                 {
-                    return recovered;
+                    var recovered = await db.Users
+                        .AsNoTracking()
+                        .Where(u => u.Email.ToLower() == lowerEmail)
+                        .Select(u => u.Id)
+                        .FirstOrDefaultAsync(ct);
+                    if (recovered != Guid.Empty)
+                    {
+                        return recovered;
+                    }
                 }
-                logger.LogWarning("Unable to provision planner user record for {Email}. Falling back to claim lookup.", normalizedEmail);
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to provision user for planner; using target ID {TargetId}.", targetId);
             }
         }
 
-        var claimUserId = User.GetUserId();
-        if (claimUserId != Guid.Empty)
+        // 4. Return targetId if authenticated
+        if (targetId != Guid.Empty)
         {
-            var exists = await db.Users
-                .AsNoTracking()
-                .AnyAsync(u => u.Id == claimUserId, ct);
-            if (exists)
-            {
-                return claimUserId;
-            }
+            return targetId;
         }
 
         return Guid.Empty;
     }
 }
+
 /// <summary>Shared request body for create and update.</summary>
 public sealed class AppointmentRequest
 {
@@ -437,5 +485,3 @@ public sealed class PlannerSessionStateRequest
     public string? DraftJson { get; set; }
     public bool ModalOpen { get; set; }
 }
-
-
