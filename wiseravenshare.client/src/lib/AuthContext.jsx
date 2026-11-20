@@ -54,7 +54,8 @@ export const AuthProvider = ({ children }) => {
         const refreshed = await apiClient.auth.tryRefreshToken();
         if (!refreshed) {
           // Refresh failed — re-verify to give a last chance before marking as logged out.
-          checkUserAuth();
+          // Pass false so a network/server hiccup doesn't sign the user out.
+          checkUserAuth(false);
         }
       }
     }, REFRESH_INTERVAL_MS);
@@ -122,7 +123,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const checkUserAuth = async () => {
+  const checkUserAuth = async (treatNetworkErrorAsLogout = true) => {
     try {
       setIsLoadingAuth(true);
       const currentUser = await apiClient.auth.me();
@@ -134,7 +135,15 @@ export const AuthProvider = ({ children }) => {
       setAuthChecked(true);
     } catch (error) {
       // apiClient.requestJson already attempts one silent token refresh before
-      // throwing, so we don't need to retry here — just mark unauthenticated.
+      // throwing. Only clear the session on a definitive auth rejection (401/403).
+      // Network errors or server unavailability should not log the user out.
+      const isDefinitiveAuthFailure = error?.status === 401 || error?.status === 403;
+      if (!isDefinitiveAuthFailure && !treatNetworkErrorAsLogout) {
+        // Transient failure during proactive check — keep the user signed in.
+        console.warn('Proactive auth check failed with a non-auth error; keeping session:', error?.message);
+        setIsLoadingAuth(false);
+        return;
+      }
       console.error('User auth check failed:', error);
       setIsLoadingAuth(false);
       setIsAuthenticated(false);

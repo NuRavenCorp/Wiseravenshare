@@ -71,11 +71,12 @@ const DEFAULT_FORM = {
 export default function DailyPlanner() {
   const calendarRef = useRef(null);
   const sessionSaveTimeoutRef = useRef(null);
-  const authBannerTimeoutRef = useRef(null);
+  const authRetryTimeoutRef = useRef(null);
 
   const [events, setEvents]           = useState([]);
   const [activeAlert, setActiveAlert] = useState(null);
   const [loadError, setLoadError]     = useState("");
+  const [authFailed, setAuthFailed]   = useState(false);
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [initialView, setInitialView] = useState("timeGridDay");
   const [initialDate, setInitialDate] = useState(null);
@@ -86,30 +87,21 @@ export default function DailyPlanner() {
   const [formError, setFormError]     = useState("");
 
   const isAuthError = useCallback((err) => err?.status === 401 || err?.status === 403, []);
-  const authExpiredMessage = "Session expired. Please refresh the page to sign in again.";
+  const authExpiredMessage = "Session expired — please sign in again to use the planner.";
 
   const clearAuthBanner = useCallback(() => {
-    if (authBannerTimeoutRef.current) {
-      clearTimeout(authBannerTimeoutRef.current);
-      authBannerTimeoutRef.current = null;
-    }
+    setAuthFailed(false);
     setLoadError((prev) => (prev === authExpiredMessage ? "" : prev));
-  }, []);
+  }, [authExpiredMessage]);
 
   const handlePlannerAuthError = useCallback((err) => {
     if (isAuthError(err)) {
-      if (authBannerTimeoutRef.current) {
-        clearTimeout(authBannerTimeoutRef.current);
-      }
+      setAuthFailed(true);
       setLoadError(authExpiredMessage);
-      authBannerTimeoutRef.current = setTimeout(() => {
-        setLoadError((prev) => (prev === authExpiredMessage ? "" : prev));
-        authBannerTimeoutRef.current = null;
-      }, 5000);
       return true;
     }
     return false;
-  }, [isAuthError]);
+  }, [isAuthError, authExpiredMessage]);
 
   const queueSessionSave = useCallback((overrides = {}) => {
     if (!sessionHydrated) return;
@@ -211,8 +203,8 @@ export default function DailyPlanner() {
       if (sessionSaveTimeoutRef.current) {
         clearTimeout(sessionSaveTimeoutRef.current);
       }
-      if (authBannerTimeoutRef.current) {
-        clearTimeout(authBannerTimeoutRef.current);
+      if (authRetryTimeoutRef.current) {
+        clearTimeout(authRetryTimeoutRef.current);
       }
     };
   }, [clearAuthBanner, isAuthError]);
@@ -293,6 +285,24 @@ export default function DailyPlanner() {
       });
     } catch (err) {
       if (handlePlannerAuthError(err)) {
+        // Schedule one automatic retry after the refresh back-off window clears
+        // so the calendar recovers silently if the token refreshes in time.
+        if (authRetryTimeoutRef.current) clearTimeout(authRetryTimeoutRef.current);
+        authRetryTimeoutRef.current = setTimeout(() => {
+          authRetryTimeoutRef.current = null;
+          void (async () => {
+            try {
+              const retryData = await apiClient.requestJson(
+                `/api/appointments?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
+              );
+              setEvents(Array.isArray(retryData) ? retryData : []);
+              setLoadError("");
+              clearAuthBanner();
+            } catch {
+              // Still failing — the persistent banner will guide the user.
+            }
+          })();
+        }, 20_000);
         return;
       }
       setLoadError(err?.message || "Failed to load appointments.");
@@ -494,8 +504,20 @@ export default function DailyPlanner() {
         </div>
       )}
       {loadError && (
-        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-          {loadError}
+        <div className={`rounded-lg border px-4 py-3 text-sm flex items-start justify-between gap-3 ${
+          authFailed
+            ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
+            : "border-red-500/40 bg-red-500/10 text-red-200"
+        }`}>
+          <span>{loadError}</span>
+          {authFailed && (
+            <a
+              href="/login"
+              className="shrink-0 underline underline-offset-2 font-medium hover:opacity-80"
+            >
+              Sign in again
+            </a>
+          )}
         </div>
       )}
 

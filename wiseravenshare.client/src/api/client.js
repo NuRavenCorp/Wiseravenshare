@@ -120,15 +120,20 @@ const refreshAccessToken = async () => {
       if (!response.ok) {
         if (response.status === 400 || response.status === 401 || response.status === 403) {
           writeStoredToken(null);
+          // Definitive auth failure — back off briefly to avoid hammering the endpoint.
+          refreshFailedUntil = Date.now() + 15_000;
+        } else {
+          // Server/network error — shorter back-off so a transient hiccup doesn't
+          // lock the user out of the planner for 2 minutes.
+          refreshFailedUntil = Date.now() + 10_000;
         }
-        refreshFailedUntil = Date.now() + 120_000;
         return false;
       }
 
       const data = await parseResponseBody(response);
       const newToken = data?.token || data?.access_token;
       if (!newToken) {
-        refreshFailedUntil = Date.now() + 120_000;
+        refreshFailedUntil = Date.now() + 15_000;
         return false;
       }
 
@@ -140,7 +145,8 @@ const refreshAccessToken = async () => {
       }
       return true;
     } catch {
-      refreshFailedUntil = Date.now() + 120_000;
+      // Network / fetch error — short back-off.
+      refreshFailedUntil = Date.now() + 10_000;
       return false;
     } finally {
       refreshInFlightPromise = null;
