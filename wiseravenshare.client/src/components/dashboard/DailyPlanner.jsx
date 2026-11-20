@@ -7,6 +7,7 @@ import { Bell, X, Loader2, Calendar, Clock, Trash2, Save, RefreshCw } from "luci
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiClient } from "@/api/client";
+import { useAuth } from "@/lib/AuthContext";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -69,6 +70,9 @@ const DEFAULT_FORM = {
 // ─── DailyPlanner ─────────────────────────────────────────────────────────────
 
 export default function DailyPlanner() {
+  // Share the same auth session as the rest of the app.
+  const { isAuthenticated, checkUserAuth } = useAuth();
+
   const calendarRef = useRef(null);
   const sessionSaveTimeoutRef = useRef(null);
   const authRetryTimeoutRef = useRef(null);
@@ -97,12 +101,21 @@ export default function DailyPlanner() {
 
   const handlePlannerAuthError = useCallback((err) => {
     if (isAuthError(err)) {
+      if (isAuthenticated) {
+        // AuthContext says user IS logged in. The planner got a 401 likely due to
+        // a stale/refreshing token. Attempt one silent token refresh through the
+        // shared auth context — this re-validates the session without any visible
+        // disruption. The 30-second retry interval will then reload appointments.
+        apiClient.auth.tryRefreshToken().then(() => {
+          checkUserAuth(false);
+        }).catch(() => {});
+      }
       setAuthFailed(true);
       setLoadError(authExpiredMessage);
       return true;
     }
     return false;
-  }, [isAuthError, authExpiredMessage]);
+  }, [isAuthError, authExpiredMessage, isAuthenticated, checkUserAuth]);
 
   const queueSessionSave = useCallback((overrides = {}) => {
     if (!sessionHydrated) return;
@@ -498,10 +511,14 @@ export default function DailyPlanner() {
   const handleRetry = async () => {
     setRetrying(true);
     try {
+      // Re-sync auth through the shared AuthContext first so both the planner
+      // and the rest of the app agree on the session state.
+      await checkUserAuth(false);
       await apiClient.auth.tryRefreshToken();
     } catch {
-      // best-effort refresh before retry
+      // best-effort — refreshCalendar will expose any remaining error
     }
+    clearAuthBanner();
     refreshCalendar();
     setRetrying(false);
   };
@@ -543,7 +560,11 @@ export default function DailyPlanner() {
             ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
             : "border-red-500/40 bg-red-500/10 text-red-200"
         }`}>
-          <span>{loadError}</span>
+          <span>
+            {authFailed && isAuthenticated
+              ? "Reconnecting planner to your session…"
+              : loadError}
+          </span>
           {authFailed && (
             <div className="flex items-center gap-2 shrink-0">
               <Button
@@ -556,12 +577,15 @@ export default function DailyPlanner() {
                 <RefreshCw className={`w-3 h-3 mr-1 ${retrying ? "animate-spin" : ""}`} />
                 Retry
               </Button>
-              <a
-                href="/login"
-                className="underline underline-offset-2 font-medium hover:opacity-80 text-xs"
-              >
-                Sign in
-              </a>
+              {/* Only show Sign in link if the AuthContext also says we're not authenticated */}
+              {!isAuthenticated && (
+                <a
+                  href="/login"
+                  className="underline underline-offset-2 font-medium hover:opacity-80 text-xs"
+                >
+                  Sign in
+                </a>
+              )}
             </div>
           )}
         </div>

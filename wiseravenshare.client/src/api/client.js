@@ -572,6 +572,10 @@ const entityProxy = new Proxy(
 
 export const apiClient = {
   requestJson,
+  /** Returns true when a JWT access token is currently stored in this browser session. */
+  hasStoredToken() {
+    return Boolean(readStoredToken());
+  },
   podcastAudio: {
     convertForBrowser(trackId) {
       return requestBlob(`/api/ravensight/media/music/${encodeURIComponent(trackId)}/browser-compatible`, { method: "GET" });

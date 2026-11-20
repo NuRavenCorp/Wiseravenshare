@@ -1,6 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { apiClient } from '@/api/client';
-import { appParams } from '@/lib/app-params';
 
 const AuthContext = createContext();
 
@@ -72,8 +71,10 @@ export const AuthProvider = ({ children }) => {
         const publicSettings = await apiClient.app.getPublicSettings();
         setAppPublicSettings(publicSettings);
         
-        // If we got the app public settings successfully, check if user is authenticated
-        if (appParams.token) {
+        // Check live token from storage — not the stale module-level appParams snapshot.
+        // appParams.token is frozen at module-load time and misses tokens written after
+        // the app boots (e.g. after a client-side login without a full page reload).
+        if (apiClient.hasStoredToken()) {
           await checkUserAuth();
         } else {
           setIsLoadingAuth(false);
