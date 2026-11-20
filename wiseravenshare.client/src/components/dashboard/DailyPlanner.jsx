@@ -135,7 +135,7 @@ export default function DailyPlanner() {
 
     sessionSaveTimeoutRef.current = setTimeout(async () => {
       try {
-        await apiClient.requestJson("/api/appointments/session-state", {
+        await apiClient.requestJson("/api/planner/session-state", {
           method: "PUT",
           body: JSON.stringify({
             currentView,
@@ -158,7 +158,7 @@ export default function DailyPlanner() {
     let mounted = true;
     const loadSessionState = async () => {
       try {
-        const state = await apiClient.requestJson("/api/appointments/session-state");
+        const state = await apiClient.requestJson("/api/planner/session-state");
         if (!mounted || !state) return;
 
         const nextView = typeof state.currentView === "string" && state.currentView.trim()
@@ -257,7 +257,7 @@ export default function DailyPlanner() {
       void (async () => {
         try {
           const data = await apiClient.requestJson(
-            `/api/appointments?start=${encodeURIComponent(api.view.activeStart.toISOString())}&end=${encodeURIComponent(api.view.activeEnd.toISOString())}`
+            `/api/planner?start=${encodeURIComponent(api.view.activeStart.toISOString())}&end=${encodeURIComponent(api.view.activeEnd.toISOString())}`
           );
           setEvents(Array.isArray(data) ? data : []);
           setLoadError("");
@@ -291,7 +291,7 @@ export default function DailyPlanner() {
       )
     );
     try {
-      await apiClient.requestJson(`/api/appointments/${id}/dismiss-alert`, { method: "PATCH" });
+      await apiClient.requestJson(`/api/planner/${id}/dismiss-alert`, { method: "PATCH" });
       clearAuthBanner();
     } catch (err) {
       handlePlannerAuthError(err);
@@ -302,7 +302,7 @@ export default function DailyPlanner() {
   const handleDatesSet = useCallback(async (dateInfo) => {
     try {
       const data = await apiClient.requestJson(
-        `/api/appointments?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
+        `/api/planner?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
       );
       setEvents(Array.isArray(data) ? data : []);
       setLoadError("");
@@ -322,7 +322,7 @@ export default function DailyPlanner() {
             void (async () => {
               try {
                 const retryData = await apiClient.requestJson(
-                  `/api/appointments?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
+                  `/api/planner?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
                 );
                 setEvents(Array.isArray(retryData) ? retryData : []);
                 setLoadError("");
@@ -352,7 +352,7 @@ export default function DailyPlanner() {
       color:                 ev.backgroundColor ?? "#3788d8",
     };
     try {
-      await apiClient.requestJson(`/api/appointments/${ev.id}`, {
+      await apiClient.requestJson(`/api/planner/${ev.id}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       });
@@ -424,12 +424,12 @@ export default function DailyPlanner() {
 
     const saveAppointment = async () => {
       if (formData.id) {
-        await apiClient.requestJson(`/api/appointments/${formData.id}`, {
+        await apiClient.requestJson(`/api/planner/${formData.id}`, {
           method: "PUT",
           body: JSON.stringify(payload),
         });
       } else {
-        await apiClient.requestJson("/api/appointments", {
+        await apiClient.requestJson("/api/planner", {
           method: "POST",
           body: JSON.stringify(payload),
         });
@@ -478,7 +478,7 @@ export default function DailyPlanner() {
     if (!formData.id || !window.confirm("Delete this appointment?")) return;
     setDeleting(true);
     try {
-      await apiClient.requestJson(`/api/appointments/${formData.id}`, { method: "DELETE" });
+      await apiClient.requestJson(`/api/planner/${formData.id}`, { method: "DELETE" });
       clearAuthBanner();
       setModalOpen(false);
       queueSessionSave({ modalOpen: false, draftJson: null });
@@ -773,3 +773,4 @@ export default function DailyPlanner() {
     </div>
   );
 }
+
