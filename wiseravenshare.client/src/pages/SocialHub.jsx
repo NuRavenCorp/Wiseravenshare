@@ -18,7 +18,8 @@ const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "twitter", "blu
 
 export default function SocialHub() {
   const [platformStatuses, setPlatformStatuses] = useState({});
-  const [loading, setLoading] = useState(true);
+  // Don't block the page on this — load statuses in the background.
+  // The Feed tab renders immediately; Connect tab shows statuses when ready.
 
   const fetchStatuses = useCallback(async () => {
     try {
@@ -26,8 +27,6 @@ export default function SocialHub() {
       setPlatformStatuses(data || {});
     } catch {
       setPlatformStatuses({});
-    } finally {
-      setLoading(false);
     }
   }, []);
 
@@ -36,14 +35,6 @@ export default function SocialHub() {
   }, [fetchStatuses]);
 
   const connectedCount = Object.values(platformStatuses).filter(s => s?.connected).length;
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-background">
