@@ -3,7 +3,7 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import { Bell, X, Loader2, Calendar, Clock, Trash2, Save } from "lucide-react";
+import { Bell, X, Loader2, Calendar, Clock, Trash2, Save, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiClient } from "@/api/client";
@@ -82,6 +82,7 @@ export default function DailyPlanner() {
   const [initialDate, setInitialDate] = useState(null);
   const [modalOpen, setModalOpen]     = useState(false);
   const [saving, setSaving]           = useState(false);
+  const [retrying, setRetrying]       = useState(false);
   const [deleting, setDeleting]       = useState(false);
   const [formData, setFormData]       = useState(DEFAULT_FORM);
   const [formError, setFormError]     = useState("");
@@ -241,6 +242,28 @@ export default function DailyPlanner() {
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
+
+  // ── Retry while auth-failed: attempt reload every 30s ─────────────────────
+  useEffect(() => {
+    if (!authFailed) return;
+    const interval = setInterval(() => {
+      const api = calendarRef.current?.getApi();
+      if (!api) return;
+      void (async () => {
+        try {
+          const data = await apiClient.requestJson(
+            `/api/appointments?start=${encodeURIComponent(api.view.activeStart.toISOString())}&end=${encodeURIComponent(api.view.activeEnd.toISOString())}`
+          );
+          setEvents(Array.isArray(data) ? data : []);
+          setLoadError("");
+          clearAuthBanner();
+        } catch {
+          // Still failing — keep interval running.
+        }
+      })();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [authFailed, clearAuthBanner]);
 
   const triggerAlert = (ev) => {
     setActiveAlert(ev);
@@ -472,6 +495,17 @@ export default function DailyPlanner() {
     });
   };
 
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await apiClient.auth.tryRefreshToken();
+    } catch {
+      // best-effort refresh before retry
+    }
+    refreshCalendar();
+    setRetrying(false);
+  };
+
   if (!sessionHydrated) {
     return (
       <div className="rounded-xl border border-border bg-card p-6 flex items-center justify-center">
@@ -511,12 +545,24 @@ export default function DailyPlanner() {
         }`}>
           <span>{loadError}</span>
           {authFailed && (
-            <a
-              href="/login"
-              className="shrink-0 underline underline-offset-2 font-medium hover:opacity-80"
-            >
-              Sign in again
-            </a>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRetry}
+                disabled={retrying}
+                className="h-7 px-2 py-0 text-xs border-amber-500/50 text-amber-200 hover:bg-amber-500/20"
+              >
+                <RefreshCw className={`w-3 h-3 mr-1 ${retrying ? "animate-spin" : ""}`} />
+                Retry
+              </Button>
+              <a
+                href="/login"
+                className="underline underline-offset-2 font-medium hover:opacity-80 text-xs"
+              >
+                Sign in
+              </a>
+            </div>
           )}
         </div>
       )}
