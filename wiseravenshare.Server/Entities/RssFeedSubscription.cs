@@ -47,6 +47,12 @@ public class RssFeedSubscription : BaseEntity
     /// <summary>Whether the feed is active (user can pause without deleting).</summary>
     public bool IsActive { get; set; } = true;
 
+    /// <summary>
+    /// True for feeds seeded by server configuration (Social:SystemFeeds).
+    /// System feeds are shared across all users; UserId is Guid.Empty for them.
+    /// </summary>
+    public bool IsSystemFeed { get; set; }
+
     public virtual User User { get; set; } = null!;
 }
 
@@ -89,6 +95,9 @@ public class RssFeedItem : BaseEntity
     public DateTimeOffset? PublishedAt { get; set; }
 
     public bool IsRead { get; set; }
+
+    /// <summary>Copied from the subscription — true for server-configured feeds.</summary>
+    public bool IsSystemFeed { get; set; }
 
     public virtual RssFeedSubscription Subscription { get; set; } = null!;
 }

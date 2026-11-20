@@ -118,6 +118,7 @@ public sealed class RssFeedIngestService : IRssFeedIngestService
                 FaviconUrl = sub.FaviconUrl?.Truncate(500),
                 PublishedAt = item.CreatedAt,
                 IsRead = false,
+                IsSystemFeed = sub.IsSystemFeed,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             });

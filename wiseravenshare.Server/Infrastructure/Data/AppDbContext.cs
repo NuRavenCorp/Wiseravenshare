@@ -1418,11 +1418,14 @@ public class AppDbContext : DbContext
             entity.Property(s => s.Platform).HasMaxLength(30);
             entity.Property(s => s.FaviconUrl).HasMaxLength(500);
             entity.HasIndex(s => s.UserId);
+            entity.HasIndex(s => s.IsSystemFeed);
+            // Unique per user (Guid.Empty = system feeds)
             entity.HasIndex(s => new { s.UserId, s.FeedUrl }).IsUnique();
             entity.HasOne(s => s.User)
                 .WithMany()
                 .HasForeignKey(s => s.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired(false);
         });
 
         modelBuilder.Entity<RssFeedItem>(entity =>

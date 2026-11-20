@@ -4,12 +4,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ConnectionCard from "@/components/social/ConnectionCard";
 import CrossPostComposer from "@/components/social/CrossPostComposer";
 import ImportPanel from "@/components/social/ImportPanel";
-import RssFeedManager from "@/components/social/RssFeedManager";
+import SystemFeedSection from "@/components/social/SystemFeedSection";
 import Navbar from "@/components/landing/Navbar";
 import Footer from "@/components/landing/Footer";
 import TodaysVibe from "@/components/vibe/TodaysVibe";
 import LimitationsNotice from "@/components/social/LimitationsNotice";
-import { Share2, Download, Feather, Link2, Rss } from "lucide-react";
+import { Share2, Download, Feather, Link2 } from "lucide-react";
 import PostComposer from "@/components/feed/PostComposer";
 import PostsFeed from "@/components/feed/PostsFeed";
 
@@ -53,12 +53,9 @@ export default function SocialHub() {
           <TodaysVibe />
         </div>
         <Tabs defaultValue="feed">
-          <TabsList className="grid w-full grid-cols-6 mb-6">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="feed" className="flex items-center gap-2">
               <Feather className="w-4 h-4" /> Feed
-            </TabsTrigger>
-            <TabsTrigger value="rss" className="flex items-center gap-2">
-              <Rss className="w-4 h-4" /> RSS
             </TabsTrigger>
             <TabsTrigger value="connect" className="flex items-center gap-2">
               <Link2 className="w-4 h-4" /> Connect
@@ -76,6 +73,7 @@ export default function SocialHub() {
 
           <TabsContent value="feed">
             <PostsFeed />
+            <SystemFeedSection />
           </TabsContent>
 
           <TabsContent value="rss">

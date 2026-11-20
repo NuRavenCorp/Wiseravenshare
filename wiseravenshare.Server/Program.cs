@@ -1881,7 +1881,7 @@ CREATE SCHEMA IF NOT EXISTS app_data;
 
 CREATE TABLE IF NOT EXISTS app_data.""RssFeedSubscriptions"" (
     ""Id""               UUID         NOT NULL DEFAULT gen_random_uuid(),
-    ""UserId""           UUID         NOT NULL,
+    ""UserId""           UUID         NULL,
     ""FeedUrl""          VARCHAR(2048) NOT NULL,
     ""DisplayName""      VARCHAR(200) NOT NULL DEFAULT '',
     ""Platform""         VARCHAR(30)  NOT NULL DEFAULT 'rss',
@@ -1890,6 +1890,7 @@ CREATE TABLE IF NOT EXISTS app_data.""RssFeedSubscriptions"" (
     ""LastItemAt""       TIMESTAMPTZ  NULL,
     ""ConsecutiveErrors"" INTEGER     NOT NULL DEFAULT 0,
     ""IsActive""         BOOLEAN      NOT NULL DEFAULT TRUE,
+    ""IsSystemFeed""     BOOLEAN      NOT NULL DEFAULT FALSE,
     ""CreatedAt""        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     ""UpdatedAt""        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     ""IsDeleted""        BOOLEAN      NOT NULL DEFAULT FALSE,
@@ -1899,6 +1900,7 @@ CREATE TABLE IF NOT EXISTS app_data.""RssFeedSubscriptions"" (
         FOREIGN KEY (""UserId"")
         REFERENCES app_data.""Users""(""Id"")
         ON DELETE CASCADE
+        DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE INDEX IF NOT EXISTS ""IX_RssFeedSubscriptions_UserId""
@@ -1937,12 +1939,63 @@ CREATE UNIQUE INDEX IF NOT EXISTS ""IX_RssFeedItems_SubscriptionId_ExternalId""
 
 CREATE INDEX IF NOT EXISTS ""IX_RssFeedItems_UserId_PublishedAt""
     ON app_data.""RssFeedItems""(""UserId"", ""PublishedAt"" DESC NULLS LAST);
+
+-- Idempotent column additions for existing deployments
+ALTER TABLE IF EXISTS app_data.""RssFeedSubscriptions""
+    ADD COLUMN IF NOT EXISTS ""IsSystemFeed"" BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE IF EXISTS app_data.""RssFeedItems""
+    ADD COLUMN IF NOT EXISTS ""IsSystemFeed"" BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS ""IX_RssFeedSubscriptions_IsSystemFeed""
+    ON app_data.""RssFeedSubscriptions""(""IsSystemFeed"") WHERE ""IsSystemFeed"" = TRUE;
 ";
 
     await using var connection = new NpgsqlConnection(connectionString);
     await connection.OpenAsync(cancellationToken);
     await using var command = new NpgsqlCommand(sql, connection);
     await command.ExecuteNonQueryAsync(cancellationToken);
+}
+
+static async Task SeedSystemRssFeedsAsync(
+    Wiseravenshare.Server.Infrastructure.Data.AppDbContext db,
+    IConfiguration configuration,
+    CancellationToken ct)
+{
+    var feedConfigs = configuration
+        .GetSection("Social:SystemFeeds")
+        .Get<SystemFeedConfig[]>();
+
+    if (feedConfigs is null || feedConfigs.Length == 0) return;
+
+    foreach (var cfg in feedConfigs)
+    {
+        if (string.IsNullOrWhiteSpace(cfg.FeedUrl)) continue;
+
+        var exists = await db.RssFeedSubscriptions
+            .AnyAsync(s => s.FeedUrl == cfg.FeedUrl && s.IsSystemFeed && !s.IsDeleted, ct);
+
+        if (exists) continue;
+
+        db.RssFeedSubscriptions.Add(new Wiseravenshare.Server.Entities.RssFeedSubscription
+        {
+            Id = Guid.NewGuid(),
+            UserId = Guid.Empty,       // No user owner — system feed
+            FeedUrl = cfg.FeedUrl.Trim(),
+            DisplayName = (cfg.DisplayName ?? GetDomainFromUrl(cfg.FeedUrl))[..Math.Min((cfg.DisplayName ?? cfg.FeedUrl).Length, 200)],
+            Platform = string.IsNullOrWhiteSpace(cfg.Platform) ? "rss" : cfg.Platform.Trim().ToLowerInvariant(),
+            IsSystemFeed = true,
+            IsActive = true,
+            ConsecutiveErrors = 0,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+    }
+
+    await db.SaveChangesAsync(ct);
+
+    static string GetDomainFromUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host.Replace("www.", "") : "RSS Feed";
 }
 
 static async Task EnsureKaraokeScoringTablesAsync(string connectionString, CancellationToken cancellationToken = default)
@@ -3224,6 +3277,18 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(ex, "RSS feed tables bootstrap failed during startup.");
     }
 
+    try
+    {
+        await SeedSystemRssFeedsAsync(
+            scope.ServiceProvider.GetRequiredService<Wiseravenshare.Server.Infrastructure.Data.AppDbContext>(),
+            app.Configuration,
+            CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "System RSS feed seeding failed during startup.");
+    }
+
     // Seed default badge catalog (badge-first currency system)
     try
     {
@@ -3827,3 +3892,10 @@ if (requireDatabase && !string.IsNullOrWhiteSpace(defaultConnectionString))
 }
 
 app.Run();
+
+internal sealed class SystemFeedConfig
+{
+    public string FeedUrl { get; set; } = string.Empty;
+    public string? DisplayName { get; set; }
+    public string? Platform { get; set; }
+}
