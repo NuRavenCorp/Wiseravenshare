@@ -1,19 +1,22 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { apiClient } from "@/api/client";
 import { Link } from "react-router-dom";
-import { Bell, CalendarClock, Activity, CheckCircle2, Circle, Heart, MessageCircle, Repeat2, Share2, Music, Users, ArrowRight } from "lucide-react";
+import { Bell, CalendarClock, Activity, CheckCircle2, Circle, Heart, MessageCircle, Repeat2, Share2, Music, Users, ArrowRight, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 
 const NOTIF_ICONS = {
-  like: Heart,
-  comment: MessageCircle,
-  follow: Users,
+  like: Heart, Like: Heart,
+  comment: MessageCircle, Comment: MessageCircle,
+  follow: Users, Follow: Users,
+  repost: Repeat2, Repost: Repeat2,
   dm: MessageCircle,
-  badge: CheckCircle2,
-  truth_score: Activity,
-  system: Bell,
+  badge: CheckCircle2, Badge: CheckCircle2,
+  truth_score: Activity, TruthScore: Activity,
+  system: Bell, System: Bell,
 };
+
+const POLL_MS = 30_000;
 
 export default function ActivityHub() {
   const [user, setUser] = useState(null);
@@ -21,8 +24,23 @@ export default function ActivityHub() {
   const [jamSessions, setJamSessions] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [recentPosts, setRecentPosts] = useState([]);
+  const [likeTally, setLikeTally] = useState({ total: 0, unread: 0 });
   const [markingRead, setMarkingRead] = useState(false);
   const { toast } = useToast();
+
+  const fetchNotifications = useCallback(async (userId) => {
+    try {
+      const res = await apiClient.notifications.list(1, 20);
+      const items = res?.items || [];
+      setNotifications(items);
+      const likeNotifs = items.filter((n) => {
+        const t = n.type || n.Type || "";
+        return t === "like" || t === "Like";
+      });
+      const unreadLikes = likeNotifs.filter((n) => !(n.IsRead ?? n.isRead)).length;
+      setLikeTally((prev) => ({ total: prev.total, unread: unreadLikes }));
+    } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -32,25 +50,27 @@ export default function ActivityHub() {
         if (!mounted) return;
         setUser(me);
 
-        const [jamRes, notifRes, postRes] = await Promise.all([
+        const [jamRes, postRes] = await Promise.all([
           apiClient.entities.JamSession.filter(
             { participants: me.id, status: { $in: ["scheduled", "active"] } },
             { sort: "scheduled_date", limit: 5 }
-          ),
-          apiClient.entities.Notification.filter(
-            { recipient_id: me.id },
-            { sort: "-created_date", limit: 8 }
-          ),
+          ).catch(() => ({ items: [] })),
           apiClient.entities.Post.filter(
             { created_by_id: me.id, status: "published" },
             { sort: "-created_date", limit: 5 }
-          ),
+          ).catch(() => ({ items: [] })),
         ]);
 
         if (!mounted) return;
+        const posts = postRes.items || [];
         setJamSessions(jamRes.items || []);
-        setNotifications(notifRes.items || []);
-        setRecentPosts(postRes.items || []);
+        setRecentPosts(posts);
+
+        // Cumulative likes tally across all my posts
+        const totalLikes = posts.reduce((sum, p) => sum + (p.like_count || p.likesCount || 0), 0);
+        setLikeTally((prev) => ({ ...prev, total: totalLikes }));
+
+        await fetchNotifications(me.id);
       } catch (e) {
         console.error("Activity hub error:", e);
       } finally {
@@ -58,17 +78,22 @@ export default function ActivityHub() {
       }
     })();
     return () => { mounted = false; };
-  }, []);
+  }, [fetchNotifications]);
+
+  // Poll for new notifications every 30s
+  useEffect(() => {
+    if (!user) return;
+    const timer = setInterval(() => fetchNotifications(user.id), POLL_MS);
+    return () => clearInterval(timer);
+  }, [user, fetchNotifications]);
 
   const markAllRead = async () => {
-    const unread = notifications.filter((n) => !n.read);
-    if (unread.length === 0) return;
+    if (!user) return;
     setMarkingRead(true);
     try {
-      await apiClient.entities.Notification.bulkUpdate(
-        unread.map((n) => ({ id: n.id, read: true }))
-      );
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      await apiClient.notifications.markAllRead();
+      setNotifications((prev) => prev.map((n) => ({ ...n, IsRead: true, isRead: true })));
+      setLikeTally((prev) => ({ ...prev, unread: 0 }));
     } catch (e) {
       toast({ title: "Could not mark notifications as read", variant: "destructive" });
     } finally {
@@ -76,18 +101,31 @@ export default function ActivityHub() {
     }
   };
 
+  const markOneRead = async (n) => {
+    const isRead = n.IsRead ?? n.isRead;
+    if (isRead) return;
+    try {
+      await apiClient.notifications.markRead(n.Id ?? n.id);
+      setNotifications((prev) =>
+        prev.map((item) => (item.Id === n.Id || item.id === n.id) ? { ...item, IsRead: true, isRead: true } : item)
+      );
+      const t = n.type || n.Type || "";
+      if (t === "like" || t === "Like") {
+        setLikeTally((prev) => ({ ...prev, unread: Math.max(0, prev.unread - 1) }));
+      }
+    } catch { /* best effort */ }
+  };
+
   const formatSessionDate = (dateStr) => {
     if (!dateStr) return "Not scheduled";
     const d = new Date(dateStr);
     const now = new Date();
     const diff = d - now;
-    const days = Math.floor(diff / 86400000);
     const hours = Math.floor(diff / 3600000);
     if (diff < 0) return "Started";
     if (hours < 1) return "Starting soon";
     if (hours < 24) return `In ${hours}h`;
-    if (days === 1) return "Tomorrow";
-    return `In ${days} days`;
+    return `In ${Math.floor(hours / 24)} days`;
   };
 
   if (loading) {
@@ -98,7 +136,7 @@ export default function ActivityHub() {
     );
   }
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = notifications.filter((n) => !(n.IsRead ?? n.isRead)).length;
 
   return (
     <div className="space-y-6">
@@ -140,6 +178,31 @@ export default function ActivityHub() {
         )}
       </section>
 
+      {/* Persistent Like Tally */}
+      <section className="rounded-xl border border-primary/20 bg-primary/5 p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <Heart className="w-4 h-4 text-red-400" />
+          <h2 className="font-heading text-sm text-foreground tracking-wide">Your Likes</h2>
+          {likeTally.unread > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/20 animate-pulse">
+              {likeTally.unread} new ♥
+            </span>
+          )}
+        </div>
+        <div className="flex items-end gap-6">
+          <div>
+            <p className="text-3xl font-heading text-foreground">{likeTally.total.toLocaleString()}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">total likes on your posts</p>
+          </div>
+          {likeTally.unread > 0 && (
+            <div>
+              <p className="text-xl font-heading text-red-400">+{likeTally.unread}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">since last check</p>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* Notifications */}
       <section className="rounded-xl border border-border bg-card p-5">
         <div className="flex items-center justify-between mb-4">
@@ -163,27 +226,34 @@ export default function ActivityHub() {
         ) : (
           <div className="space-y-1">
             {notifications.map((n) => {
-              const Icon = NOTIF_ICONS[n.type] || Bell;
+              const type = n.type || n.Type || "system";
+              const Icon = NOTIF_ICONS[type] || Bell;
+              const isRead = n.IsRead ?? n.isRead ?? false;
+              const content = n.Content ?? n.content ?? n.message ?? "";
+              const createdAt = n.CreatedAt ?? n.created_date ?? n.createdAt;
               return (
-                <div
-                  key={n.id}
-                  className={`flex items-start gap-3 rounded-lg p-3 transition-colors ${
-                    n.read ? "bg-transparent" : "bg-primary/5 border border-primary/20"
+                <button
+                  key={n.Id ?? n.id}
+                  onClick={() => markOneRead(n)}
+                  className={`w-full flex items-start gap-3 rounded-lg p-3 text-left transition-colors hover:bg-secondary/50 ${
+                    isRead ? "bg-transparent" : "bg-primary/5 border border-primary/20"
                   }`}
                 >
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                    n.read ? "bg-secondary text-muted-foreground" : "bg-primary/15 text-primary"
+                    isRead ? "bg-secondary text-muted-foreground" : "bg-primary/15 text-primary"
                   }`}>
                     <Icon className="w-3.5 h-3.5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-foreground">{n.message}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {new Date(n.created_date).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                    </p>
+                    <p className="text-sm text-foreground">{content}</p>
+                    {createdAt && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {new Date(createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                      </p>
+                    )}
                   </div>
-                  {!n.read && <Circle className="w-2.5 h-2.5 text-primary fill-primary shrink-0 mt-2" />}
-                </div>
+                  {!isRead && <Circle className="w-2.5 h-2.5 text-primary fill-primary shrink-0 mt-2" />}
+                </button>
               );
             })}
           </div>
@@ -207,16 +277,16 @@ export default function ActivityHub() {
                 </p>
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1">
-                    <Heart className="w-3 h-3" /> {post.like_count || 0}
+                    <Heart className="w-3 h-3" /> {post.like_count || post.likesCount || 0}
                   </span>
                   <span className="flex items-center gap-1">
-                    <MessageCircle className="w-3 h-3" /> {post.comment_count || 0}
+                    <MessageCircle className="w-3 h-3" /> {post.comment_count || post.commentsCount || 0}
                   </span>
                   <span className="flex items-center gap-1">
-                    <Repeat2 className="w-3 h-3" /> {post.repost_count || 0}
+                    <Repeat2 className="w-3 h-3" /> {post.repost_count || post.repostsCount || 0}
                   </span>
                   <span className="flex items-center gap-1">
-                    <Share2 className="w-3 h-3" /> {post.share_count || 0}
+                    <Share2 className="w-3 h-3" /> {post.share_count || post.sharesCount || 0}
                   </span>
                   <span className="ml-auto">
                     {new Date(post.created_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
@@ -230,7 +300,6 @@ export default function ActivityHub() {
           <Button variant="outline" size="sm">View All Posts</Button>
         </Link>
       </section>
-
     </div>
   );
 }

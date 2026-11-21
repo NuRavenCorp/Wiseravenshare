@@ -803,14 +803,22 @@ public class AuthController : ControllerBase
                 profileUrl = connection.ProfileUrl,
                 feedUrl = connection.FeedUrl,
                 designation = connection.Designation,
-                tokenExpiresAt = connection.TokenExpiresAt
+                tokenExpiresAt = connection.TokenExpiresAt,
+                destinationId = connection.DestinationId,
+                destinationName = connection.DestinationName,
+                shareProfile = connection.ShareProfile,
+                allowCrossPosting = connection.AllowCrossPosting,
+                allowContentImport = connection.AllowContentImport,
+                shareAnalytics = connection.ShareAnalytics,
+                sharingConsent = connection.SharingConsent,
+                scopes = connection.Scopes
             }
         });
     }
 
     /// <summary>
     /// Returns connection status for all supported social platforms in one call.
-    /// Used by the Social Hub connect page to show a summary without 6 round-trips.
+    /// Used by the Social Hub connect page to show a summary without multiple round-trips.
     /// </summary>
     [HttpGet("platforms")]
     [Authorize]
@@ -824,7 +832,7 @@ public class AuthController : ControllerBase
             return Ok(new Dictionary<string, object>());
         }
 
-        var allPlatforms = new[] { "facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky" };
+        var allPlatforms = new[] { "facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky", "linkedin" };
         var result = new Dictionary<string, object>();
 
         foreach (var p in allPlatforms)
@@ -835,11 +843,17 @@ public class AuthController : ControllerBase
             result[p] = new
             {
                 connected,
-                oauthConfigured = cfg.IsEnabled || p == "bluesky", // bluesky uses manual app-password
+                oauthConfigured = cfg.IsEnabled || p == "bluesky",
                 username = connection?.Username,
                 profileUrl = connection?.ProfileUrl,
                 designation = connection?.Designation,
                 tokenExpiresAt = connection?.TokenExpiresAt,
+                shareProfile = connection?.ShareProfile ?? true,
+                allowCrossPosting = connection?.AllowCrossPosting ?? true,
+                allowContentImport = connection?.AllowContentImport ?? true,
+                shareAnalytics = connection?.ShareAnalytics ?? true,
+                sharingConsent = connection?.SharingConsent ?? true,
+                scopes = connection?.Scopes ?? "profile,crosspost,import,analytics"
             };
         }
 
@@ -3492,19 +3506,6 @@ public class AuthController : ControllerBase
         SocialFeedConnection existing,
         IReadOnlyDictionary<string, string> fields)
     {
-        var next = new SocialFeedConnection
-        {
-            Enabled = true,
-            Site = platform,
-            Username = existing.Username,
-            ProfileUrl = existing.ProfileUrl,
-            FeedUrl = existing.FeedUrl,
-            Designation = existing.Designation,
-            AccessToken = existing.AccessToken,
-            RefreshToken = existing.RefreshToken,
-            TokenExpiresAt = existing.TokenExpiresAt
-        };
-
         static string ReadField(IReadOnlyDictionary<string, string> values, params string[] keys)
         {
             foreach (var key in keys)
@@ -3518,12 +3519,45 @@ public class AuthController : ControllerBase
             return string.Empty;
         }
 
-        var channelHandle = ReadField(fields, "channel_handle", "channelHandle", "youtube_user_id", "youtubeUserId", "user_id", "userId", "username", "handle");
+        static bool ParseBool(string value, bool fallback)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return fallback;
+            return bool.TryParse(value, out var b) ? b : fallback;
+        }
+
+        var explicitUsername = ReadField(fields, "username", "handle", "user_id", "userId");
+        var explicitProfileUrl = ReadField(fields, "profile_url", "profileUrl");
+        var explicitFeedUrl = ReadField(fields, "feed_url", "feedUrl");
+        var explicitDesignation = ReadField(fields, "designation");
+
+        var next = new SocialFeedConnection
+        {
+            Enabled = true,
+            Site = platform,
+            Username = !string.IsNullOrWhiteSpace(explicitUsername) ? explicitUsername : existing.Username,
+            ProfileUrl = !string.IsNullOrWhiteSpace(explicitProfileUrl) ? explicitProfileUrl : existing.ProfileUrl,
+            FeedUrl = !string.IsNullOrWhiteSpace(explicitFeedUrl) ? explicitFeedUrl : existing.FeedUrl,
+            Designation = !string.IsNullOrWhiteSpace(explicitDesignation) ? explicitDesignation : existing.Designation,
+            AccessToken = existing.AccessToken,
+            RefreshToken = existing.RefreshToken,
+            TokenExpiresAt = existing.TokenExpiresAt,
+            DestinationId = existing.DestinationId,
+            DestinationToken = existing.DestinationToken,
+            DestinationName = existing.DestinationName,
+            ShareProfile = ParseBool(ReadField(fields, "share_profile", "shareProfile"), existing.ShareProfile),
+            AllowCrossPosting = ParseBool(ReadField(fields, "allow_crossposting", "allowCrossPosting", "sharing_crosspost"), existing.AllowCrossPosting),
+            AllowContentImport = ParseBool(ReadField(fields, "allow_content_import", "allowContentImport", "sharing_import"), existing.AllowContentImport),
+            ShareAnalytics = ParseBool(ReadField(fields, "share_analytics", "shareAnalytics", "sharing_analytics"), existing.ShareAnalytics),
+            SharingConsent = ParseBool(ReadField(fields, "sharing_consent", "sharingConsent"), true),
+            Scopes = ReadField(fields, "scopes", "sharing_scopes") is { Length: > 0 } sc ? sc : (existing.Scopes ?? "profile,crosspost,import,analytics")
+        };
+
+        var channelHandle = ReadField(fields, "channel_handle", "channelHandle", "youtube_user_id", "youtubeUserId");
         var channelId = ReadField(fields, "channel_id", "channelId", "youtube_channel_id", "youtubeChannelId", "id");
         var pageId = ReadField(fields, "page_id", "pageId");
         var pageName = ReadField(fields, "page_name", "pageName");
-        var instagramUserId = ReadField(fields, "user_id", "instagram_user_id", "business_user_id");
-        var instagramUsername = ReadField(fields, "instagram_username", "username", "handle");
+        var instagramUserId = ReadField(fields, "instagram_user_id", "business_user_id");
+        var instagramUsername = ReadField(fields, "instagram_username");
 
         switch (platform)
         {
@@ -3541,8 +3575,9 @@ public class AuthController : ControllerBase
                     next.ProfileUrl = $"https://www.youtube.com/channel/{channelId}";
                     next.FeedUrl = next.ProfileUrl;
                 }
-
+                if (string.IsNullOrWhiteSpace(next.Designation)) next.Designation = "youtube-channel";
                 return new UpdateSocialFeedsRequest { YouTube = next };
+
             case "facebook":
                 if (!string.IsNullOrWhiteSpace(pageName))
                 {
@@ -3558,8 +3593,9 @@ public class AuthController : ControllerBase
                     next.ProfileUrl = $"https://www.facebook.com/{pageId}";
                     next.FeedUrl = next.ProfileUrl;
                 }
-
+                if (string.IsNullOrWhiteSpace(next.Designation)) next.Designation = "facebook-page";
                 return new UpdateSocialFeedsRequest { Facebook = next };
+
             case "instagram":
                 if (!string.IsNullOrWhiteSpace(instagramUsername))
                 {
@@ -3575,10 +3611,11 @@ public class AuthController : ControllerBase
                     next.ProfileUrl = $"https://www.instagram.com/{next.Username.TrimStart('@')}";
                     next.FeedUrl = next.ProfileUrl;
                 }
-                next.Designation = "instagram-creator";
+                if (string.IsNullOrWhiteSpace(next.Designation)) next.Designation = "instagram-creator";
                 return new UpdateSocialFeedsRequest { Instagram = next };
+
             case "tiktok":
-                var tiktokUser = ReadField(fields, "username", "handle", "user_id", "open_id");
+                var tiktokUser = ReadField(fields, "username", "handle", "open_id");
                 if (!string.IsNullOrWhiteSpace(tiktokUser))
                 {
                     var normalized = tiktokUser.TrimStart('@');
@@ -3586,8 +3623,50 @@ public class AuthController : ControllerBase
                     next.ProfileUrl = $"https://www.tiktok.com/@{normalized}";
                     next.FeedUrl = next.ProfileUrl;
                 }
-
+                if (string.IsNullOrWhiteSpace(next.Designation)) next.Designation = "tiktok-creator";
                 return new UpdateSocialFeedsRequest { TikTok = next };
+
+            case "twitter":
+                var twitterUser = ReadField(fields, "username", "handle");
+                if (!string.IsNullOrWhiteSpace(twitterUser))
+                {
+                    var normalized = twitterUser.TrimStart('@');
+                    next.Username = normalized;
+                    next.ProfileUrl = $"https://x.com/{normalized}";
+                    next.FeedUrl = next.ProfileUrl;
+                }
+                if (string.IsNullOrWhiteSpace(next.Designation)) next.Designation = "x-profile";
+                return new UpdateSocialFeedsRequest { Twitter = next };
+
+            case "bluesky":
+                var bskyUser = ReadField(fields, "username", "handle");
+                if (!string.IsNullOrWhiteSpace(bskyUser))
+                {
+                    var normalized = bskyUser.TrimStart('@');
+                    next.Username = normalized;
+                    next.ProfileUrl = $"https://bsky.app/profile/{normalized}";
+                    next.FeedUrl = next.ProfileUrl;
+                }
+                var appPassword = ReadField(fields, "app_password", "appPassword");
+                if (!string.IsNullOrWhiteSpace(appPassword))
+                {
+                    next.AccessToken = appPassword;
+                }
+                if (string.IsNullOrWhiteSpace(next.Designation)) next.Designation = "bluesky-profile";
+                return new UpdateSocialFeedsRequest { Bluesky = next };
+
+            case "linkedin":
+                var linkedinUser = ReadField(fields, "username", "handle");
+                if (!string.IsNullOrWhiteSpace(linkedinUser))
+                {
+                    var normalized = linkedinUser.TrimStart('@');
+                    next.Username = normalized;
+                    next.ProfileUrl = $"https://www.linkedin.com/in/{normalized}";
+                    next.FeedUrl = next.ProfileUrl;
+                }
+                if (string.IsNullOrWhiteSpace(next.Designation)) next.Designation = "linkedin-profile";
+                return new UpdateSocialFeedsRequest { LinkedIn = next };
+
             default:
                 return null;
         }

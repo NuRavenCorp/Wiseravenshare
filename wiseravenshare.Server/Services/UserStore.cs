@@ -792,7 +792,16 @@ public sealed class UserStore
             Designation = designation,
             AccessToken = connection.AccessToken ?? string.Empty,
             RefreshToken = connection.RefreshToken ?? string.Empty,
-            TokenExpiresAt = connection.TokenExpiresAt
+            TokenExpiresAt = connection.TokenExpiresAt,
+            DestinationId = connection.DestinationId ?? string.Empty,
+            DestinationToken = connection.DestinationToken ?? string.Empty,
+            DestinationName = connection.DestinationName ?? string.Empty,
+            ShareProfile = connection.ShareProfile,
+            AllowCrossPosting = connection.AllowCrossPosting,
+            AllowContentImport = connection.AllowContentImport,
+            ShareAnalytics = connection.ShareAnalytics,
+            SharingConsent = connection.SharingConsent,
+            Scopes = connection.Scopes ?? "profile,crosspost,import,analytics"
         };
     }
 

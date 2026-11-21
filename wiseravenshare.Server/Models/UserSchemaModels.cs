@@ -81,6 +81,12 @@ public sealed class SocialFeedConnection
     public string DestinationToken { get; set; } = string.Empty;
     /// <summary>Human-readable name for the publish destination (e.g., Facebook page name, YouTube channel title).</summary>
     public string DestinationName { get; set; } = string.Empty;
+    public bool ShareProfile { get; set; } = true;
+    public bool AllowCrossPosting { get; set; } = true;
+    public bool AllowContentImport { get; set; } = true;
+    public bool ShareAnalytics { get; set; } = true;
+    public bool SharingConsent { get; set; } = true;
+    public string Scopes { get; set; } = "profile,crosspost,import,analytics";
 }
 
 public sealed class UserResponse

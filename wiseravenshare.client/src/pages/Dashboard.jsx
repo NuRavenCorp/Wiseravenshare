@@ -14,6 +14,7 @@ import AnalyticsSection from "@/components/dashboard/AnalyticsSection";
 import SubscriptionPlans from "@/components/dashboard/SubscriptionPlans";
 import ContentPerformance from "@/components/dashboard/ContentPerformance";
 import PostComposer from "@/components/feed/PostComposer";
+import FollowingFeed from "@/components/feed/FollowingFeed";
 import ThreadsWidget from "@/components/dashboard/ThreadsWidget";
 import ActivityHub from "@/components/dashboard/ActivityHub";
 
@@ -72,7 +73,12 @@ export default function Dashboard() {
           <div>
             <h1 className="font-heading text-2xl text-foreground mb-6 text-glow">{current.label}</h1>
             {active === "hub" && <ActivityHub />}
-            {active === "create" && <PostComposer />}
+            {active === "create" && (
+              <div>
+                <PostComposer />
+                <FollowingFeed />
+              </div>
+            )}
             {active === "threads" && <ThreadsWidget />}
             {active === "vibe" && <TodaysVibe />}
             {active === "profile" && <ProfileSection />}

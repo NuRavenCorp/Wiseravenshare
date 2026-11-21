@@ -1384,6 +1384,26 @@ export const apiClient = {
       });
     },
   },
+  notifications: {
+    list(page = 1, pageSize = 20) {
+      return requestJson(`/api/notifications?page=${page}&pageSize=${pageSize}`, { method: "GET" });
+    },
+    unreadCount() {
+      return requestJson("/api/notifications/count", { method: "GET" });
+    },
+    markRead(id) {
+      return requestJson("/api/notifications/mark-read", {
+        method: "POST",
+        body: JSON.stringify({ id }),
+      });
+    },
+    markAllRead() {
+      return requestJson("/api/notifications/mark-read", {
+        method: "POST",
+        body: JSON.stringify({ all: true }),
+      });
+    },
+  },
   functions: {
     invoke: invokeFunction,
   },

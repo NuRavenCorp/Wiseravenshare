@@ -14,7 +14,7 @@ import PostComposer from "@/components/feed/PostComposer";
 import PostsFeed from "@/components/feed/PostsFeed";
 
 // All supported platforms — order determines display sequence
-const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky"];
+const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky", "linkedin"];
 
 export default function SocialHub() {
   const [platformStatuses, setPlatformStatuses] = useState({});
