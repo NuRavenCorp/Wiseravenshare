@@ -24,6 +24,7 @@ public class AppDbContext : DbContext
 
     public DbSet<User> Users => Set<User>();
     public DbSet<Post> Posts => Set<Post>();
+    public DbSet<Comment> Comments => Set<Comment>();
     public DbSet<Video> Videos => Set<Video>();
     public DbSet<TruthClaim> TruthClaims => Set<TruthClaim>();
     public DbSet<AIAgent> Agents => Set<AIAgent>();

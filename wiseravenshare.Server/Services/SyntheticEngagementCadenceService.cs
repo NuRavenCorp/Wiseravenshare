@@ -295,11 +295,11 @@ public sealed class SyntheticEngagementCadenceOptions
     public const string SectionName = "SyntheticEngagement:Cadence";
 
     public bool Enabled { get; set; } = true;
-    public int PollIntervalMinutes { get; set; } = 30;
-    public int PostsPerCycle { get; set; } = 6;
-    public int MinRepliesPerCycle { get; set; } = 4;
+    public int PollIntervalMinutes { get; set; } = 15;
+    public int PostsPerCycle { get; set; } = 10;
+    public int MinRepliesPerCycle { get; set; } = 5;
     public int PostSpacingHours { get; set; } = 3;
-    public int ActiveHours { get; set; } = 18;
+    public int ActiveHours { get; set; } = 28;
     public int RestHours { get; set; } = 6;
     public int ActiveStartHourUtc { get; set; } = 0;
     public int AllowedSlotDriftMinutes { get; set; } = 80;
@@ -341,6 +341,12 @@ public sealed class SyntheticEngagementCadenceHostedService : BackgroundService
                 if (syntheticEnabled && options.Enabled)
                 {
                     await using var scope = _scopeFactory.CreateAsyncScope();
+                    var simulator = scope.ServiceProvider.GetService<Wiseravenshare.Server.Services.Simulation.EngagementSimulatorService>();
+                    if (simulator != null)
+                    {
+                        await simulator.RunCadenceTickAsync(stoppingToken);
+                    }
+
                     var service = scope.ServiceProvider.GetRequiredService<SyntheticEngagementCadenceService>();
                     await service.RunCycleAsync(new SyntheticCadenceRunRequest
                     {

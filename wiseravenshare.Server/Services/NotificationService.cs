@@ -53,6 +53,22 @@ public sealed class NotificationService : INotificationService
             _db.Notifications.Add(notification);
             await _db.SaveChangesAsync(cancellationToken);
 
+            var link = postId.HasValue 
+                ? $"/social?postId={postId.Value}" 
+                : (!string.IsNullOrWhiteSpace(streamId) ? $"/go-live/{streamId}" : "/social");
+
+            var title = type switch
+            {
+                NotificationType.Follow => "New Follower",
+                NotificationType.Comment => "New Comment",
+                NotificationType.Like => "New Like",
+                NotificationType.Repost => "Post Reposted",
+                NotificationType.ViralContent => "🔥 Viral Content Alert!",
+                NotificationType.ViralAlert => "🔥 Viral Trending Alert!",
+                NotificationType.LiveStream => "Live Stream Started",
+                _ => type.ToString()
+            };
+
             // Push real-time event to the recipient's SignalR group
             var group = NotificationHub.BuildUserGroup(recipientUserId.ToString());
             await _hub.Clients.Group(group).SendAsync("NewNotification", new
@@ -63,7 +79,9 @@ public sealed class NotificationService : INotificationService
                 postId,
                 commentId,
                 streamId,
+                title,
                 content,
+                link,
                 createdAt       = notification.CreatedAt,
                 isRead          = false
             }, cancellationToken);

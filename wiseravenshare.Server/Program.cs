@@ -2656,6 +2656,7 @@ if (enableHostedServices && !string.IsNullOrWhiteSpace(streamBridgeOptions.WiseR
 builder.Services.AddScoped<SyntheticEngagementService>();
 builder.Services.AddScoped<SyntheticEngagementCadenceService>();
 builder.Services.Configure<SyntheticEngagementCadenceOptions>(builder.Configuration.GetSection(SyntheticEngagementCadenceOptions.SectionName));
+builder.Services.AddSingleton<Wiseravenshare.Server.Services.Simulation.EngagementSimulatorService>();
 builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
 builder.Services.AddHttpClient<ITikTokAggregatorService, TikTokAggregatorService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();

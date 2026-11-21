@@ -1,4 +1,5 @@
 ﻿// Wiseravenshare.Server/Controllers/PostsController.cs
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
@@ -249,14 +250,21 @@ namespace Wiseravenshare.Server.Controllers
                 var state = await _postService.LikePostAsync(userId, id);
                 await TryTrackPostInteractionAsync(userId, id, "Like");
 
+                var ownerId = await GetPostOwnerIdAsync(id);
                 // Notify post owner (best-effort)
                 _ = _notificationService.SendAsync(
-                    await GetPostOwnerIdAsync(id),
+                    ownerId,
                     Wiseravenshare.Server.Entities.NotificationType.Like,
                     actorId: userId,
                     postId: id,
                     content: "liked your post",
                     cancellationToken: HttpContext.RequestAborted);
+
+                if (state != null)
+                {
+                    var totalEngagement = state.LikesCount + state.RepostsCount + state.CommentsCount + state.SharesCount;
+                    CheckAndTriggerViralNotification(id, totalEngagement, ownerId);
+                }
 
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return Ok(state);
@@ -314,14 +322,21 @@ namespace Wiseravenshare.Server.Controllers
                 var state = await _postService.RepostPostAsync(userId, id);
                 await TryTrackPostInteractionAsync(userId, id, "Share");
 
+                var ownerId = await GetPostOwnerIdAsync(id);
                 // Notify original post owner
                 _ = _notificationService.SendAsync(
-                    await GetPostOwnerIdAsync(id),
+                    ownerId,
                     Wiseravenshare.Server.Entities.NotificationType.Repost,
                     actorId: userId,
                     postId: id,
                     content: "reposted your post",
                     cancellationToken: HttpContext.RequestAborted);
+
+                if (state != null)
+                {
+                    var totalEngagement = state.LikesCount + state.RepostsCount + state.CommentsCount + state.SharesCount;
+                    CheckAndTriggerViralNotification(id, totalEngagement, ownerId);
+                }
 
                 await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
                 return Ok(state);
@@ -390,15 +405,27 @@ namespace Wiseravenshare.Server.Controllers
             var comment = await _postService.AddCommentAsync(userId, id, dto);
             await TryTrackPostInteractionAsync(userId, id, "Comment");
 
+            var ownerId = await GetPostOwnerIdAsync(id);
             // Notify post owner
             _ = _notificationService.SendAsync(
-                await GetPostOwnerIdAsync(id),
+                ownerId,
                 Wiseravenshare.Server.Entities.NotificationType.Comment,
                 actorId: userId,
                 postId: id,
                 commentId: comment.Id,
                 content: "commented on your post",
                 cancellationToken: HttpContext.RequestAborted);
+
+            try
+            {
+                var post = await _postService.GetPostAsync(id);
+                if (post != null)
+                {
+                    var totalEngagement = post.LikesCount + post.RepostsCount + post.CommentsCount + post.SharesCount;
+                    CheckAndTriggerViralNotification(id, totalEngagement, ownerId);
+                }
+            }
+            catch { /* best-effort viral notification */ }
 
             await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
             return Ok(comment);
@@ -873,6 +900,36 @@ namespace Wiseravenshare.Server.Controllers
             catch
             {
                 return Guid.Empty;
+            }
+        }
+
+        private static readonly ConcurrentDictionary<string, int> _notifiedViralThresholds = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Fires a ViralContent notification to the post owner when total engagement crosses key viral thresholds.
+        /// </summary>
+        private void CheckAndTriggerViralNotification(Guid postId, int totalEngagement, Guid ownerId)
+        {
+            if (ownerId == Guid.Empty || totalEngagement < 5) return;
+
+            // Milestones: 5, 15, 30, 50, 100, 250, 500, 1000
+            int[] thresholds = { 1000, 500, 250, 100, 50, 30, 15, 5 };
+            foreach (var threshold in thresholds)
+            {
+                if (totalEngagement >= threshold)
+                {
+                    var key = $"{postId:N}_{threshold}";
+                    if (_notifiedViralThresholds.TryAdd(key, threshold))
+                    {
+                        _ = _notificationService.SendAsync(
+                            ownerId,
+                            Wiseravenshare.Server.Entities.NotificationType.ViralContent,
+                            postId: postId,
+                            content: $"🔥 Viral Alert! Your post has reached {threshold}+ interactions and is gaining community momentum!",
+                            cancellationToken: HttpContext.RequestAborted);
+                    }
+                    break;
+                }
             }
         }
     }
