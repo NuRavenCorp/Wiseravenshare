@@ -177,6 +177,21 @@ public sealed class GrowthService
         }
     }
 
+    public IReadOnlyList<InviteRecord> GetUserInvites(string userId, string? email = null)
+    {
+        EnsureLoaded();
+
+        lock (_lock)
+        {
+            var cleanEmail = (email ?? string.Empty).Trim();
+            return _state.Invites
+                .Where(i => i.ReferrerUserId == userId
+                    || (!string.IsNullOrEmpty(cleanEmail) && i.ReferrerEmail.Equals(cleanEmail, StringComparison.OrdinalIgnoreCase)))
+                .OrderByDescending(i => i.CreatedAtUtc)
+                .ToList();
+        }
+    }
+
     public object GetReferralStats(string userId)
     {
         EnsureLoaded();

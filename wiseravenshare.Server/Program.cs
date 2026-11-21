@@ -2658,7 +2658,8 @@ builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
 builder.Services.AddHttpClient<ITikTokAggregatorService, TikTokAggregatorService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
 builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
-builder.Services.AddScoped<IRssFeedIngestService, RssFeedIngestService>();
+builder.Services.Configure<RssFeedIngestOptions>(builder.Configuration.GetSection(RssFeedIngestOptions.SectionName));
+builder.Services.AddSingleton<IRssFeedIngestService, RssFeedIngestService>();
 if (enableHostedServices)
 {
     builder.Services.AddHostedService<Wiseravenshare.Server.HostedServices.TikTokTokenRefreshBackgroundService>();

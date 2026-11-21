@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Infrastructure.Data;
 
@@ -10,6 +11,14 @@ public interface IRssFeedIngestService
 {
     Task IngestAllActiveSubscriptionsAsync(CancellationToken ct = default);
     Task IngestSubscriptionAsync(Guid subscriptionId, CancellationToken ct = default);
+}
+
+public sealed class RssFeedIngestOptions
+{
+    public const string SectionName = "Social:RssIngest";
+
+    public int PollIntervalMinutes { get; set; } = 15;
+    public int InitialDelaySeconds { get; set; } = 30;
 }
 
 public sealed class RssFeedIngestService : IRssFeedIngestService
@@ -171,23 +180,29 @@ public sealed class RssFeedIngestService : IRssFeedIngestService
 /// <summary>Polls all active RSS subscriptions every 15 minutes.</summary>
 public sealed class RssFeedIngestBackgroundService : BackgroundService
 {
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(15);
-
     private readonly IRssFeedIngestService _ingestService;
     private readonly ILogger<RssFeedIngestBackgroundService> _logger;
+    private readonly TimeSpan _pollInterval;
+    private readonly TimeSpan _initialDelay;
 
     public RssFeedIngestBackgroundService(
         IRssFeedIngestService ingestService,
+        IOptions<RssFeedIngestOptions> options,
         ILogger<RssFeedIngestBackgroundService> logger)
     {
         _ingestService = ingestService;
         _logger = logger;
+        var configured = options.Value ?? new RssFeedIngestOptions();
+        _pollInterval = TimeSpan.FromMinutes(Math.Clamp(configured.PollIntervalMinutes, 1, 120));
+        _initialDelay = TimeSpan.FromSeconds(Math.Clamp(configured.InitialDelaySeconds, 0, 300));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Initial delay so the app fully starts before first poll.
-        await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+        if (_initialDelay > TimeSpan.Zero)
+        {
+            await Task.Delay(_initialDelay, stoppingToken);
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -200,7 +215,7 @@ public sealed class RssFeedIngestBackgroundService : BackgroundService
                 _logger.LogError(ex, "RSS ingest background service encountered an unexpected error");
             }
 
-            await Task.Delay(PollInterval, stoppingToken);
+            await Task.Delay(_pollInterval, stoppingToken);
         }
     }
 }
