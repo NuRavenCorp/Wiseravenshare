@@ -1202,12 +1202,14 @@ public sealed class FunctionCompatController : ControllerBase
             MediaType = request.InstagramMediaType?.Equals("video", StringComparison.OrdinalIgnoreCase) == true
                 ? SocialMediaType.Video
                 : SocialMediaType.Photo,
-            PublishToFacebook = !string.IsNullOrWhiteSpace(resolvedFbPageId),
-            PublishToInstagram = !string.IsNullOrWhiteSpace(request.InstagramMediaUrl),
+            PublishToFacebook = !string.IsNullOrWhiteSpace(resolvedFbPageId) || request.PublishToFacebook,
+            PublishToInstagram = !string.IsNullOrWhiteSpace(request.InstagramMediaUrl) || request.PublishToInstagram,
             PublishToTikTok = request.PublishToTikTok,
             PublishToYouTube = request.PublishToYouTube,
+            PublishToTwitter = request.PublishToTwitter,
+            PublishToBluesky = request.PublishToBluesky,
+            PublishToLinkedIn = request.PublishToLinkedIn,
             PublishToWiseRavenStream = false,
-            PublishToBluesky = false,
             FacebookPageId = resolvedFbPageId,
             FacebookPageAccessToken = resolvedFbPageToken,
             TikTokUsername = resolvedTikTokUsername,
@@ -2270,8 +2272,10 @@ public sealed class FunctionCompatController : ControllerBase
         if (request.PublishToInstagram) platforms.Add("instagram");
         if (request.PublishToTikTok) platforms.Add("tiktok");
         if (request.PublishToYouTube) platforms.Add("youtube");
-        if (request.PublishToWiseRavenStream) platforms.Add("wiseravenstream");
+        if (request.PublishToTwitter) platforms.Add("twitter");
         if (request.PublishToBluesky) platforms.Add("bluesky");
+        if (request.PublishToLinkedIn) platforms.Add("linkedin");
+        if (request.PublishToWiseRavenStream) platforms.Add("wiseravenstream");
         return platforms;
     }
 
@@ -3101,8 +3105,13 @@ public sealed class SocialCrossPostsRequest
     public string? FacebookPageId { get; set; }
     public string? InstagramMediaUrl { get; set; }
     public string? InstagramMediaType { get; set; }
-    public bool PublishToTikTok { get; set; } = true;
+    public bool PublishToFacebook { get; set; }
+    public bool PublishToInstagram { get; set; }
+    public bool PublishToTikTok { get; set; }
     public bool PublishToYouTube { get; set; }
+    public bool PublishToTwitter { get; set; }
+    public bool PublishToBluesky { get; set; }
+    public bool PublishToLinkedIn { get; set; }
     public string? TikTokUsername { get; set; }
     public string? YouTubeChannelId { get; set; }
     public bool Queue { get; set; } = true;

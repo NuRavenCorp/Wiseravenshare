@@ -437,6 +437,9 @@ public sealed class SocialOrchestrationController : ControllerBase
         if (req.PublishToInstagram) list.Add("instagram");
         if (req.PublishToTikTok) list.Add("tiktok");
         if (req.PublishToYouTube) list.Add("youtube");
+        if (req.PublishToTwitter) list.Add("twitter");
+        if (req.PublishToBluesky) list.Add("bluesky");
+        if (req.PublishToLinkedIn) list.Add("linkedin");
         return list;
     }
 

@@ -131,7 +131,7 @@ export default function SocialHub() {
             <PostComposer />
           </TabsContent>
           <TabsContent value="push">
-            <CrossPostComposer platformStatuses={platformStatuses} />
+            <CrossPostComposer platformStatuses={platformStatuses} onRefreshStatuses={fetchStatuses} />
           </TabsContent>
           <TabsContent value="pull">
             <ImportPanel />

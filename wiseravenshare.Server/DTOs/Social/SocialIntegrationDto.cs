@@ -53,8 +53,10 @@ public class PublishSocialContentRequest
     public bool PublishToInstagram { get; set; } = false;
     public bool PublishToTikTok { get; set; } = true;
     public bool PublishToYouTube { get; set; } = false;
-    public bool PublishToWiseRavenStream { get; set; } = false;
+    public bool PublishToTwitter { get; set; } = false;
     public bool PublishToBluesky { get; set; } = false;
+    public bool PublishToLinkedIn { get; set; } = false;
+    public bool PublishToWiseRavenStream { get; set; } = false;
     public string? FacebookPageId { get; set; }
     public string? TikTokUsername { get; set; }
     public string? YouTubeChannelId { get; set; }

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Wiseravenshare.Server.DTOs.Social;
+using Wiseravenshare.Server.Services.CrossPlatform;
 using Wiseravenshare.Server.Services.StreamBridge;
 
 namespace Wiseravenshare.Server.Services;
@@ -45,6 +46,7 @@ public class SocialPlatformService : ISocialPlatformService
     private readonly IRssFeedService _rssFeedService;
     private readonly ITikTokAggregatorService _tikTokAggregatorService;
     private readonly IStreamTransferService _streamTransfer;
+    private readonly IServiceProvider? _serviceProvider;
     private sealed record FacebookPageDestination(string Id, string Name, string AccessToken, bool IsDefault);
 
     public SocialPlatformService(
@@ -55,7 +57,8 @@ public class SocialPlatformService : ISocialPlatformService
         IYouTubeTokenService youTubeTokenService,
         IRssFeedService rssFeedService,
         ITikTokAggregatorService tikTokAggregatorService,
-        IStreamTransferService streamTransfer)
+        IStreamTransferService streamTransfer,
+        IServiceProvider? serviceProvider = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
@@ -65,6 +68,7 @@ public class SocialPlatformService : ISocialPlatformService
         _rssFeedService = rssFeedService;
         _tikTokAggregatorService = tikTokAggregatorService;
         _streamTransfer = streamTransfer;
+        _serviceProvider = serviceProvider;
     }
 
     public async Task<IReadOnlyList<SocialFeedItemDto>> GetFacebookFeedAsync(string? pageId, int limit)
@@ -404,13 +408,96 @@ public class SocialPlatformService : ISocialPlatformService
             response.Results.Add(await PublishToWiseRavenStreamAsync(message, request.VideoUrl, mediaType));
         }
 
+        if (request.PublishToTwitter || request.PublishToBluesky || request.PublishToLinkedIn)
+        {
+            var crossPlatform = _serviceProvider?.GetService<ICrossPlatformPublishService>();
+            if (crossPlatform != null)
+            {
+                var crossPlatforms = new List<string>();
+                if (request.PublishToTwitter) crossPlatforms.Add(SocialPlatforms.Twitter);
+                if (request.PublishToBluesky) crossPlatforms.Add(SocialPlatforms.Bluesky);
+                if (request.PublishToLinkedIn) crossPlatforms.Add(SocialPlatforms.LinkedIn);
+
+                try
+                {
+                    var crossResult = await crossPlatform.PublishAsync(userId, new CrossPlatformPublishRequest
+                    {
+                        PostId = Guid.NewGuid(),
+                        UserId = userId,
+                        Message = message,
+                        MediaUrl = request.VideoUrl ?? request.PhotoUrl ?? request.LinkUrl,
+                        MediaType = mediaType,
+                        Platforms = crossPlatforms
+                    });
+
+                    foreach (var res in crossResult.Results)
+                    {
+                        response.Results.Add(new SocialPublishResultDto
+                        {
+                            Platform = res.Platform,
+                            Success = res.Success,
+                            ExternalPostId = res.ExternalPostId,
+                            ExternalPostUrl = res.ExternalPostUrl,
+                            Error = res.Error ?? (res.Skipped ? res.SkipReason : null)
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Cross-platform publisher threw during SocialPlatformService.PublishAsync");
+                    foreach (var p in crossPlatforms)
+                    {
+                        response.Results.Add(new SocialPublishResultDto
+                        {
+                            Platform = p,
+                            Success = false,
+                            Error = ex.Message
+                        });
+                    }
+                }
+            }
+            else
+            {
+                if (request.PublishToTwitter)
+                {
+                    response.Results.Add(new SocialPublishResultDto
+                    {
+                        Platform = "twitter",
+                        Success = false,
+                        Error = "Twitter cross-platform service is not available."
+                    });
+                }
+                if (request.PublishToBluesky)
+                {
+                    response.Results.Add(new SocialPublishResultDto
+                    {
+                        Platform = "bluesky",
+                        Success = false,
+                        Error = "Bluesky cross-platform service is not available."
+                    });
+                }
+                if (request.PublishToLinkedIn)
+                {
+                    response.Results.Add(new SocialPublishResultDto
+                    {
+                        Platform = "linkedin",
+                        Success = false,
+                        Error = "LinkedIn cross-platform service is not available."
+                    });
+                }
+            }
+        }
+
         _logger.LogInformation(
-            "User {UserId} requested cross-post. Facebook={Facebook}, Instagram={Instagram}, TikTok={TikTok}, YouTube={YouTube}, WiseRavenStream={WiseRavenStream}, MediaType={MediaType}",
+            "User {UserId} requested cross-post. Facebook={Facebook}, Instagram={Instagram}, TikTok={TikTok}, YouTube={YouTube}, Twitter={Twitter}, Bluesky={Bluesky}, LinkedIn={LinkedIn}, WiseRavenStream={WiseRavenStream}, MediaType={MediaType}",
             userId,
             request.PublishToFacebook,
             request.PublishToInstagram,
             request.PublishToTikTok,
             request.PublishToYouTube,
+            request.PublishToTwitter,
+            request.PublishToBluesky,
+            request.PublishToLinkedIn,
             request.PublishToWiseRavenStream,
             mediaType);
 
