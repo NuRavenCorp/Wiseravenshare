@@ -321,11 +321,6 @@ export default function ConnectionCard({ platform, onStatusChange }) {
       return;
     }
 
-    if (platform === "bluesky" && (!username || !appPassword)) {
-      setShowManual(true);
-      return;
-    }
-
     setConnecting(true);
     setError("");
     setOauthUnavailable(false);
@@ -350,13 +345,11 @@ export default function ConnectionCard({ platform, onStatusChange }) {
         window.location.href = data.authorize_url;
       } else {
         setOauthUnavailable(true);
-        setShowManual(true);
         setConnecting(false);
       }
     } catch (e) {
-      if (e?.status === 409 || e?.status === 501 || platform === "bluesky") {
+      if (e?.status === 409 || e?.status === 501) {
         setOauthUnavailable(true);
-        setShowManual(true);
       } else {
         setError(e?.message || "Failed to start connection.");
       }
@@ -475,9 +468,14 @@ export default function ConnectionCard({ platform, onStatusChange }) {
               </div>
             </div>
             {isConnected && (
-              <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                <Check className="w-3 h-3" /> Active
-              </span>
+              <div className="flex flex-col items-end gap-1">
+                <span className="px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" /> Handshake Verified
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {platform === "bluesky" ? "AT Protocol Handshake" : "OAuth 2.0 Handshake"}
+                </span>
+              </div>
             )}
           </div>
           <p className="text-[11px] text-muted-foreground leading-relaxed pt-1.5">{capabilities}</p>
@@ -575,16 +573,18 @@ export default function ConnectionCard({ platform, onStatusChange }) {
 
               {/* ── Section: Sign In Actions ── */}
               {platform === "bluesky" ? (
-                /* Bluesky: handle + app-password sign in */
+                /* Bluesky: live AT Protocol cryptographic handshake */
                 <div className="space-y-3 rounded-lg border border-border p-3.5 bg-secondary/10">
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-foreground">Sign into Bluesky Account</p>
+                    <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Cloud className="w-4 h-4 text-blue-400" /> AT Protocol Handshake Authentication
+                    </p>
                     <p className="text-[11px] text-muted-foreground">
-                      Enter your Bluesky handle and App Password (generated from Bluesky Settings → App Passwords).
+                      WiseRavenShare will perform a direct cryptographic session handshake with <strong>bsky.social</strong> to verify your account and obtain a verified AT Protocol access JWT.
                     </p>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Your Bluesky handle</Label>
+                    <Label className="text-xs text-muted-foreground">Bluesky Handle</Label>
                     <Input
                       value={bskyHandle}
                       onChange={(e) => setBskyHandle(e.target.value)}
@@ -599,6 +599,9 @@ export default function ConnectionCard({ platform, onStatusChange }) {
                       placeholder="xxxx-xxxx-xxxx-xxxx"
                       className="h-9 text-sm font-mono"
                     />
+                    <p className="text-[10px] text-muted-foreground">
+                      Generate an App Password from your Bluesky app: <em>Settings → Privacy &amp; Security → App Passwords</em>.
+                    </p>
                   </div>
                   <Button
                     onClick={handleSave}
@@ -610,20 +613,19 @@ export default function ConnectionCard({ platform, onStatusChange }) {
                     ) : (
                       <Icon className={`w-4 h-4 mr-2 ${color}`} />
                     )}
-                    {saving ? "Connecting Bluesky…" : "Sign In & Connect Bluesky"}
+                    {saving ? "Performing Handshake with bsky.social…" : "Sign In & Authenticate with Bluesky"}
                   </Button>
                   {!consentChecked && (
                     <p className="text-[11px] text-amber-400 text-center">
-                      * Check the authorization box above to enable sign-in.
+                      * Check the authorization box above to enable authentication.
                     </p>
                   )}
                 </div>
               ) : (
-                /* Standard OAuth & Account Connection Flow */
+                /* Standard OAuth 2.0 Web Authentication Flow */
                 <div className="space-y-3">
-                  {/* Primary OAuth Button */}
-                  {!oauthUnavailable && (
-                    <div className="space-y-1.5">
+                  {!oauthUnavailable ? (
+                    <div className="space-y-2">
                       <Button
                         onClick={handleConnect}
                         disabled={connecting || !userId || !consentChecked}
@@ -634,69 +636,26 @@ export default function ConnectionCard({ platform, onStatusChange }) {
                         ) : (
                           <Icon className={`w-4 h-4 mr-2 ${color}`} />
                         )}
-                        {connecting ? "Opening sign-in window…" : `Sign in with ${label}`}
+                        {connecting ? `Connecting to ${label}…` : `Sign in with ${label}`}
                       </Button>
+                      <p className="text-[11px] text-muted-foreground text-center">
+                        Redirects directly to {label} for secure login and OAuth 2.0 handshake verification.
+                      </p>
                       {!consentChecked && (
                         <p className="text-[11px] text-amber-400 text-center">
                           * Check the authorization box above to enable {label} sign-in.
                         </p>
                       )}
                     </div>
-                  )}
-
-                  {oauthUnavailable && (
-                    <div className="flex items-start gap-2 p-2.5 rounded-md border border-amber-500/30 bg-amber-500/5 text-xs text-amber-300">
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                      OAuth for {label} is not configured on this server. You can sign in and link your account directly below.
-                    </div>
-                  )}
-
-                  {/* Manual / Direct Handle Link Option */}
-                  <button
-                    type="button"
-                    onClick={() => setShowManual((v) => !v)}
-                    className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2 text-center"
-                  >
-                    {showManual ? "Hide direct link form" : `Or sign into ${label} via account handle / profile`}
-                  </button>
-
-                  {(showManual || oauthUnavailable) && (
-                    <div className="space-y-3 rounded-lg border border-border p-3.5 bg-secondary/10">
-                      <p className="text-xs text-muted-foreground">
-                        Enter your {label} handle or profile URL to sign into and link this account:
-                      </p>
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">Username / Handle</Label>
-                        <Input
-                          value={username}
-                          onChange={(e) => setUsername(e.target.value)}
-                          placeholder={`@your_${platform}_handle`}
-                          className="h-9 text-sm"
-                        />
-                        <Label className="text-xs text-muted-foreground">
-                          Profile URL <span className="opacity-60">(optional)</span>
-                        </Label>
-                        <Input
-                          value={profileUrl}
-                          onChange={(e) => setProfileUrl(e.target.value)}
-                          placeholder={PLATFORM_URL_HINTS[platform] || "https://…"}
-                          className="h-9 text-sm"
-                        />
+                  ) : (
+                    <div className="flex items-start gap-2.5 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="font-semibold text-amber-300">OAuth Handshake Setup Required</p>
+                        <p className="text-muted-foreground leading-snug">
+                          Authentic connection requires logging in directly at {label}'s official site. Configure {label} OAuth credentials (Client ID &amp; Client Secret) in your server settings to complete the handshake.
+                        </p>
                       </div>
-
-                      <Button
-                        onClick={handleSave}
-                        disabled={saving || !username.trim() || !consentChecked}
-                        size="sm"
-                        className="w-full font-medium"
-                      >
-                        {saving ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
-                        ) : (
-                          <Save className="w-3.5 h-3.5 mr-1.5" />
-                        )}
-                        {saving ? "Saving…" : `Sign In & Link ${label} Account`}
-                      </Button>
                     </div>
                   )}
                 </div>

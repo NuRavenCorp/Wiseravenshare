@@ -51,5 +51,7 @@ namespace Wiseravenshare.Server.Entities
         LiveLike,       // like on a live stream
         LiveComment,    // comment on a live stream
         LiveView,       // view on a live stream
+        ViralContent,   // when a post crosses viral interaction thresholds
+        ViralAlert      // general trending / viral alert
     }
 }

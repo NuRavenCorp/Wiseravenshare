@@ -1414,12 +1414,54 @@ public sealed class FunctionCompatController : ControllerBase
             var created = new List<object>();
             foreach (var item in request.Items ?? [])
             {
+                var platform = (item.Platform ?? string.Empty).Trim().ToLowerInvariant();
+                var platformLabel = platform switch
+                {
+                    "facebook" => "Facebook",
+                    "instagram" => "Instagram",
+                    "tiktok" => "TikTok",
+                    "youtube" => "YouTube",
+                    "twitter" or "x" => "X / Twitter",
+                    "bluesky" => "Bluesky",
+                    "linkedin" => "LinkedIn",
+                    _ => string.IsNullOrWhiteSpace(platform) ? "External Source" : platform
+                };
+
+                var rawHandle = (item.AuthorHandle ?? string.Empty).Trim();
+                var handle = !string.IsNullOrWhiteSpace(rawHandle) && !rawHandle.Equals("me", StringComparison.OrdinalIgnoreCase)
+                    ? (rawHandle.StartsWith("@") ? rawHandle : $"@{rawHandle}")
+                    : string.Empty;
+
+                var identifyingMark = !string.IsNullOrWhiteSpace(handle)
+                    ? $"[Imported from {platformLabel} · {handle}]"
+                    : $"[Imported from {platformLabel}]";
+
+                var baseText = string.IsNullOrWhiteSpace(item.Content) ? "(imported post)" : item.Content.Trim();
+                var linkPart = !string.IsNullOrWhiteSpace(item.PermalinkUrl)
+                    ? $"\n\nSource: {item.PermalinkUrl.Trim()}"
+                    : string.Empty;
+
+                var markedContent = $"{identifyingMark}\n\n{baseText}{linkPart}".Trim();
+
                 var post = new Wiseravenshare.Server.Entities.Post
                 {
                     UserId = userId,
-                    Content = string.IsNullOrWhiteSpace(item.Content) ? "(imported post)" : item.Content,
+                    Content = markedContent,
                     Type = ParsePostType(item.PostType),
                     MediaUrls = item.MediaUris,
+                    MediaMetadata = BuildJsonDocument(new
+                    {
+                        importedFrom = new
+                        {
+                            platform = platform,
+                            platformLabel = platformLabel,
+                            authorHandle = handle,
+                            authorName = item.AuthorName,
+                            permalinkUrl = item.PermalinkUrl,
+                            externalId = item.ExternalId,
+                            importedAt = DateTime.UtcNow
+                        }
+                    }),
                     TruthScore = null
                 };
                 _db.Posts.Add(post);
@@ -1483,12 +1525,18 @@ public sealed class FunctionCompatController : ControllerBase
             : null;
         var blueskyItems = await _socialPlatformService.GetBlueskyFeedAsync(bskyHandle, importLimit);
 
+        // ── Twitter / X ────────────────────────────────────────────────────────
+        IReadOnlyList<SocialFeedItemDto> twitterItems = Array.Empty<SocialFeedItemDto>();
+        if (socialFeeds.Twitter.Enabled && !string.IsNullOrWhiteSpace(socialFeeds.Twitter.AccessToken))
+            twitterItems = await FetchTwitterUserPostsAsync(socialFeeds.Twitter.AccessToken, socialFeeds.Twitter.Username, importLimit);
+
         return Ok(new
         {
             facebook = facebookItems,
             instagram = instagramItems,
             tiktok = tiktokItems,
             bluesky = blueskyItems,
+            twitter = twitterItems
         });
     }
 
@@ -1533,6 +1581,49 @@ public sealed class FunctionCompatController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Facebook user post import failed.");
+            return [];
+        }
+    }
+
+    private async Task<IReadOnlyList<SocialFeedItemDto>> FetchTwitterUserPostsAsync(string accessToken, string? username, int limit)
+    {
+        try
+        {
+            var httpFactory = _serviceProvider.GetRequiredService<IHttpClientFactory>();
+            using var client = httpFactory.CreateClient();
+            var req = new HttpRequestMessage(HttpMethod.Get, $"https://api.twitter.com/2/users/me/tweets?tweet.fields=created_at,text&max_results={Math.Clamp(limit, 5, 20)}");
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            using var resp = await client.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return [];
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return [];
+            var items = new List<SocialFeedItemDto>();
+            foreach (var entry in data.EnumerateArray())
+            {
+                var id = entry.TryGetProperty("id", out var idNode) ? idNode.GetString() ?? string.Empty : string.Empty;
+                var text = entry.TryGetProperty("text", out var textNode) ? textNode.GetString() : null;
+                DateTimeOffset? createdAt = null;
+                if (entry.TryGetProperty("created_at", out var ct) && ct.ValueKind == JsonValueKind.String)
+                {
+                    DateTimeOffset.TryParse(ct.GetString(), out var dt);
+                    createdAt = dt;
+                }
+                items.Add(new SocialFeedItemDto
+                {
+                    Platform = "twitter",
+                    ExternalId = id,
+                    Text = text,
+                    PermalinkUrl = !string.IsNullOrWhiteSpace(id) ? $"https://x.com/i/web/status/{id}" : null,
+                    AuthorHandle = !string.IsNullOrWhiteSpace(username) ? $"@{username.TrimStart('@')}" : "me",
+                    CreatedAt = createdAt
+                });
+            }
+            return items;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Twitter user tweet import failed.");
             return [];
         }
     }
@@ -3137,6 +3228,11 @@ public sealed class SocialImportItem
     public string? Content { get; set; }
     public string? PostType { get; set; }
     public string[]? MediaUris { get; set; }
+    public string? Platform { get; set; }
+    public string? AuthorHandle { get; set; }
+    public string? AuthorName { get; set; }
+    public string? PermalinkUrl { get; set; }
+    public string? ExternalId { get; set; }
 }
 
 public sealed class SpacesUploadRequest

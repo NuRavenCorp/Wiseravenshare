@@ -6,7 +6,7 @@ namespace Wiseravenshare.Server.Services;
 
 public sealed class SyntheticEngagementService
 {
-    private const string SyntheticMarker = "[SYNTHETIC_TEST]";
+    private const string SyntheticMarker = "[TRANSPARENT_AI_SEED]";
     private readonly AppDbContext _dbContext;
     private readonly ILogger<SyntheticEngagementService> _logger;
 
@@ -68,7 +68,7 @@ public sealed class SyntheticEngagementService
                 Username = username,
                 DisplayName = identity.DisplayName,
                 PasswordHash = "synthetic-test-only",
-                Bio = $"{SyntheticMarker} Synthetic persona for controlled engagement simulations. CharacterId={identity.CharacterId}.",
+                Bio = $"{SyntheticMarker} Transparent AI seed account used to bootstrap community activity. CharacterId={identity.CharacterId}.",
                 AvatarUrl = null,
                 CoverPhotoUrl = null,
                 Location = identity.Location,
@@ -319,7 +319,7 @@ public sealed class SyntheticEngagementService
 
         var selected = archetypes[(index - 1) % archetypes.Length];
         return new SyntheticIdentity(
-            DisplayName: $"{selected.Item1} Persona {index:D3}",
+            DisplayName: $"AI Seed {selected.Item1} {index:D3}",
             CharacterId: $"{selected.Item2}-{index:D3}",
             Location: selected.Item3);
     }
@@ -339,7 +339,7 @@ public sealed class SyntheticEngagementService
         }
 
         return new SyntheticIdentity(
-            DisplayName: string.IsNullOrWhiteSpace(user.DisplayName) ? "Synthetic Persona" : user.DisplayName,
+            DisplayName: string.IsNullOrWhiteSpace(user.DisplayName) ? "AI Seed Persona" : user.DisplayName,
             CharacterId: characterId,
             Location: string.IsNullOrWhiteSpace(user.Location) ? "Remote" : user.Location);
     }

@@ -1306,6 +1306,7 @@ public class PostService : IPostService
             YoutubeUrl = ReadMediaMetadataValue(post.MediaMetadata, "youtubeUrl"),
             TikTokUrl = ReadMediaMetadataValue(post.MediaMetadata, "tiktokUrl"),
             FacebookUrl = ReadMediaMetadataValue(post.MediaMetadata, "facebookUrl"),
+            MediaMetadata = post.MediaMetadata,
             TruthScore = post.TruthScore,
             TruthCorrection = post.TruthCorrection,
             Provenance = ReadProvenanceMetadata(post.TruthSources),

@@ -1,5 +1,6 @@
 ﻿// Wiseravenshare.Server/DTOs/Post/PostDto.cs
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Wiseravenshare.Server.DTOs.Post
@@ -43,6 +44,8 @@ namespace Wiseravenshare.Server.DTOs.Post
 
         [JsonPropertyName("facebookUrl")]
         public string? FacebookUrl { get; set; }
+        [JsonPropertyName("mediaMetadata")]
+        public JsonDocument? MediaMetadata { get; set; }
         public decimal? TruthScore { get; set; }
         public string? TruthCorrection { get; set; }
         [JsonPropertyName("provenance")]
@@ -150,6 +153,8 @@ namespace Wiseravenshare.Server.DTOs.Post
 
         [JsonPropertyName("facebookUrl")]
         public string? FacebookUrl { get; set; }
+        [JsonPropertyName("mediaMetadata")]
+        public JsonDocument? MediaMetadata { get; set; }
         [JsonPropertyName("provenance")]
         public PostProvenanceDto? Provenance { get; set; }
         public string Type { get; set; } = "Text";
@@ -208,6 +213,8 @@ namespace Wiseravenshare.Server.DTOs.Post
 
         [JsonPropertyName("facebookUrl")]
         public string? FacebookUrl { get; set; }
+        [JsonPropertyName("mediaMetadata")]
+        public JsonDocument? MediaMetadata { get; set; }
 
         [JsonPropertyName("provenance")]
         public PostProvenanceDto? Provenance { get; set; }

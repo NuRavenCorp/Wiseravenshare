@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/api/client";
-import { Heart, MessageCircle, MoreVertical, UserPlus, UserMinus, ShieldBan, Repeat2, Share2, Music, Trash2, Bookmark } from "lucide-react";
+import { Heart, MessageCircle, MoreVertical, UserPlus, UserMinus, ShieldBan, Repeat2, Share2, Music, Trash2, Bookmark, ExternalLink } from "lucide-react";
 import { Image } from "@/components/ui/image";
 import PostComments from "./PostComments";
 import ShareMenu from "./ShareMenu";
@@ -236,6 +236,24 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
     return `${name} ${verb}`;
   });
 
+  const metadataImport = post.media_metadata?.importedFrom || post.mediaMetadata?.importedFrom;
+  let importedSource = metadataImport || null;
+  if (!importedSource && typeof post.content === "string") {
+    const importMatch = post.content.match(/^\[Imported from ([^·\]]+)(?:\s*·\s*([^\]]+))?\]/i);
+    if (importMatch) {
+      const sourceMatch = post.content.match(/\n\nSource:\s*([^\s]+)/i);
+      importedSource = {
+        platformLabel: importMatch[1]?.trim() || "External Source",
+        authorHandle: importMatch[2]?.trim() || "",
+        permalinkUrl: sourceMatch?.[1]?.trim() || null,
+      };
+    }
+  }
+
+  const cleanDisplayContent = typeof post.content === "string" && importedSource
+    ? post.content.replace(/^\[Imported from [^\]]+\]\s*/i, "").replace(/\n\nSource:\s*[^\s]+$/i, "").trim()
+    : post.content;
+
   const renderContentWithHashtagHighlight = (content) => {
     if (!content) return null;
 
@@ -350,8 +368,37 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
         </div>
       </div>
 
+      {importedSource && (
+        <div className="mx-4 mb-2.5 flex items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/10 px-3 py-2 text-xs">
+          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+            <span className="font-semibold text-primary inline-flex items-center gap-1">
+              {importedSource.platformLabel}
+            </span>
+            {importedSource.authorHandle && (
+              <span className="text-foreground/90 font-mono text-[11px] bg-secondary/60 px-1.5 py-0.5 rounded border border-border">
+                {importedSource.authorHandle}
+              </span>
+            )}
+            <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
+              ✓ Source Verified
+            </span>
+          </div>
+          {importedSource.permalinkUrl && (
+            <a
+              href={importedSource.permalinkUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-[11px] text-primary hover:underline font-medium shrink-0 ml-auto"
+            >
+              <span>View Source</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+        </div>
+      )}
+
       <div className="px-4 pb-3">
-        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{renderContentWithHashtagHighlight(post.content)}</p>
+        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{renderContentWithHashtagHighlight(cleanDisplayContent)}</p>
         {post.repostOf && (
           <div className="mt-2 rounded-xl border border-border bg-secondary/20 p-3 space-y-1.5">
             <p className="text-xs text-muted-foreground flex items-center gap-1">

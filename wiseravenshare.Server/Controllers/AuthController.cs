@@ -635,15 +635,29 @@ public class AuthController : ControllerBase
 
     private static bool IsConnected(SocialFeedConnection? connection)
     {
-        if (connection is null)
+        if (connection is null || !connection.Enabled)
         {
             return false;
         }
 
-        return connection.Enabled
-            || !string.IsNullOrWhiteSpace(connection.Username)
-            || !string.IsNullOrWhiteSpace(connection.ProfileUrl)
-            || !string.IsNullOrWhiteSpace(connection.FeedUrl);
+        // True authentication requires a valid access token or AT Protocol verified session
+        if (!string.IsNullOrWhiteSpace(connection.AccessToken))
+        {
+            if (connection.TokenExpiresAt.HasValue && connection.TokenExpiresAt.Value < DateTimeOffset.UtcNow)
+            {
+                return !string.IsNullOrWhiteSpace(connection.RefreshToken);
+            }
+            return true;
+        }
+
+        // Bluesky with verified DID from AT Protocol handshake
+        if (string.Equals(connection.Site, "bluesky", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(connection.DestinationId))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     [HttpGet("oauth/{provider}/start")]
@@ -862,7 +876,7 @@ public class AuthController : ControllerBase
 
     [HttpPost("{platform}/complete")]
     [Authorize]
-    public IActionResult CompleteSocialConnect(
+    public async Task<IActionResult> CompleteSocialConnect(
         string platform,
         [FromBody] SocialConnectCompleteRequest? request)
     {
@@ -892,13 +906,143 @@ public class AuthController : ControllerBase
 
         var currentConnection = GetSocialConnection(user, normalizedPlatform) ?? new SocialFeedConnection();
         var fields = request?.Fields ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var merged = BuildManualConnectionUpdate(normalizedPlatform, currentConnection, fields);
-        if (merged is null)
+
+        static string ReadField(IReadOnlyDictionary<string, string> values, params string[] keys)
         {
-            return BadRequest(new { message = $"Unsupported platform '{platform}'." });
+            foreach (var key in keys)
+            {
+                if (values.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+                {
+                    return value.Trim();
+                }
+            }
+            return string.Empty;
         }
 
-        _userStore.UpdateSocialFeeds(requestedUserId, merged);
+        static bool ParseBool(string value, bool fallback)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return fallback;
+            return bool.TryParse(value, out var b) ? b : fallback;
+        }
+
+        if (normalizedPlatform == "bluesky")
+        {
+            var bskyUser = ReadField(fields, "username", "handle");
+            var bskyPassword = ReadField(fields, "app_password", "appPassword");
+
+            // If updating sharing consent on an already authenticated connection without new credentials
+            if (string.IsNullOrWhiteSpace(bskyPassword) && IsConnected(currentConnection))
+            {
+                currentConnection.ShareProfile = ParseBool(ReadField(fields, "share_profile", "shareProfile"), currentConnection.ShareProfile);
+                currentConnection.AllowCrossPosting = ParseBool(ReadField(fields, "allow_crossposting", "allowCrossPosting"), currentConnection.AllowCrossPosting);
+                currentConnection.AllowContentImport = ParseBool(ReadField(fields, "allow_content_import", "allowContentImport"), currentConnection.AllowContentImport);
+                currentConnection.ShareAnalytics = ParseBool(ReadField(fields, "share_analytics", "shareAnalytics"), currentConnection.ShareAnalytics);
+                currentConnection.SharingConsent = ParseBool(ReadField(fields, "sharing_consent", "sharingConsent"), true);
+                if (ReadField(fields, "scopes") is { Length: > 0 } sc) currentConnection.Scopes = sc;
+                _userStore.UpdateSocialFeeds(requestedUserId, new UpdateSocialFeedsRequest { Bluesky = currentConnection });
+                return Ok(new { success = true });
+            }
+
+            if (string.IsNullOrWhiteSpace(bskyUser) || string.IsNullOrWhiteSpace(bskyPassword))
+            {
+                return BadRequest(new { message = "Bluesky handle and App Password are required for authentication." });
+            }
+
+            // Perform live AT Protocol cryptographic handshake with bsky.social
+            try
+            {
+                using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                var sessionPayload = new { identifier = bskyUser.TrimStart('@'), password = bskyPassword.Trim() };
+                var sessionContent = new StringContent(JsonSerializer.Serialize(sessionPayload), Encoding.UTF8, "application/json");
+                using var sessionResponse = await httpClient.PostAsync("https://bsky.social/xrpc/com.atproto.server.createSession", sessionContent);
+                if (!sessionResponse.IsSuccessStatusCode)
+                {
+                    var errorBody = await sessionResponse.Content.ReadAsStringAsync();
+                    _logger.LogWarning("Bluesky AT Protocol handshake failed ({Status}): {Body}", (int)sessionResponse.StatusCode, errorBody);
+                    return StatusCode(StatusCodes.Status401Unauthorized, new
+                    {
+                        message = "Bluesky authentication failed at bsky.social. Please verify your handle and App Password."
+                    });
+                }
+
+                await using var sessionStream = await sessionResponse.Content.ReadAsStreamAsync();
+                using var sessionDoc = await JsonDocument.ParseAsync(sessionStream);
+                var sRoot = sessionDoc.RootElement;
+                var did = sRoot.TryGetProperty("did", out var didNode) ? didNode.GetString() ?? string.Empty : string.Empty;
+                var verifiedHandle = sRoot.TryGetProperty("handle", out var hNode) ? hNode.GetString() ?? bskyUser.TrimStart('@') : bskyUser.TrimStart('@');
+                var accessJwt = sRoot.TryGetProperty("accessJwt", out var ajNode) ? ajNode.GetString() ?? string.Empty : string.Empty;
+                var refreshJwt = sRoot.TryGetProperty("refreshJwt", out var rjNode) ? rjNode.GetString() ?? string.Empty : string.Empty;
+
+                var verifiedConnection = new SocialFeedConnection
+                {
+                    Enabled = true,
+                    Site = "bluesky",
+                    Username = verifiedHandle,
+                    ProfileUrl = $"https://bsky.app/profile/{verifiedHandle}",
+                    FeedUrl = $"https://bsky.app/profile/{verifiedHandle}",
+                    Designation = "bluesky-profile",
+                    AccessToken = accessJwt,
+                    RefreshToken = refreshJwt,
+                    DestinationId = did,
+                    DestinationName = verifiedHandle,
+                    ShareProfile = ParseBool(ReadField(fields, "share_profile", "shareProfile"), true),
+                    AllowCrossPosting = ParseBool(ReadField(fields, "allow_crossposting", "allowCrossPosting"), true),
+                    AllowContentImport = ParseBool(ReadField(fields, "allow_content_import", "allowContentImport"), true),
+                    ShareAnalytics = ParseBool(ReadField(fields, "share_analytics", "shareAnalytics"), true),
+                    SharingConsent = ParseBool(ReadField(fields, "sharing_consent", "sharingConsent"), true),
+                    Scopes = ReadField(fields, "scopes") is { Length: > 0 } sc ? sc : "profile,crosspost,import,analytics"
+                };
+
+                _userStore.UpdateSocialFeeds(requestedUserId, new UpdateSocialFeedsRequest { Bluesky = verifiedConnection });
+                return Ok(new { success = true, username = verifiedHandle, did = did, message = "Bluesky authenticated via AT Protocol handshake." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Bluesky AT Protocol handshake threw an exception for {Handle}", bskyUser);
+                return StatusCode(StatusCodes.Status502BadGateway, new
+                {
+                    message = $"Could not complete handshake with Bluesky network: {ex.Message}"
+                });
+            }
+        }
+
+        // For all OAuth providers (Facebook, Instagram, YouTube, Twitter/X, TikTok, LinkedIn),
+        // reject arbitrary handle submission if no authentic OAuth handshake was performed!
+        if (!IsConnected(currentConnection))
+        {
+            return BadRequest(new
+            {
+                message = $"Full authentication at {normalizedPlatform} is required. Please use the 'Sign in with {normalizedPlatform}' button to authenticate at the social media site."
+            });
+        }
+
+        // Updating sharing consent & preferences on an already-authenticated connection
+        currentConnection.ShareProfile = ParseBool(ReadField(fields, "share_profile", "shareProfile"), currentConnection.ShareProfile);
+        currentConnection.AllowCrossPosting = ParseBool(ReadField(fields, "allow_crossposting", "allowCrossPosting"), currentConnection.AllowCrossPosting);
+        currentConnection.AllowContentImport = ParseBool(ReadField(fields, "allow_content_import", "allowContentImport"), currentConnection.AllowContentImport);
+        currentConnection.ShareAnalytics = ParseBool(ReadField(fields, "share_analytics", "shareAnalytics"), currentConnection.ShareAnalytics);
+        currentConnection.SharingConsent = ParseBool(ReadField(fields, "sharing_consent", "sharingConsent"), true);
+        if (ReadField(fields, "scopes") is { Length: > 0 } scopesVal)
+        {
+            currentConnection.Scopes = scopesVal;
+        }
+
+        var updateReq = normalizedPlatform switch
+        {
+            "facebook" => new UpdateSocialFeedsRequest { Facebook = currentConnection },
+            "instagram" => new UpdateSocialFeedsRequest { Instagram = currentConnection },
+            "tiktok" => new UpdateSocialFeedsRequest { TikTok = currentConnection },
+            "youtube" => new UpdateSocialFeedsRequest { YouTube = currentConnection },
+            "twitter" => new UpdateSocialFeedsRequest { Twitter = currentConnection },
+            "linkedin" => new UpdateSocialFeedsRequest { LinkedIn = currentConnection },
+            _ => null
+        };
+
+        if (updateReq is not null)
+        {
+            _userStore.UpdateSocialFeeds(requestedUserId, updateReq);
+        }
+
         return Ok(new { success = true });
     }
 
@@ -2457,6 +2601,7 @@ public class AuthController : ControllerBase
             "twitter" => "twitter",
             "x" => "twitter",         // X is the rebrand of Twitter
             "bluesky" => "bluesky",
+            "linkedin" => "linkedin",
             _ => string.Empty
         };
     }
@@ -2473,6 +2618,7 @@ public class AuthController : ControllerBase
             "youtube" => "YouTube",
             "twitter" => "Twitter",
             "bluesky" => "Bluesky",
+            "linkedin" => "LinkedIn",
             _ => string.Empty
         };
 
@@ -2510,6 +2656,10 @@ public class AuthController : ControllerBase
                 _configuration["TWITTER_CLIENT_ID"],
                 _configuration["X_CLIENT_ID"],
                 _configuration["Social:Twitter:ClientId"]),
+            "linkedin" => ResolveOAuthSettingValue(
+                _configuration["LINKEDIN_CLIENT_ID"],
+                _configuration["Social:LinkedIn:ClientId"],
+                _configuration["Social:LinkedIn:AppId"]),
             _ => string.Empty
         };
         var fallbackClientSecret = provider switch
@@ -2537,6 +2687,10 @@ public class AuthController : ControllerBase
                 _configuration["TWITTER_CLIENT_SECRET"],
                 _configuration["X_CLIENT_SECRET"],
                 _configuration["Social:Twitter:ClientSecret"]),
+            "linkedin" => ResolveOAuthSettingValue(
+                _configuration["LINKEDIN_CLIENT_SECRET"],
+                _configuration["Social:LinkedIn:ClientSecret"],
+                _configuration["Social:LinkedIn:AppSecret"]),
             _ => string.Empty
         };
         var fallbackRedirectUri = provider switch
@@ -2554,6 +2708,10 @@ public class AuthController : ControllerBase
                 _configuration["Social:TikTok:RedirectUri"],
                 _configuration["TIKTOK_OAUTH_REDIRECT_URI"],
                 _configuration["TIKTOK_REDIRECT_URI"]),
+            "linkedin" => ResolveOAuthSettingValue(
+                _configuration["Social:LinkedIn:RedirectUri"],
+                _configuration["LINKEDIN_OAUTH_REDIRECT_URI"],
+                _configuration["LINKEDIN_REDIRECT_URI"]),
             _ => string.Empty
         };
 
@@ -2912,6 +3070,14 @@ public class AuthController : ControllerBase
             {
                 ["state"] = state
             }),
+            "linkedin" => BuildUrl("https://www.linkedin.com/oauth/v2/authorization", new Dictionary<string, string?>
+            {
+                ["client_id"] = config.ClientId,
+                ["redirect_uri"] = callbackUrl,
+                ["response_type"] = "code",
+                ["scope"] = "openid profile email w_member_social",
+                ["state"] = state
+            }),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
         };
     }
@@ -2933,7 +3099,67 @@ public class AuthController : ControllerBase
             "youtube" => await ResolveYouTubeProfileAsync(httpClient, config, code, callbackUrl, codeVerifier),
             "twitter" => await ResolveTwitterProfileAsync(httpClient, config, code, callbackUrl, codeVerifier),
             "bluesky" => await ResolveBlueskyProfileAsync(httpClient, config, code, callbackUrl),
+            "linkedin" => await ResolveLinkedInProfileAsync(httpClient, config, code, callbackUrl),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
+        };
+    }
+
+    private static async Task<SocialProfile> ResolveLinkedInProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    {
+        var tokenRequest = new HttpRequestMessage(HttpMethod.Post, "https://www.linkedin.com/oauth/v2/accessToken");
+        var tokenParams = new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["code"] = code,
+            ["redirect_uri"] = callbackUrl,
+            ["client_id"] = config.ClientId,
+            ["client_secret"] = config.ClientSecret
+        };
+        tokenRequest.Content = new FormUrlEncodedContent(tokenParams);
+
+        using var response = await httpClient.SendAsync(tokenRequest);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var tokenJson = await JsonDocument.ParseAsync(stream);
+        var tokenRoot = tokenJson.RootElement;
+
+        var accessToken = tokenRoot.TryGetProperty("access_token", out var atNode) ? atNode.GetString() ?? string.Empty : string.Empty;
+        var refreshToken = tokenRoot.TryGetProperty("refresh_token", out var rtNode) ? rtNode.GetString() ?? string.Empty : string.Empty;
+        DateTimeOffset? tokenExpiresAt = null;
+        if (tokenRoot.TryGetProperty("expires_in", out var expNode) && expNode.TryGetInt32(out var expSeconds) && expSeconds > 0)
+        {
+            tokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expSeconds);
+        }
+
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            throw new InvalidOperationException("LinkedIn access token was not returned.");
+        }
+
+        var userRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.linkedin.com/v2/userinfo");
+        userRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var userResponse = await httpClient.SendAsync(userRequest);
+        userResponse.EnsureSuccessStatusCode();
+
+        await using var userStream = await userResponse.Content.ReadAsStreamAsync();
+        using var userJson = await JsonDocument.ParseAsync(userStream);
+        var uRoot = userJson.RootElement;
+
+        var sub = uRoot.TryGetProperty("sub", out var subNode) ? subNode.GetString() ?? string.Empty : string.Empty;
+        var name = uRoot.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty;
+        var email = uRoot.TryGetProperty("email", out var emailNode) ? emailNode.GetString() ?? $"{sub}@linkedin.com" : $"{sub}@linkedin.com";
+
+        return new SocialProfile
+        {
+            ProviderUserId = !string.IsNullOrWhiteSpace(sub) ? sub : name,
+            Name = !string.IsNullOrWhiteSpace(name) ? name : "LinkedIn User",
+            Email = email,
+            AccessToken = accessToken,
+            RefreshToken = refreshToken,
+            TokenExpiresAt = tokenExpiresAt,
+            DestinationId = sub,
+            DestinationName = name
         };
     }
 
@@ -3831,7 +4057,7 @@ public class AuthController : ControllerBase
             "facebook" => providerUserId,
             "instagram" => !string.IsNullOrWhiteSpace(providerUserId) ? providerUserId : displayName,
             "tiktok" => !string.IsNullOrWhiteSpace(providerUserId) ? providerUserId : displayName,
-            "youtube" or "twitter" or "linkedin" => !string.IsNullOrWhiteSpace(displayName) ? displayName : providerUserId,
+            "youtube" or "twitter" or "linkedin" or "bluesky" => !string.IsNullOrWhiteSpace(displayName) ? displayName : providerUserId,
             _ => string.Empty
         };
     }
@@ -3852,6 +4078,7 @@ public class AuthController : ControllerBase
                 ? $"https://www.youtube.com/channel/{identifier}"
                 : $"https://www.youtube.com/@{identifier.TrimStart('@')}",
             "twitter" => $"https://x.com/{identifier}",
+            "bluesky" => $"https://bsky.app/profile/{identifier.TrimStart('@')}",
             "linkedin" => $"https://www.linkedin.com/in/{identifier}",
             _ => string.Empty
         };

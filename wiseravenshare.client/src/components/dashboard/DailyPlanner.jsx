@@ -124,7 +124,9 @@ export default function DailyPlanner() {
   const calendarRef = useRef(null);
   const sessionSaveTimeoutRef = useRef(null);
 
-  const storageKey = `wiseravenshare_appointments_${user?.email || user?.id || "default"}`;
+  const userKey = (user?.email || user?.id || "").trim().toLowerCase();
+  const storageKey = userKey ? `wiseravenshare_appointments_${userKey}` : "wiseravenshare_appointments_default";
+  const globalStorageKey = "wiseravenshare_appointments_global";
 
   const [events, setEvents]                   = useState([]);
   const [activeAlert, setActiveAlert]         = useState(null);
@@ -142,31 +144,57 @@ export default function DailyPlanner() {
   const [listFilter, setListFilter]           = useState("upcoming"); // "upcoming" | "today" | "all"
   const [listSearch, setListSearch]           = useState("");
 
-  // ── Sync to local cache so appointments survive offline / page navigation ─
+  // ── Sync to local cache so appointments survive offline / page navigation / logins ─
   const syncLocalAppointments = useCallback((items) => {
     if (typeof window === "undefined" || !Array.isArray(items)) return;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(items));
+      const serialized = JSON.stringify(items);
+      localStorage.setItem(storageKey, serialized);
+      localStorage.setItem(globalStorageKey, serialized);
+      if (user?.id) {
+        localStorage.setItem(`wiseravenshare_appointments_${user.id}`, serialized);
+      }
+      if (user?.email) {
+        localStorage.setItem(`wiseravenshare_appointments_${user.email.toLowerCase()}`, serialized);
+      }
     } catch (err) {
       console.warn("Failed to cache planner appointments locally:", err);
     }
-  }, [storageKey]);
+  }, [storageKey, user?.id, user?.email]);
+
+  const readLocalCachedAppointments = useCallback(() => {
+    if (typeof window === "undefined") return [];
+    const candidateKeys = [
+      storageKey,
+      user?.email ? `wiseravenshare_appointments_${user.email.toLowerCase()}` : null,
+      user?.id ? `wiseravenshare_appointments_${user.id}` : null,
+      globalStorageKey,
+      "wiseravenshare_appointments_default",
+    ].filter(Boolean);
+
+    for (const key of candidateKeys) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {
+        // continue
+      }
+    }
+    return [];
+  }, [storageKey, user?.email, user?.id]);
 
   // ── Immediate local hydration on mount or user change ────────────────────
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const cached = localStorage.getItem(storageKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setEvents(parsed);
-        }
-      }
-    } catch {
-      // Ignore cache parse errors
+    const cached = readLocalCachedAppointments();
+    if (cached.length > 0) {
+      setEvents(cached);
     }
-  }, [storageKey]);
+  }, [readLocalCachedAppointments]);
 
   const queueSessionSave = useCallback((overrides = {}) => {
     if (!sessionHydrated || !isAuthenticated) return;
@@ -276,8 +304,36 @@ export default function DailyPlanner() {
     try {
       const data = await apiClient.requestJson("/api/planner?all=true");
       if (Array.isArray(data)) {
-        setEvents(data);
-        syncLocalAppointments(data);
+        if (data.length > 0) {
+          setEvents(data);
+          syncLocalAppointments(data);
+        } else {
+          // Server returned empty list; verify if we have locally cached appointments to preserve
+          const cached = readLocalCachedAppointments();
+          if (cached && cached.length > 0) {
+            setEvents(cached);
+            // Re-sync locally cached items to server so they persist permanently
+            for (const item of cached) {
+              if (item?.title && item?.start) {
+                const payload = {
+                  title: item.title,
+                  description: item.extendedProps?.description ?? "",
+                  startUtc: new Date(item.start).toISOString(),
+                  endUtc: new Date(item.end || item.start).toISOString(),
+                  reminderMinutesBefore: Number(item.extendedProps?.reminderMinutesBefore ?? 15),
+                  color: item.backgroundColor || item.borderColor || "#3788d8",
+                };
+                apiClient.requestJson("/api/planner", {
+                  method: "POST",
+                  body: JSON.stringify(payload),
+                }).catch(() => {});
+              }
+            }
+          } else {
+            setEvents([]);
+            syncLocalAppointments([]);
+          }
+        }
       }
       setLoadError("");
     } catch (err) {
@@ -285,9 +341,14 @@ export default function DailyPlanner() {
         checkUserAuth(false);
         return;
       }
+      // On network or server error, retain any locally cached appointments
+      const cached = readLocalCachedAppointments();
+      if (cached.length > 0) {
+        setEvents(cached);
+      }
       setLoadError(err?.message || "Failed to load appointments.");
     }
-  }, [checkUserAuth, isAuthenticated, syncLocalAppointments]);
+  }, [checkUserAuth, isAuthenticated, readLocalCachedAppointments, syncLocalAppointments]);
 
   useEffect(() => {
     if (isAuthenticated) {

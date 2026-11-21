@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Download, Loader2, Check, RefreshCw } from "lucide-react";
 
 export default function ImportPanel() {
-  const [items, setItems] = useState({ facebook: [], instagram: [], tiktok: [], twitter: [], bluesky: [] });
+  const [items, setItems] = useState({ facebook: [], instagram: [], tiktok: [], twitter: [], bluesky: [], linkedin: [], youtube: [] });
   const [selected, setSelected] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -24,10 +24,12 @@ export default function ImportPanel() {
         tiktok: data.tiktok || [],
         twitter: data.twitter || data.x || [],
         bluesky: data.bluesky || [],
+        linkedin: data.linkedin || [],
+        youtube: data.youtube || [],
       });
       setSelected(new Set());
     } catch {
-      setItems({ facebook: [], instagram: [], tiktok: [], twitter: [], bluesky: [] });
+      setItems({ facebook: [], instagram: [], tiktok: [], twitter: [], bluesky: [], linkedin: [], youtube: [] });
     } finally {
       setLoading(false);
     }
@@ -42,7 +44,15 @@ export default function ImportPanel() {
   };
 
   const handleImport = async () => {
-    const all = [...items.facebook, ...items.instagram, ...items.tiktok, ...items.twitter, ...items.bluesky];
+    const all = [
+      ...items.facebook,
+      ...items.instagram,
+      ...items.tiktok,
+      ...items.twitter,
+      ...items.bluesky,
+      ...(items.linkedin || []),
+      ...(items.youtube || []),
+    ];
     const chosen = all.filter((_, i) => selected.has(i));
     if (chosen.length === 0) return;
     setImporting(true);
@@ -51,6 +61,11 @@ export default function ImportPanel() {
         content: item.text || item.content || "",
         post_type: item.mediaUrl ? "Image" : "Text",
         media_uris: item.mediaUrl ? [item.mediaUrl] : null,
+        platform: item.platform || "",
+        author_handle: item.authorHandle || item.author_handle || item.handle || "",
+        author_name: item.authorName || item.author_name || item.name || "",
+        permalink_url: item.permalinkUrl || item.permalink_url || item.url || "",
+        external_id: item.externalId || item.external_id || item.id || "",
       }));
       const res = await apiClient.functions.invoke("SocialImport", { action: "import", items: importItems });
       setImported(res.data?.imported || 0);
@@ -66,6 +81,8 @@ export default function ImportPanel() {
     ...items.tiktok,
     ...items.twitter,
     ...items.bluesky,
+    ...(items.linkedin || []),
+    ...(items.youtube || []),
   ];
 
   return (

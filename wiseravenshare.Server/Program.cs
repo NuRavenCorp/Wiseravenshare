@@ -2654,6 +2654,8 @@ if (enableHostedServices && !string.IsNullOrWhiteSpace(streamBridgeOptions.WiseR
     builder.Services.AddHostedService<Wiseravenshare.Server.Services.StreamBridge.WiseRavenStreamPushService>();
 }
 builder.Services.AddScoped<SyntheticEngagementService>();
+builder.Services.AddScoped<SyntheticEngagementCadenceService>();
+builder.Services.Configure<SyntheticEngagementCadenceOptions>(builder.Configuration.GetSection(SyntheticEngagementCadenceOptions.SectionName));
 builder.Services.AddHttpClient<IRssFeedService, RssFeedService>();
 builder.Services.AddHttpClient<ITikTokAggregatorService, TikTokAggregatorService>();
 builder.Services.AddHttpClient<ISocialPlatformService, SocialPlatformService>();
@@ -2872,6 +2874,7 @@ if (enableHostedServices)
 {
     builder.Services.AddHostedService<RavensightMediaRetentionCleanupService>();
     builder.Services.AddHostedService<RssFeedIngestBackgroundService>();
+    builder.Services.AddHostedService<SyntheticEngagementCadenceHostedService>();
 }
 
 // RavenCommuniqué — Twilio voice/SMS/WhatsApp + WebRTC call hub
