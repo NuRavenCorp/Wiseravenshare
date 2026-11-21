@@ -230,6 +230,26 @@ export default function PostsFeed() {
     const postId = String(post.id || "");
     return { ...post, _bookmarkId: bookmarkMap[postId] || post._bookmarkId || null };
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const targetPostId = params.get("post");
+    if (!targetPostId) return;
+
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`post-${targetPostId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("ring-2", "ring-primary", "bg-primary/5");
+        setTimeout(() => {
+          el.classList.remove("ring-2", "ring-primary", "bg-primary/5");
+        }, 3000);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [posts]);
   const removeBlockedUser = async (userId) => {
     const blocked = String(userId);
     setBlockedIds((current) => [...new Set([...current, blocked])]);

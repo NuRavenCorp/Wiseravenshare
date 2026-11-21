@@ -266,7 +266,7 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
   }
 
   return (
-    <article className="rounded-2xl border border-border bg-background/60 backdrop-blur-sm overflow-hidden">
+    <article id={`post-${post.id}`} className="rounded-2xl border border-border bg-background/60 backdrop-blur-sm overflow-hidden scroll-mt-24 transition-all duration-500">
       <div className="flex items-center justify-between p-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center overflow-hidden shrink-0">

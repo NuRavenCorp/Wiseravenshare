@@ -204,7 +204,7 @@ export default function JournalismBoard() {
                                     )}
                                     {r.post_id && (
                                       <a
-                                        href={`/?post=${r.post_id}`}
+                                        href={`/social?post=${encodeURIComponent(r.post_id)}`}
                                         target="_blank"
                                         rel="noopener"
                                         onClick={(e) => e.stopPropagation()}

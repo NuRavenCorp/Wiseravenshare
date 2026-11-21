@@ -168,7 +168,10 @@ export default function TeamsSection() {
             <Label htmlFor="desc">Description</Label>
             <Textarea id="desc" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
           </div>
-          <Button onClick={handleCreate} disabled={!form.team_name}>Create Team</Button>
+          <Button onClick={handleCreate} disabled={creating || !form.team_name.trim()}>
+            {creating && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+            {creating ? "Creating..." : "Create Team"}
+          </Button>
         </div>
       )}
       {teams.length === 0 ? (
@@ -178,13 +181,29 @@ export default function TeamsSection() {
         </div>
       ) : (
         teams.map((t) => {
-          const isOwner = t.owner_id === user.id;
+          const isOwner =
+            t.owner_id === user?.id ||
+            t.owner_id?.toLowerCase() === user?.id?.toLowerCase() ||
+            (user?.email && t.owner_id?.toLowerCase() === user?.email?.toLowerCase());
           const details = t.member_details || [];
           return (
             <div key={t.id} className="rounded-lg border border-border bg-card p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="text-sm font-medium text-foreground">{t.team_name}</h3>
-                {isOwner && <Crown className="w-4 h-4 text-accent" />}
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-medium text-foreground">{t.team_name}</h3>
+                  {isOwner && <Crown className="w-4 h-4 text-accent" title="Owner" />}
+                </div>
+                {isOwner && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDeleteTeam(t.id)}
+                    title="Delete Team"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
               </div>
               {t.focus && <p className="text-xs text-accent/80 mb-1">{t.focus}</p>}
               {t.description && <p className="text-xs text-muted-foreground mb-2">{t.description}</p>}
@@ -194,7 +213,10 @@ export default function TeamsSection() {
               {details.length > 0 && (
                 <div className="space-y-1.5 mb-3">
                   {details.map((m) => {
-                    const isMe = m.user_id === user.id;
+                    const isMe =
+                      m.user_id === user?.id ||
+                      m.user_id?.toLowerCase() === user?.id?.toLowerCase() ||
+                      (user?.email && m.user_id?.toLowerCase() === user?.email?.toLowerCase());
                     const editKey = `${t.id}:${m.user_id}`;
                     const editing = editRole[editKey] !== undefined;
                     return (

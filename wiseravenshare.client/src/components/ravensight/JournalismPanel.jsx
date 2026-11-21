@@ -174,7 +174,9 @@ export default function JournalismPanel() {
             return (
               <div
                 key={post.id}
-                className="p-5 rounded-xl border border-border bg-card hover:border-primary/30 transition-colors"
+                id={`post-${post.id}`}
+                data-story-id={post.id}
+                className="p-5 rounded-xl border border-border bg-card hover:border-primary/30 transition-all scroll-mt-24"
               >
                 <div className="flex items-start gap-4">
                   <div className="shrink-0 w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-heading text-lg">

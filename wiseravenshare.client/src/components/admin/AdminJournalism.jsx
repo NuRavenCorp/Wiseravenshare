@@ -198,7 +198,7 @@ export default function AdminJournalism() {
                   </div>
                   {r.post_id && (
                     <a
-                      href={`/?post=${r.post_id}`}
+                      href={`/social?post=${encodeURIComponent(r.post_id)}`}
                       target="_blank"
                       rel="noopener"
                       className="shrink-0 p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
