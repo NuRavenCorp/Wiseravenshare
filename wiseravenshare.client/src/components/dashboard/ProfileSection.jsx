@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import AvatarUploadContainer from "@/components/ui/AvatarUploadContainer";
 import {
   Loader2,
   Save,
@@ -44,7 +45,6 @@ function StatusBanner({ message, variant = "success" }) {
 
 export default function ProfileSection() {
   const { user, checkUserAuth } = useAuth();
-  const fileInputRef = useRef(null);
 
   const cacheKey = user?.id ? `wr_profile_cache_${user.id}` : "wr_profile_cache";
 
@@ -68,8 +68,6 @@ export default function ProfileSection() {
 
   const [loading, setLoading] = useState(!initial);
   const [saving, setSaving] = useState(false);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const [showUrlInput, setShowUrlInput] = useState(false);
   const [profileMsg, setProfileMsg] = useState(null); // { text, variant }
 
   // ── Password change ─────────────────────────────────────────────
@@ -123,56 +121,7 @@ export default function ProfileSection() {
     load();
   }, [user?.id, cacheKey]);
 
-  const handleAvatarFileSelect = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
 
-    if (!file.type.startsWith("image/")) {
-      setProfileMsg({ text: "Please select an image file (JPG, PNG, WebP, GIF).", variant: "error" });
-      return;
-    }
-
-    if (file.size > 15 * 1024 * 1024) {
-      setProfileMsg({ text: "Image size must be 15 MB or less.", variant: "error" });
-      return;
-    }
-
-    // Immediate optimistic local preview
-    const localPreview = URL.createObjectURL(file);
-    setAvatar(localPreview);
-    setUploadingAvatar(true);
-    setProfileMsg(null);
-
-    try {
-      const uploadedUrl = await apiClient.users.uploadAvatar(user?.id || "me", file);
-      if (uploadedUrl) {
-        setAvatar(uploadedUrl);
-
-        // Retain / persist immediately
-        try {
-          const currentCache = {
-            name,
-            bio,
-            location,
-            website,
-            avatar: uploadedUrl,
-          };
-          localStorage.setItem(cacheKey, JSON.stringify(currentCache));
-        } catch {}
-
-        await checkUserAuth();
-        setProfileMsg({ text: "Avatar uploaded & retained.", variant: "success" });
-        setTimeout(() => setProfileMsg(null), 3500);
-      }
-    } catch (err) {
-      setProfileMsg({ text: err?.message || "Failed to upload avatar.", variant: "error" });
-    } finally {
-      setUploadingAvatar(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
-  };
 
   const handleRemoveAvatar = async () => {
     setAvatar("");
@@ -276,102 +225,53 @@ export default function ProfileSection() {
       <div className="rounded-lg border border-border bg-card p-6 space-y-5">
         <h2 className="font-semibold text-foreground">Profile</h2>
 
-        {/* ── Avatar section with computer file upload & persistence ── */}
-        <div className="space-y-3 pt-1">
-          <Label>Profile Picture / Avatar</Label>
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-xl border border-border bg-card/60 backdrop-blur-sm">
-            {/* Circular Preview */}
-            <div className="relative group w-20 h-20 rounded-full border-2 border-primary/20 bg-muted flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
-              {avatar ? (
-                <img
-                  src={avatar}
-                  alt="Avatar preview"
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    e.currentTarget.style.display = "none";
-                  }}
-                />
-              ) : (
-                <UserIcon className="w-10 h-10 text-muted-foreground/60" />
-              )}
-              {uploadingAvatar && (
-                <div className="absolute inset-0 bg-background/70 backdrop-blur-xs flex items-center justify-center">
-                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                </div>
-              )}
-            </div>
-
-            {/* Upload Buttons & Options */}
-            <div className="flex-1 space-y-2">
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept="image/png,image/jpeg,image/webp,image/gif"
-                onChange={handleAvatarFileSelect}
-                className="hidden"
-              />
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="default"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadingAvatar || saving}
-                >
-                  {uploadingAvatar ? (
-                    <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
-                  ) : (
-                    <Upload className="w-4 h-4 mr-1.5" />
-                  )}
-                  {avatar ? "Change Photo" : "Upload from Computer"}
-                </Button>
-
-                {avatar && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleRemoveAvatar}
-                    disabled={uploadingAvatar || saving}
-                    className="text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 className="w-4 h-4 mr-1.5" />
-                    Remove
-                  </Button>
-                )}
-
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowUrlInput(!showUrlInput)}
-                  className="text-xs text-muted-foreground"
-                >
-                  <LinkIcon className="w-3.5 h-3.5 mr-1" />
-                  {showUrlInput ? "Hide URL field" : "Use image link"}
-                </Button>
-              </div>
-
-              <p className="text-xs text-muted-foreground">
-                Supports JPG, PNG, WebP or GIF up to 15 MB. Automatically retains across sessions.
-              </p>
-
-              {/* Optional URL input fallback */}
-              {showUrlInput && (
-                <div className="pt-2">
-                  <Input
-                    id="avatar-url"
-                    value={avatar}
-                    onChange={(e) => setAvatar(e.target.value)}
-                    placeholder="https://example.com/my-photo.jpg"
-                    className="text-xs"
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        {/* ── Avatar container with computer file upload, webcam photo capture & persistence ── */}
+        <AvatarUploadContainer
+          value={avatar}
+          name={name || user?.displayName || user?.name || user?.email}
+          userId={user?.id || "me"}
+          disabled={saving}
+          onChange={(newUrl) => {
+            setAvatar(newUrl);
+            try {
+              const currentCache = {
+                name,
+                bio,
+                location,
+                website,
+                avatar: newUrl,
+              };
+              localStorage.setItem(cacheKey, JSON.stringify(currentCache));
+            } catch {}
+          }}
+          onUpload={async (file) => {
+            const uploadedUrl = await apiClient.users.uploadAvatar(user?.id || "me", file);
+            if (uploadedUrl) {
+              setAvatar(uploadedUrl);
+              try {
+                const currentCache = {
+                  name,
+                  bio,
+                  location,
+                  website,
+                  avatar: uploadedUrl,
+                };
+                localStorage.setItem(cacheKey, JSON.stringify(currentCache));
+              } catch {}
+              await checkUserAuth();
+            }
+            return uploadedUrl;
+          }}
+          onRemove={handleRemoveAvatar}
+          onSuccess={(msg) => {
+            setProfileMsg({ text: msg, variant: "success" });
+            setTimeout(() => setProfileMsg(null), 3500);
+            checkUserAuth();
+          }}
+          onError={(err) => {
+            setProfileMsg({ text: err, variant: "error" });
+          }}
+        />
 
         <FieldGroup id="name" label="Display Name">
           <Input
