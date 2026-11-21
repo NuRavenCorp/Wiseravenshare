@@ -37,6 +37,7 @@ export default function PostsFeed() {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
+  const [bookmarkMap, setBookmarkMap] = useState({});
   const [blockedIds, setBlockedIds] = useState([]);
   const [blockedUsers, setBlockedUsers] = useState([]);
   const [showComposer, setShowComposer] = useState(false);
@@ -87,7 +88,19 @@ export default function PostsFeed() {
       let user = null;
       try { user = await apiClient.auth.me(); } catch { /* proceed with non-ranked following feed */ }
       setCurrentUser(user);
+      let nextBookmarkMap = {};
       if (user) {
+        const bookmarkResult = await apiClient.entities.Bookmark.filter({}, { sort: "-created_date", limit: 200 }).catch(() => ({ items: [] }));
+        nextBookmarkMap = (bookmarkResult?.items || []).reduce((acc, bookmark) => {
+          const postId = String(bookmark?.post_id || "");
+          const id = String(bookmark?.id || "");
+          if (postId && id) {
+            acc[postId] = id;
+          }
+          return acc;
+        }, {});
+        setBookmarkMap(nextBookmarkMap);
+
         const blocks = await apiClient.social.myBlocks().catch(() => []);
         const blockProfiles = await Promise.all((blocks || []).map(async (block) => {
           try { return { ...(await apiClient.social.getUser(block.userId)), id: String(block.userId) }; }
@@ -96,6 +109,7 @@ export default function PostsFeed() {
         setBlockedUsers(blockProfiles);
         setBlockedIds(blockProfiles.map((user) => user.id));
       } else {
+        setBookmarkMap({});
         setBlockedUsers([]);
         setBlockedIds([]);
       }
@@ -132,7 +146,14 @@ export default function PostsFeed() {
       } else {
         feedResult = await apiClient.posts.trending(40);
       }
-      const normalized = (Array.isArray(feedResult) ? feedResult : feedResult?.items || []).map(normalizePost);
+      const normalized = (Array.isArray(feedResult) ? feedResult : feedResult?.items || []).map((post) => {
+        const normalizedPost = normalizePost(post);
+        const postId = String(normalizedPost.id || "");
+        if (postId && nextBookmarkMap[postId]) {
+          normalizedPost._bookmarkId = nextBookmarkMap[postId];
+        }
+        return normalizedPost;
+      });
       // Merge optimistic posts (created this session) that the server hasn't returned yet.
       const optimisticIds = new Set(normalized.map((p) => String(p.id)));
       const survivingOptimistic = Array.from(optimisticPostsRef.current.values())
@@ -205,6 +226,10 @@ export default function PostsFeed() {
     };
   }, [visiblePosts]);
   const displayedPosts = mode === "trending" ? rankedPosts : visiblePosts;
+  const displayedPostsWithBookmarks = displayedPosts.map((post) => {
+    const postId = String(post.id || "");
+    return { ...post, _bookmarkId: bookmarkMap[postId] || post._bookmarkId || null };
+  });
   const removeBlockedUser = async (userId) => {
     const blocked = String(userId);
     setBlockedIds((current) => [...new Set([...current, blocked])]);
@@ -223,6 +248,20 @@ export default function PostsFeed() {
     } catch (error) { console.error("Could not unblock user", error); }
   };
   const openTag = (value) => { setTag(value.startsWith("%") ? value : value.replace(/^#/, "")); setMode("trending"); };
+  const handleBookmarkChange = (postId, nextState) => {
+    const key = String(postId || "");
+    if (!key) return;
+    setBookmarkMap((current) => {
+      const next = { ...current };
+      if (nextState?.bookmarked && nextState?.bookmarkId) next[key] = String(nextState.bookmarkId);
+      else delete next[key];
+      return next;
+    });
+    setPosts((current) => current.map((post) => {
+      if (String(post.id) !== key) return post;
+      return { ...post, _bookmarkId: nextState?.bookmarked ? (nextState.bookmarkId || post._bookmarkId || null) : null };
+    }));
+  };
   const handlePosted = async (createdPost) => {
     if (createdPost) {
       const normalizedCreatedPost = normalizePost(createdPost);
@@ -275,10 +314,29 @@ export default function PostsFeed() {
       {displayedPosts.length === 0 ? (
         <div className="py-12 text-center"><Feather className="mx-auto mb-3 h-8 w-8 text-muted-foreground" /><p className="text-sm text-muted-foreground">{tag ? `No posts found for ${tag.startsWith("%") ? tag : `#${tag}`}.` : "No posts in this feed yet. Be the first to share."}</p></div>
       ) : view === "timeline" ? (
-        <PostTimeline posts={displayedPosts} currentUser={currentUser} blockedIds={blockedIds} onHashtagClick={openTag} onBlocked={removeBlockedUser} onAuthRequired={handleAuthRequired} />
+        <PostTimeline
+          posts={displayedPostsWithBookmarks}
+          currentUser={currentUser}
+          blockedIds={blockedIds}
+          onHashtagClick={openTag}
+          onBlocked={removeBlockedUser}
+          onBookmarkChange={handleBookmarkChange}
+          onAuthRequired={handleAuthRequired}
+        />
       ) : (
         <div className="grid gap-5 md:grid-cols-2">
-          {displayedPosts.map((post) => <PostCard key={post.id} post={post} currentUser={currentUser} blockedIds={blockedIds} onHashtagClick={openTag} onBlocked={removeBlockedUser} onAuthRequired={handleAuthRequired} />)}
+          {displayedPostsWithBookmarks.map((post) => (
+            <PostCard
+              key={post.id}
+              post={post}
+              currentUser={currentUser}
+              blockedIds={blockedIds}
+              onHashtagClick={openTag}
+              onBlocked={removeBlockedUser}
+              onAuthRequired={handleAuthRequired}
+              onBookmarkChange={handleBookmarkChange}
+            />
+          ))}
         </div>
       )}
     </div>

@@ -34,8 +34,11 @@ export default function InviteSection() {
         ),
         apiClient.entities.WiseCoinTransaction.aggregate({ sum: "amount" }),
       ]);
-      setInvitations(invRes.items || []);
-      setBalance(balAgg.rows[0]?.sum_amount || 0);
+      setInvitations(invRes?.items || []);
+      const sumAmount = balAgg?.rows?.[0]?.sum_amount ?? balAgg?.balance ?? 0;
+      setBalance(sumAmount);
+    } catch (err) {
+      console.warn("Failed to fetch invite/balance data:", err);
     } finally {
       setLoading(false);
     }
@@ -58,10 +61,13 @@ export default function InviteSection() {
         `Invitation sent to ${email.trim()}. ${REWARD_AMOUNT} WiseCoins will be credited when they join.`
       );
       setEmail("");
-      fetchData();
+      await fetchData();
     } catch (err) {
       const msg =
+        err?.data?.error ||
+        err?.data?.message ||
         err?.response?.data?.error ||
+        err?.response?.data?.message ||
         err?.message ||
         "Failed to send invitation";
       setError(msg);

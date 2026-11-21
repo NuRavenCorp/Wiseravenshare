@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Net;
 using System.Net.Http.Headers;
@@ -505,6 +507,84 @@ public sealed class FunctionCompatController : ControllerBase
     [Authorize]
     public async Task<IActionResult> InviteCollaborator([FromBody] InviteCollaboratorRequest request)
     {
+        if (!string.IsNullOrWhiteSpace(request.TeamId))
+        {
+            var teamStore = _serviceProvider.GetService<TeamStore>();
+            var team = teamStore?.GetById(request.TeamId);
+            if (team is null)
+            {
+                return NotFound(new { error = "Team not found." });
+            }
+
+            var identifier = request.Identifier?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(identifier))
+            {
+                return BadRequest(new { error = "identifier is required." });
+            }
+
+            var role = string.IsNullOrWhiteSpace(request.Role) ? "Contributor" : request.Role;
+            var existingUser = await ResolveUserByIdentifierAsync(identifier);
+            if (existingUser != null)
+            {
+                teamStore!.AddOrUpdateMember(
+                    team.Id,
+                    existingUser.Value.Id.ToString(),
+                    existingUser.Value.DisplayName ?? identifier,
+                    role,
+                    request.Message);
+
+                return Ok(new
+                {
+                    invited = "user",
+                    display_name = existingUser.Value.DisplayName ?? identifier,
+                    team_id = team.Id,
+                    role = role
+                });
+            }
+
+            var inviteeEmail = await ResolveInviteeEmailAsync(identifier) ?? (identifier.Contains('@') ? identifier : null);
+            if (inviteeEmail != null)
+            {
+                var inviter = await ResolveCurrentUserAsync();
+                var issue = _teamAccessService.IssueInvite(
+                    inviter.Email,
+                    inviteeEmail,
+                    inviteeEmail.Split('@')[0],
+                    role,
+                    TimeSpan.FromDays(7),
+                    prearranged: false);
+
+                var inviteLink = $"{GetAppBaseUrl()}/register?team_invite={Uri.EscapeDataString(issue.InviteToken)}";
+                _ = await _emailService.SendTeamInviteEmailAsync(new TeamInviteEmailMessage
+                {
+                    ToEmail = inviteeEmail,
+                    ToName = inviteeEmail.Split('@')[0],
+                    InviterEmail = inviter.Email,
+                    TeamRole = role,
+                    Prearranged = false,
+                    ExpiresAtUtc = issue.ExpiresAtUtc,
+                    InviteLink = inviteLink
+                });
+
+                teamStore!.AddOrUpdateMember(
+                    team.Id,
+                    inviteeEmail,
+                    inviteeEmail.Split('@')[0],
+                    role,
+                    "Pending invite");
+
+                return Ok(new
+                {
+                    invited = "email",
+                    display_name = inviteeEmail,
+                    team_id = team.Id,
+                    role = role
+                });
+            }
+
+            return BadRequest(new { error = "Could not find that user. Try their email or username." });
+        }
+
         var projectService = _serviceProvider.GetService<IProjectService>();
         if (projectService is null)
         {
@@ -513,24 +593,24 @@ public sealed class FunctionCompatController : ControllerBase
 
         if (request.ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(request.Identifier))
         {
-            return BadRequest(new { error = "projectId and identifier are required." });
+            return BadRequest(new { error = "team_id (or projectId) and identifier are required." });
         }
 
-        var inviteeEmail = await ResolveInviteeEmailAsync(request.Identifier);
-        if (inviteeEmail is null)
+        var pInviteeEmail = await ResolveInviteeEmailAsync(request.Identifier);
+        if (pInviteeEmail is null)
         {
             return BadRequest(new { error = "Provide an email address or a known collaborator identifier." });
         }
 
         var invite = await projectService.InviteCollaboratorAsync(request.ProjectId, new InviteCollaboratorDto
         {
-            Email = inviteeEmail,
+            Email = pInviteeEmail,
             Role = string.IsNullOrWhiteSpace(request.Role) ? "Contributor" : request.Role,
             Level = request.Level,
             Message = request.Message
         }, ResolveUserId());
 
-        return Ok(new { invite, invitee_email = inviteeEmail });
+        return Ok(new { invite, invitee_email = pInviteeEmail });
     }
 
     [HttpPost("invite-collaborators")]
@@ -570,6 +650,18 @@ public sealed class FunctionCompatController : ControllerBase
             InviteLink = inviteLink
         });
 
+        if (!string.IsNullOrWhiteSpace(request.TeamId))
+        {
+            var teamStore = _serviceProvider.GetService<TeamStore>();
+            teamStore?.AddOrUpdateMember(
+                request.TeamId,
+                inviteeEmail,
+                displayName ?? inviteeEmail.Split('@')[0],
+                string.IsNullOrWhiteSpace(request.Role) ? "Member" : request.Role,
+                request.Responsibility,
+                request.Device);
+        }
+
         return Ok(new
         {
             success = true,
@@ -581,28 +673,65 @@ public sealed class FunctionCompatController : ControllerBase
     }
 
     [HttpPost("invite-user-with-reward")]
+    [HttpPost("InviteUserWithReward")]
     [Authorize]
-    public async Task<IActionResult> InviteUserWithReward([FromBody] InviteUserWithRewardRequest request)
+    public async Task<IActionResult> InviteUserWithReward([FromBody] InviteUserWithRewardRequest? request)
     {
-        if (string.IsNullOrWhiteSpace(request.Email))
+        if (request is null || string.IsNullOrWhiteSpace(request.Email))
         {
             return BadRequest(new { error = "email is required." });
         }
 
-        var inviter = await ResolveCurrentUserAsync();
-        var invite = _growthService.CreateInvite(inviter.Id.ToString("N"), inviter.Email, request.Email, request.Message ?? string.Empty);
-        var inviteLink = $"{GetAppBaseUrl()}/register?ref={Uri.EscapeDataString(invite.Code)}";
-
-        await _emailService.SendWelcomeEmailAsync(request.Email, request.Email.Split('@')[0]);
-
-        return Ok(new
+        var cleanEmail = request.Email.Trim();
+        if (!cleanEmail.Contains('@') || cleanEmail.Length < 5)
         {
-            success = true,
-            email = request.Email,
-            reward = request.RewardAmount <= 0 ? 25 : request.RewardAmount,
-            inviteCode = invite.Code,
-            inviteLink
-        });
+            return BadRequest(new { error = "A valid email address is required." });
+        }
+
+        try
+        {
+            var inviter = await ResolveCurrentUserAsync();
+            var message = string.IsNullOrWhiteSpace(request.Message)
+                ? $"{inviter.DisplayName} invited you to join WiseRavenShare!"
+                : request.Message.Trim();
+
+            var invite = _growthService.CreateInvite(
+                inviter.Id.ToString("N"),
+                inviter.Email,
+                cleanEmail,
+                message);
+
+            var inviteLink = $"{GetAppBaseUrl()}/register?ref={Uri.EscapeDataString(invite.Code)}";
+
+            try
+            {
+                var recipientName = cleanEmail.Split('@')[0];
+                await _emailService.SendWelcomeEmailAsync(cleanEmail, recipientName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send welcome email to {Email}; continuing because invite record was successfully created.", cleanEmail);
+            }
+
+            return Ok(new
+            {
+                success = true,
+                email = cleanEmail,
+                reward = request.RewardAmount <= 0 ? 25 : request.RewardAmount,
+                inviteCode = invite.Code,
+                inviteLink
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Invite creation rate limited or rejected for {Email}", cleanEmail);
+            return StatusCode(StatusCodes.Status429TooManyRequests, new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled error creating invite for {Email}", cleanEmail);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Unable to create invitation right now." });
+        }
     }
 
     [HttpPost("issue-digital-certificate")]
@@ -1933,13 +2062,62 @@ public sealed class FunctionCompatController : ControllerBase
         return user?.Email;
     }
 
+    private async Task<(string Id, string Email, string? DisplayName)?> ResolveUserByIdentifierAsync(string identifier)
+    {
+        var cleaned = identifier.Trim();
+        try
+        {
+            var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(x =>
+                x.Email == cleaned || x.Username == cleaned || x.DisplayName == cleaned);
+            if (user != null)
+            {
+                return (user.Id.ToString(), user.Email, user.DisplayName ?? user.Username ?? user.Email);
+            }
+        }
+        catch { /* db offline fallback */ }
+
+        var userStore = _serviceProvider.GetService<UserStore>();
+        if (userStore != null)
+        {
+            var storeUser = userStore.FindByLoginIdentifier(cleaned);
+            if (storeUser != null)
+            {
+                return (storeUser.Id, storeUser.Email, storeUser.Name ?? storeUser.Handle ?? storeUser.Email);
+            }
+        }
+
+        return null;
+    }
+
     private async Task<(Guid Id, string Email, string DisplayName)> ResolveCurrentUserAsync()
     {
         var userId = ResolveUserId();
-        var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == userId);
-        return user is null
-            ? (userId, "unknown@example.com", "Unknown User")
-            : (user.Id, user.Email, string.IsNullOrWhiteSpace(user.DisplayName) ? user.Email : user.DisplayName);
+        var emailClaim = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? (User.Identity?.Name?.Contains('@') == true ? User.Identity.Name : null);
+        var nameClaim = User.FindFirstValue(ClaimTypes.Name)
+            ?? User.FindFirstValue("name")
+            ?? User.Identity?.Name;
+
+        try
+        {
+            if (_db != null && userId != Guid.Empty)
+            {
+                var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == userId || (emailClaim != null && x.Email == emailClaim));
+                if (user != null)
+                {
+                    return (user.Id, user.Email, string.IsNullOrWhiteSpace(user.DisplayName) ? user.Email : user.DisplayName);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query database for current user in FunctionCompatController; falling back to claims.");
+        }
+
+        var effectiveEmail = !string.IsNullOrWhiteSpace(emailClaim) ? emailClaim.Trim() : "user@wiseravenshare.com";
+        var effectiveName = !string.IsNullOrWhiteSpace(nameClaim) ? nameClaim.Trim() : (!string.IsNullOrWhiteSpace(emailClaim) ? emailClaim.Split('@')[0] : "Wise Raven");
+        return (userId != Guid.Empty ? userId : Guid.NewGuid(), effectiveEmail, effectiveName);
     }
 
     private string GetAppBaseUrl()
@@ -2706,9 +2884,25 @@ public sealed class FunctionCompatController : ControllerBase
     {
         var raw = User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? User.FindFirstValue("sub")
-            ?? User.FindFirstValue("userId");
+            ?? User.FindFirstValue("id")
+            ?? User.FindFirstValue("userId")
+            ?? User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? User.Identity?.Name;
 
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return Guid.Empty;
+        }
+
+        if (Guid.TryParse(raw, out var id))
+        {
+            return id;
+        }
+
+        using var md5 = MD5.Create();
+        var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(raw.Trim().ToLowerInvariant()));
+        return new Guid(hash);
     }
 }
 
@@ -2739,6 +2933,10 @@ public sealed class PodcastPricingRequest
 public sealed class InviteCollaboratorRequest
 {
     public Guid ProjectId { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("team_id")]
+    public string? TeamId { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("teamId")]
+    public string? TeamIdCamel { get => TeamId; set => TeamId ??= value; }
     public string Identifier { get; set; } = string.Empty;
     public string Role { get; set; } = "Contributor";
     public string? Level { get; set; }
@@ -2747,6 +2945,10 @@ public sealed class InviteCollaboratorRequest
 
 public sealed class TeamCollaboratorInviteRequest
 {
+    [System.Text.Json.Serialization.JsonPropertyName("team_id")]
+    public string? TeamId { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("teamId")]
+    public string? TeamIdCamel { get => TeamId; set => TeamId ??= value; }
     public string Identifier { get; set; } = string.Empty;
     public string? Role { get; set; }
     public string? Responsibility { get; set; }

@@ -2724,6 +2724,7 @@ builder.Services.AddHostedService(sp => (SocialPublishQueueService)sp.GetRequire
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<GrowthService>();
 builder.Services.AddSingleton<TeamAccessService>();
+builder.Services.AddSingleton<TeamStore>();
 builder.Services.AddSingleton<PerformanceMetricsService>();
 builder.Services.AddScoped<OutputCacheInvalidationService>();
 builder.Services.AddSingleton<VideoFeedCollaborationService>();

@@ -1,11 +1,22 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/api/client";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Loader2, Save, Check, KeyRound, AlertCircle } from "lucide-react";
+import {
+  Loader2,
+  Save,
+  Check,
+  KeyRound,
+  AlertCircle,
+  Upload,
+  Camera,
+  Trash2,
+  Link as LinkIcon,
+  User as UserIcon,
+} from "lucide-react";
 
 function FieldGroup({ id, label, children }) {
   return (
@@ -33,16 +44,32 @@ function StatusBanner({ message, variant = "success" }) {
 
 export default function ProfileSection() {
   const { user, checkUserAuth } = useAuth();
+  const fileInputRef = useRef(null);
+
+  const cacheKey = user?.id ? `wr_profile_cache_${user.id}` : "wr_profile_cache";
+
+  // Pre-seed from cache if available so there is zero layout flicker
+  const getInitialState = () => {
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return null;
+  };
+
+  const initial = getInitialState();
 
   // ── Profile fields ─────────────────────────────────────────────
-  const [name, setName] = useState("");
-  const [bio, setBio] = useState("");
-  const [location, setLocation] = useState("");
-  const [website, setWebsite] = useState("");
-  const [avatar, setAvatar] = useState("");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [bio, setBio] = useState(initial?.bio ?? "");
+  const [location, setLocation] = useState(initial?.location ?? "");
+  const [website, setWebsite] = useState(initial?.website ?? "");
+  const [avatar, setAvatar] = useState(initial?.avatar ?? "");
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initial);
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
   const [profileMsg, setProfileMsg] = useState(null); // { text, variant }
 
   // ── Password change ─────────────────────────────────────────────
@@ -57,26 +84,139 @@ export default function ProfileSection() {
     const load = async () => {
       try {
         const res = await apiClient.users.getById(user.id);
-        setName(res.name ?? res.display_name ?? "");
-        setBio(res.bio ?? "");
-        setLocation(res.location ?? "");
-        setWebsite(res.website ?? "");
-        setAvatar(res.avatar ?? res.avatar_uri ?? "");
+        const nextName = res.name ?? res.display_name ?? "";
+        const nextBio = res.bio ?? "";
+        const nextLocation = res.location ?? "";
+        const nextWebsite = res.website ?? "";
+        const nextAvatar = res.avatar ?? res.avatar_uri ?? "";
+
+        setName(nextName);
+        setBio(nextBio);
+        setLocation(nextLocation);
+        setWebsite(nextWebsite);
+        setAvatar(nextAvatar);
+
+        // Retain / persist locally in cache
+        try {
+          localStorage.setItem(
+            cacheKey,
+            JSON.stringify({
+              name: nextName,
+              bio: nextBio,
+              location: nextLocation,
+              website: nextWebsite,
+              avatar: nextAvatar,
+            })
+          );
+        } catch {}
       } catch {
-        // fall back to auth context values
-        setName(user.displayName ?? user.name ?? user.full_name ?? user.email?.split("@")[0] ?? "");
+        // Fall back to auth context values
+        const fallbackName = user.displayName ?? user.name ?? user.full_name ?? user.email?.split("@")[0] ?? "";
+        if (!name) setName(fallbackName);
+        if (!avatar && (user.avatar || user.avatar_uri || user.avatarUrl)) {
+          setAvatar(user.avatar || user.avatar_uri || user.avatarUrl);
+        }
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, [user?.id]);
+  }, [user?.id, cacheKey]);
+
+  const handleAvatarFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setProfileMsg({ text: "Please select an image file (JPG, PNG, WebP, GIF).", variant: "error" });
+      return;
+    }
+
+    if (file.size > 15 * 1024 * 1024) {
+      setProfileMsg({ text: "Image size must be 15 MB or less.", variant: "error" });
+      return;
+    }
+
+    // Immediate optimistic local preview
+    const localPreview = URL.createObjectURL(file);
+    setAvatar(localPreview);
+    setUploadingAvatar(true);
+    setProfileMsg(null);
+
+    try {
+      const uploadedUrl = await apiClient.users.uploadAvatar(user?.id || "me", file);
+      if (uploadedUrl) {
+        setAvatar(uploadedUrl);
+
+        // Retain / persist immediately
+        try {
+          const currentCache = {
+            name,
+            bio,
+            location,
+            website,
+            avatar: uploadedUrl,
+          };
+          localStorage.setItem(cacheKey, JSON.stringify(currentCache));
+        } catch {}
+
+        await checkUserAuth();
+        setProfileMsg({ text: "Avatar uploaded & retained.", variant: "success" });
+        setTimeout(() => setProfileMsg(null), 3500);
+      }
+    } catch (err) {
+      setProfileMsg({ text: err?.message || "Failed to upload avatar.", variant: "error" });
+    } finally {
+      setUploadingAvatar(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setAvatar("");
+    try {
+      const currentCache = { name, bio, location, website, avatar: "" };
+      localStorage.setItem(cacheKey, JSON.stringify(currentCache));
+    } catch {}
+
+    try {
+      await apiClient.users.updateProfile(user.id || "me", {
+        name: name.trim(),
+        bio: bio.trim(),
+        location: location.trim(),
+        website: website.trim(),
+        avatar: "",
+      });
+      await checkUserAuth();
+      setProfileMsg({ text: "Avatar removed.", variant: "success" });
+      setTimeout(() => setProfileMsg(null), 3000);
+    } catch (err) {
+      setProfileMsg({ text: err?.message || "Failed to remove avatar.", variant: "error" });
+    }
+  };
 
   const handleSaveProfile = async () => {
     setSaving(true);
     setProfileMsg(null);
+
+    // Retain / persist locally immediately
     try {
-      await apiClient.users.updateProfile(user.id, {
+      localStorage.setItem(
+        cacheKey,
+        JSON.stringify({
+          name: name.trim(),
+          bio: bio.trim(),
+          location: location.trim(),
+          website: website.trim(),
+          avatar: avatar.trim(),
+        })
+      );
+    } catch {}
+
+    try {
+      await apiClient.users.updateProfile(user.id || "me", {
         name: name.trim(),
         bio: bio.trim(),
         location: location.trim(),
@@ -84,7 +224,7 @@ export default function ProfileSection() {
         avatar: avatar.trim(),
       });
       await checkUserAuth();
-      setProfileMsg({ text: "Profile saved.", variant: "success" });
+      setProfileMsg({ text: "Profile saved & retained.", variant: "success" });
       setTimeout(() => setProfileMsg(null), 3000);
     } catch (err) {
       setProfileMsg({ text: err?.message || "Save failed.", variant: "error" });
@@ -136,6 +276,103 @@ export default function ProfileSection() {
       <div className="rounded-lg border border-border bg-card p-6 space-y-5">
         <h2 className="font-semibold text-foreground">Profile</h2>
 
+        {/* ── Avatar section with computer file upload & persistence ── */}
+        <div className="space-y-3 pt-1">
+          <Label>Profile Picture / Avatar</Label>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-xl border border-border bg-card/60 backdrop-blur-sm">
+            {/* Circular Preview */}
+            <div className="relative group w-20 h-20 rounded-full border-2 border-primary/20 bg-muted flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+              {avatar ? (
+                <img
+                  src={avatar}
+                  alt="Avatar preview"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
+                />
+              ) : (
+                <UserIcon className="w-10 h-10 text-muted-foreground/60" />
+              )}
+              {uploadingAvatar && (
+                <div className="absolute inset-0 bg-background/70 backdrop-blur-xs flex items-center justify-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              )}
+            </div>
+
+            {/* Upload Buttons & Options */}
+            <div className="flex-1 space-y-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={handleAvatarFileSelect}
+                className="hidden"
+              />
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingAvatar || saving}
+                >
+                  {uploadingAvatar ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                  ) : (
+                    <Upload className="w-4 h-4 mr-1.5" />
+                  )}
+                  {avatar ? "Change Photo" : "Upload from Computer"}
+                </Button>
+
+                {avatar && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRemoveAvatar}
+                    disabled={uploadingAvatar || saving}
+                    className="text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="w-4 h-4 mr-1.5" />
+                    Remove
+                  </Button>
+                )}
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowUrlInput(!showUrlInput)}
+                  className="text-xs text-muted-foreground"
+                >
+                  <LinkIcon className="w-3.5 h-3.5 mr-1" />
+                  {showUrlInput ? "Hide URL field" : "Use image link"}
+                </Button>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Supports JPG, PNG, WebP or GIF up to 15 MB. Automatically retains across sessions.
+              </p>
+
+              {/* Optional URL input fallback */}
+              {showUrlInput && (
+                <div className="pt-2">
+                  <Input
+                    id="avatar-url"
+                    value={avatar}
+                    onChange={(e) => setAvatar(e.target.value)}
+                    placeholder="https://example.com/my-photo.jpg"
+                    className="text-xs"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         <FieldGroup id="name" label="Display Name">
           <Input
             id="name"
@@ -176,26 +413,6 @@ export default function ProfileSection() {
             />
           </FieldGroup>
         </div>
-
-        <FieldGroup id="avatar" label="Avatar URL">
-          <div className="flex items-center gap-3">
-            {avatar && (
-              <img
-                src={avatar}
-                alt="avatar preview"
-                className="w-10 h-10 rounded-full object-cover border border-border shrink-0"
-                onError={(e) => { e.target.style.display = "none"; }}
-              />
-            )}
-            <Input
-              id="avatar"
-              value={avatar}
-              onChange={(e) => setAvatar(e.target.value)}
-              placeholder="https://..."
-              className="flex-1"
-            />
-          </div>
-        </FieldGroup>
 
         <StatusBanner message={profileMsg?.text} variant={profileMsg?.variant} />
 

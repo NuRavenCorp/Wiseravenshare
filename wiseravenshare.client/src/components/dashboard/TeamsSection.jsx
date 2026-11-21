@@ -16,6 +16,7 @@ export default function TeamsSection() {
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ team_name: "", description: "", focus: "" });
   const [inviteInput, setInviteInput] = useState({});
   const [inviteRole, setInviteRole] = useState({});
@@ -37,16 +38,59 @@ export default function TeamsSection() {
   }, [user]);
 
   const handleCreate = async () => {
-    if (!form.team_name) return;
-    await apiClient.entities.Team.create({
-      ...form,
-      owner_id: user.id,
-      members: [user.id],
-      member_details: [{ user_id: user.id, display_name: user.full_name || user.email, role: "Owner", responsibility: "" }],
-    });
-    setForm({ team_name: "", description: "", focus: "" });
-    setShowForm(false);
-    fetchTeams();
+    const trimmedName = (form.team_name || "").trim();
+    if (!trimmedName) return;
+
+    setCreating(true);
+    try {
+      const currentUserId = user?.id || user?.userId || "";
+      const currentUserName = user?.full_name || user?.name || user?.displayName || user?.email || "Owner";
+
+      const created = await apiClient.entities.Team.create({
+        team_name: trimmedName,
+        description: form.description?.trim() || "",
+        focus: form.focus?.trim() || "",
+        owner_id: currentUserId,
+        members: currentUserId ? [currentUserId] : [],
+        member_details: [
+          {
+            user_id: currentUserId,
+            display_name: currentUserName,
+            role: "Owner",
+            responsibility: "",
+          },
+        ],
+      });
+
+      setForm({ team_name: "", description: "", focus: "" });
+      setShowForm(false);
+      toast({
+        title: "Team created!",
+        description: `Team "${created?.team_name || trimmedName}" was successfully created.`,
+      });
+      setTeams((prev) => [created, ...(prev || []).filter((t) => t.id !== created?.id)]);
+      await fetchTeams();
+    } catch (err) {
+      toast({
+        title: "Failed to create team",
+        description: err?.message || "An unexpected error occurred while creating the team.",
+        variant: "destructive",
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDeleteTeam = async (teamId) => {
+    if (!window.confirm("Are you sure you want to delete this team?")) return;
+    try {
+      await apiClient.entities.Team.delete(teamId);
+      toast({ title: "Team deleted" });
+      setTeams((prev) => prev.filter((t) => t.id !== teamId));
+      fetchTeams();
+    } catch (e) {
+      toast({ title: "Delete failed", description: e.message, variant: "destructive" });
+    }
   };
 
   const handleInvite = async (teamId) => {

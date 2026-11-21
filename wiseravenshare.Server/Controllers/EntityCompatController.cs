@@ -1,4 +1,7 @@
 using System.Linq;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -6,7 +9,9 @@ using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.DTOs.Post;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
+using Wiseravenshare.Server.Services.Currency;
 using Wiseravenshare.Server.Shared;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -30,6 +35,9 @@ public sealed partial class EntityCompatController : ControllerBase
     private readonly LiveStreamStateStore _liveStreamStateStore;
     private readonly IMediaBlobSignatureService _signatureService;
     private readonly IPostService _postService;
+    private readonly GrowthService _growthService;
+    private readonly IWiseCoinService _wiseCoinService;
+    private readonly TeamStore _teamStore;
     private readonly ILogger<EntityCompatController> _logger;
 
     public EntityCompatController(
@@ -37,12 +45,18 @@ public sealed partial class EntityCompatController : ControllerBase
         LiveStreamStateStore liveStreamStateStore,
         IMediaBlobSignatureService signatureService,
         IPostService postService,
+        GrowthService growthService,
+        IWiseCoinService wiseCoinService,
+        TeamStore teamStore,
         ILogger<EntityCompatController> logger)
     {
         _db = db;
         _liveStreamStateStore = liveStreamStateStore;
         _signatureService = signatureService;
         _postService = postService;
+        _growthService = growthService;
+        _wiseCoinService = wiseCoinService;
+        _teamStore = teamStore;
         _logger = logger;
     }
 
@@ -70,6 +84,8 @@ public sealed partial class EntityCompatController : ControllerBase
                 "jamsession" => Ok(await FilterJamSessionsAsync(userId, body, limit, cancellationToken)),
                 "journalismreport" => Ok(await FilterJournalismReportsAsync(userId, body, limit, cancellationToken)),
                 "vibe" => Ok(await FilterVibesAsync(userId, body, limit, cancellationToken)),
+                "invitation" => Ok(FilterInvitations(userId, body, limit)),
+                "team" => Ok(FilterTeams(userId, body, limit)),
                 _ => Ok(EmptyResult())
             };
         }
@@ -97,14 +113,15 @@ public sealed partial class EntityCompatController : ControllerBase
             {
                 "post" => await AggregatePostsAsync(userId, cancellationToken),
                 "vibe" => await AggregateVibesAsync(userId, body, cancellationToken),
-                _ => (object)new { count = 0, total = 0, items = Array.Empty<object>() }
+                "wisecointransaction" or "wisecoin" => await AggregateWiseCoinsAsync(userId, cancellationToken),
+                _ => (object)new { count = 0, total = 0, sum = 0m, balance = 0m, rows = new[] { new { sum_amount = 0m } }, items = Array.Empty<object>() }
             };
             return Ok(result);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "EntityCompat aggregate failed for entity '{Entity}'.", entityName);
-            return Ok(new { count = 0, total = 0, items = Array.Empty<object>() });
+            return Ok(new { count = 0, total = 0, sum = 0m, balance = 0m, rows = new[] { new { sum_amount = 0m } }, items = Array.Empty<object>() });
         }
     }
 
@@ -133,6 +150,8 @@ public sealed partial class EntityCompatController : ControllerBase
                 "livestream" => CountLiveStreams(body),
                 "jamsession" => await CountJamSessionsAsync(userId, body, cancellationToken),
                 "vibe" => await CountVibesAsync(userId, body, cancellationToken),
+                "invitation" => CountInvitations(userId),
+                "team" => CountTeams(userId, body),
                 _ => 0
             };
             return Ok(new { count });
@@ -173,6 +192,11 @@ public sealed partial class EntityCompatController : ControllerBase
         if (string.Equals(entityName, "Vibe", StringComparison.OrdinalIgnoreCase))
         {
             return await CreateVibeCompat(payload);
+        }
+
+        if (string.Equals(entityName, "Team", StringComparison.OrdinalIgnoreCase))
+        {
+            return await CreateTeamCompat(payload);
         }
 
         if (!string.Equals(entityName, "LiveStream", StringComparison.OrdinalIgnoreCase))
@@ -221,6 +245,7 @@ public sealed partial class EntityCompatController : ControllerBase
         return Ok(stream);
     }
 
+    [HttpPut("{entityName}/{id}")]
     [HttpPatch("{entityName}/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Update(
@@ -228,6 +253,11 @@ public sealed partial class EntityCompatController : ControllerBase
         string id,
         [FromBody] JsonElement payload)
     {
+        if (string.Equals(entityName, "Team", StringComparison.OrdinalIgnoreCase))
+        {
+            return UpdateTeamCompat(id, payload);
+        }
+
         if (string.Equals(entityName, "Post", StringComparison.OrdinalIgnoreCase))
         {
             return await UpdatePostCompat(id, payload);
@@ -363,6 +393,11 @@ public sealed partial class EntityCompatController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(string entityName, string id)
     {
+        if (string.Equals(entityName, "Team", StringComparison.OrdinalIgnoreCase))
+        {
+            return DeleteTeamCompat(id);
+        }
+
         if (!string.Equals(entityName, "Post", StringComparison.OrdinalIgnoreCase))
         {
             return NotFound(new { message = $"Entity '{entityName}' does not support delete in compat mode." });
@@ -391,6 +426,19 @@ public sealed partial class EntityCompatController : ControllerBase
         post.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    [HttpGet("{entityName}/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult Get(string entityName, string id)
+    {
+        if (string.Equals(entityName, "Team", StringComparison.OrdinalIgnoreCase))
+        {
+            return GetTeamCompat(id);
+        }
+
+        return NotFound(new { message = $"Entity '{entityName}' not found." });
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -605,6 +653,82 @@ public sealed partial class EntityCompatController : ControllerBase
 
     private static EntityFilterResponse EmptyResult() =>
         new() { Items = [], Total = 0 };
+
+    private EntityFilterResponse FilterInvitations(Guid userId, JsonElement body, int limit)
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? (User.Identity?.Name?.Contains('@') == true ? User.Identity.Name : null);
+        var userIdStr = userId != Guid.Empty ? userId.ToString("N") : (User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub") ?? string.Empty);
+
+        var list = _growthService.GetUserInvites(userIdStr, email);
+        var items = list.Take(limit).Select(inv => (object)new Dictionary<string, object?>
+        {
+            ["id"] = inv.Code,
+            ["invitee_email"] = inv.InviteeEmail,
+            ["status"] = inv.Redeemed ? "accepted" : "pending",
+            ["reward_amount"] = 25,
+            ["reward_issued"] = inv.Redeemed,
+            ["created_date"] = inv.CreatedAtUtc.ToString("o"),
+            ["created_by_id"] = userIdStr,
+            ["invite_code"] = inv.Code
+        }).ToList();
+
+        return new EntityFilterResponse
+        {
+            Items = items,
+            Total = list.Count
+        };
+    }
+
+    private int CountInvitations(Guid userId)
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? (User.Identity?.Name?.Contains('@') == true ? User.Identity.Name : null);
+        var userIdStr = userId != Guid.Empty ? userId.ToString("N") : (User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub") ?? string.Empty);
+
+        return _growthService.GetUserInvites(userIdStr, email).Count;
+    }
+
+    private async Task<object> AggregateWiseCoinsAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        if (userId == Guid.Empty)
+        {
+            var raw = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue("sub")
+                ?? User.FindFirstValue(ClaimTypes.Email)
+                ?? User.Identity?.Name;
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                using var md5 = MD5.Create();
+                userId = new Guid(md5.ComputeHash(Encoding.UTF8.GetBytes(raw.Trim().ToLowerInvariant())));
+            }
+        }
+
+        decimal balance = 0;
+        try
+        {
+            if (userId != Guid.Empty)
+            {
+                balance = await _wiseCoinService.GetBalanceAsync(userId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to calculate WiseCoin aggregate for user {UserId}", userId);
+        }
+
+        return new
+        {
+            count = 1,
+            total = 1,
+            sum = balance,
+            balance = balance,
+            rows = new[] { new { sum_amount = balance } },
+            items = Array.Empty<object>()
+        };
+    }
 
     private EntityFilterResponse FilterLiveStreams(JsonElement body, int limit)
     {
@@ -1765,6 +1889,210 @@ private static string[]? TryReadStringArray(JsonElement body, string dotPath)
         return null;
     }
 }
+
+    private EntityFilterResponse FilterTeams(Guid userId, JsonElement body, int limit)
+    {
+        var userIdStr = ResolveCurrentUserIdString();
+        var ownerId = ReadString(body, "query.owner_id");
+        var id = ReadString(body, "query.id");
+        var search = ReadString(body, "query.search") ?? ReadString(body, "query.$text.$search");
+        var sort = ReadString(body, "options.sort");
+        var isAdmin = User.IsInRole("Admin");
+
+        var items = _teamStore.Filter(userIdStr, ownerId, id, search, limit, sort, isAdmin);
+        return new EntityFilterResponse
+        {
+            Items = items.Cast<object>().ToList(),
+            Total = items.Count
+        };
+    }
+
+    private int CountTeams(Guid userId, JsonElement body)
+    {
+        var userIdStr = ResolveCurrentUserIdString();
+        var ownerId = ReadString(body, "query.owner_id");
+        var id = ReadString(body, "query.id");
+        var search = ReadString(body, "query.search");
+        var isAdmin = User.IsInRole("Admin");
+        return _teamStore.Filter(userIdStr, ownerId, id, search, 500, null, isAdmin).Count;
+    }
+
+    private async Task<IActionResult> CreateTeamCompat(JsonElement payload)
+    {
+        var userIdStr = ResolveCurrentUserIdString();
+        if (string.IsNullOrWhiteSpace(userIdStr))
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        var teamName = ReadString(payload, "team_name") ?? ReadString(payload, "teamName") ?? ReadString(payload, "name");
+        if (string.IsNullOrWhiteSpace(teamName))
+        {
+            return BadRequest(new { message = "team_name is required." });
+        }
+
+        var ownerId = ReadString(payload, "owner_id") ?? ReadString(payload, "ownerId");
+        if (string.IsNullOrWhiteSpace(ownerId))
+        {
+            ownerId = userIdStr;
+        }
+
+        var description = ReadString(payload, "description");
+        var focus = ReadString(payload, "focus");
+        var purpose = ReadString(payload, "purpose");
+
+        var members = TryReadStringArray(payload, "members")?.ToList() ?? new List<string>();
+        var memberDetails = ParseMemberDetails(payload);
+
+        var displayName = ResolveCurrentUserName();
+
+        var team = new TeamRecord
+        {
+            Id = ReadString(payload, "id") is { Length: > 0 } customId ? customId : Guid.NewGuid().ToString("N"),
+            TeamName = teamName.Trim(),
+            Description = description?.Trim(),
+            Focus = focus?.Trim(),
+            Purpose = purpose?.Trim(),
+            OwnerId = ownerId.Trim(),
+            Members = members,
+            MemberDetails = memberDetails,
+        };
+
+        var created = _teamStore.Create(team, userIdStr, displayName);
+        return Ok(created);
+    }
+
+    private IActionResult UpdateTeamCompat(string id, JsonElement payload)
+    {
+        var userIdStr = ResolveCurrentUserIdString();
+        var isAdmin = User.IsInRole("Admin");
+
+        var updated = _teamStore.Update(id, team =>
+        {
+            var name = ReadString(payload, "team_name") ?? ReadString(payload, "teamName");
+            if (!string.IsNullOrWhiteSpace(name)) team.TeamName = name.Trim();
+
+            var desc = ReadString(payload, "description");
+            if (desc is not null) team.Description = desc.Trim();
+
+            var focus = ReadString(payload, "focus");
+            if (focus is not null) team.Focus = focus.Trim();
+
+            var purpose = ReadString(payload, "purpose");
+            if (purpose is not null) team.Purpose = purpose.Trim();
+
+            var members = TryReadStringArray(payload, "members");
+            if (members is not null)
+            {
+                team.Members = members.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            }
+
+            if (payload.TryGetProperty("member_details", out _) || payload.TryGetProperty("memberDetails", out _))
+            {
+                team.MemberDetails = ParseMemberDetails(payload);
+            }
+        }, userIdStr, isAdmin);
+
+        if (updated is null)
+        {
+            return NotFound(new { message = "Team not found or you do not have permission to modify it." });
+        }
+
+        return Ok(updated);
+    }
+
+    private IActionResult DeleteTeamCompat(string id)
+    {
+        var userIdStr = ResolveCurrentUserIdString();
+        var isAdmin = User.IsInRole("Admin");
+
+        var deleted = _teamStore.Delete(id, userIdStr, isAdmin);
+        if (!deleted)
+        {
+            return NotFound(new { message = "Team not found or you do not have permission to delete it." });
+        }
+
+        return NoContent();
+    }
+
+    private IActionResult GetTeamCompat(string id)
+    {
+        var team = _teamStore.GetById(id);
+        if (team is null)
+        {
+            return NotFound(new { message = "Team not found." });
+        }
+
+        return Ok(team);
+    }
+
+    private string ResolveCurrentUserIdString()
+    {
+        var guid = User.GetUserId();
+        if (guid != Guid.Empty)
+        {
+            return guid.ToString();
+        }
+
+        var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("sub")?.Value
+            ?? User.FindFirst("id")?.Value
+            ?? User.FindFirst(ClaimTypes.Email)?.Value
+            ?? User.FindFirst("email")?.Value;
+
+        return claim?.Trim() ?? string.Empty;
+    }
+
+    private string ResolveCurrentUserName()
+    {
+        var name = User.FindFirst(ClaimTypes.Name)?.Value
+            ?? User.FindFirst("name")?.Value
+            ?? User.FindFirst("full_name")?.Value
+            ?? User.FindFirst("display_name")?.Value;
+        if (!string.IsNullOrWhiteSpace(name)) return name.Trim();
+        var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
+        if (!string.IsNullOrWhiteSpace(email)) return email.Trim();
+        return "User";
+    }
+
+    private static List<TeamMemberDetail> ParseMemberDetails(JsonElement payload)
+    {
+        var list = new List<TeamMemberDetail>();
+        JsonElement targetProp = default;
+        if (!payload.TryGetProperty("member_details", out targetProp) &&
+            !payload.TryGetProperty("memberDetails", out targetProp))
+        {
+            return list;
+        }
+
+        if (targetProp.ValueKind != JsonValueKind.Array)
+        {
+            return list;
+        }
+
+        foreach (var element in targetProp.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.Object) continue;
+
+            var uid = ReadString(element, "user_id") ?? ReadString(element, "userId") ?? string.Empty;
+            var name = ReadString(element, "display_name") ?? ReadString(element, "displayName") ?? string.Empty;
+            var role = ReadString(element, "role") ?? "Member";
+            var resp = ReadString(element, "responsibility");
+            var dev = ReadString(element, "device");
+
+            list.Add(new TeamMemberDetail
+            {
+                UserId = uid,
+                DisplayName = string.IsNullOrWhiteSpace(name) ? uid : name,
+                Role = role,
+                Responsibility = resp,
+                Device = dev,
+                JoinedDate = DateTime.UtcNow
+            });
+        }
+
+        return list;
+    }
 
 }
 

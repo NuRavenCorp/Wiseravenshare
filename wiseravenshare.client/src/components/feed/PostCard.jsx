@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/api/client";
-import { Heart, MessageCircle, MoreVertical, UserPlus, UserMinus, ShieldBan, Repeat2, Share2, Music, Trash2 } from "lucide-react";
+import { Heart, MessageCircle, MoreVertical, UserPlus, UserMinus, ShieldBan, Repeat2, Share2, Music, Trash2, Bookmark } from "lucide-react";
 import { Image } from "@/components/ui/image";
 import PostComments from "./PostComments";
 import ShareMenu from "./ShareMenu";
@@ -17,7 +17,7 @@ const TRUTH_STYLES = {
 };
 const EMPTY_BLOCKED_IDS = Object.freeze([]);
 
-export default function PostCard({ post, currentUser, onAuthRequired, onHashtagClick, onBlocked, blockedIds = EMPTY_BLOCKED_IDS }) {
+export default function PostCard({ post, currentUser, onAuthRequired, onHashtagClick, onBlocked, onBookmarkChange, blockedIds = EMPTY_BLOCKED_IDS }) {
   const [author, setAuthor] = useState(null);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(post.like_count || 0);
@@ -33,6 +33,9 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
   const [shared, setShared] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [bookmarked, setBookmarked] = useState(false);
+  const [bookmarkId, setBookmarkId] = useState(null);
+  const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const menuRef = useRef(null);
   const { toast } = useToast();
   const { openMedia } = useMediaExperience();
@@ -49,13 +52,15 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
     setRepostCount(post.repost_count || 0);
     setCommentCount(post.comment_count || 0);
     setShareCount(post.share_count || 0);
+    setBookmarked(Boolean(post._bookmarkId));
+    setBookmarkId(post._bookmarkId || null);
     if (currentUser) {
       apiClient.social.followStatus(post.created_by_id)
         .then((res) => { if (mounted) setFollowing(Boolean(res.isFollowing)); }).catch(() => {});
       setBlocked(blockedIds.includes(String(post.created_by_id)));
     }
     return () => { mounted = false; };
-  }, [post.id, post.created_by_id, currentUser?.id, blockedIds]);
+  }, [post.id, post._bookmarkId, post.created_by_id, currentUser?.id, blockedIds]);
 
   useEffect(() => {
     const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
@@ -176,6 +181,48 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
       const state = await apiClient.posts.share(post.id);
       setShareCount(Number(state.sharesCount ?? n));
     } catch { setShareCount((count) => Math.max(0, count - 1)); }
+  };
+
+  const handleBookmark = async () => {
+    if (!currentUser) return onAuthRequired?.();
+    if (bookmarkBusy) return;
+    setBookmarkBusy(true);
+    try {
+      if (bookmarked) {
+        let targetId = bookmarkId;
+        if (!targetId) {
+          const existing = await apiClient.entities.Bookmark.filter({ post_id: post.id }, { limit: 1 });
+          targetId = existing?.items?.[0]?.id || null;
+        }
+        if (targetId) {
+          await apiClient.entities.Bookmark.delete(targetId);
+        }
+        setBookmarked(false);
+        setBookmarkId(null);
+        onBookmarkChange?.(post.id, { bookmarked: false, bookmarkId: null });
+        toast({ title: "Bookmark removed" });
+      } else {
+        let created = await apiClient.entities.Bookmark.create({
+          created_by_id: currentUser.id,
+          post_id: post.id,
+          post_content: post.content || "",
+          label: authorName,
+        });
+        let createdId = created?.id || null;
+        if (!createdId) {
+          created = await apiClient.entities.Bookmark.filter({ post_id: post.id }, { sort: "-created_date", limit: 1 });
+          createdId = created?.items?.[0]?.id || null;
+        }
+        setBookmarked(true);
+        setBookmarkId(createdId);
+        onBookmarkChange?.(post.id, { bookmarked: true, bookmarkId: createdId });
+        toast({ title: "Bookmarked for later" });
+      }
+    } catch (e) {
+      toast({ title: "Could not update bookmark", description: e?.message || "Please try again.", variant: "destructive" });
+    } finally {
+      setBookmarkBusy(false);
+    }
   };
 
   const hashtagList = post.hashtags?.length ? post.hashtags : [...new Set((post.content?.match(/#[\p{L}\p{N}_-]+/gu) || []).map((value) => value.slice(1)))];
@@ -358,6 +405,16 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
         <button type="button" onClick={() => setShowComments((s) => !s)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
           <MessageCircle className="w-4 h-4" />
           <span>{commentCount}</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleBookmark}
+          disabled={bookmarkBusy}
+          aria-label={bookmarked ? "Remove bookmark" : "Bookmark post"}
+          className="flex items-center gap-1.5 text-sm transition-colors disabled:opacity-50"
+        >
+          <Bookmark className={`w-4 h-4 transition-all ${bookmarked ? "fill-primary text-primary scale-110" : "text-muted-foreground hover:text-primary"}`} />
+          <span className={bookmarked ? "text-primary" : "text-muted-foreground"}>{bookmarked ? "Saved" : "Save"}</span>
         </button>
         <div className="relative ml-auto">
           <button type="button" onClick={() => setShareOpen((o) => !o)} disabled={busy} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors disabled:opacity-50">

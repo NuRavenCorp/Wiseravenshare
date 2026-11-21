@@ -1,5 +1,8 @@
+using System.IO;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Entities;
@@ -21,8 +24,18 @@ public sealed class UsersController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly ILogger<UsersController> _logger;
     private readonly AppDbContext _dbContext;
+    private readonly IBlobStorageService _blobStorage;
+    private readonly IWebHostEnvironment _environment;
 
-    public UsersController(IConfiguration configuration, UserStore userStore, GrowthService growthService, IWiseCoinService wiseCoinService, ILogger<UsersController> logger, AppDbContext dbContext)
+    public UsersController(
+        IConfiguration configuration,
+        UserStore userStore,
+        GrowthService growthService,
+        IWiseCoinService wiseCoinService,
+        ILogger<UsersController> logger,
+        AppDbContext dbContext,
+        IBlobStorageService blobStorage,
+        IWebHostEnvironment environment)
     {
         _configuration = configuration;
         _userStore = userStore;
@@ -30,12 +43,61 @@ public sealed class UsersController : ControllerBase
         _wiseCoinService = wiseCoinService;
         _logger = logger;
         _dbContext = dbContext;
+        _blobStorage = blobStorage;
+        _environment = environment;
+    }
+
+    private UserRecord? ResolveTargetUser(string id)
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? (User.Identity?.Name?.Contains('@') == true ? User.Identity.Name : null);
+
+        if (string.Equals(id, "me", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.IsNullOrWhiteSpace(email) && _userStore.TryGetByEmail(email, out var userByEmail) && userByEmail != null)
+            {
+                return userByEmail;
+            }
+
+            var sub = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+            if (!string.IsNullOrWhiteSpace(sub) && _userStore.TryGetById(sub, out var userBySub) && userBySub != null)
+            {
+                return userBySub;
+            }
+        }
+
+        if (_userStore.TryGetById(id, out var user) && user != null)
+        {
+            return user;
+        }
+
+        if (Guid.TryParse(id, out var parsedGuid))
+        {
+            var withDashes = parsedGuid.ToString("D");
+            var withoutDashes = parsedGuid.ToString("N");
+            if (_userStore.TryGetById(withDashes, out user) && user != null) return user;
+            if (_userStore.TryGetById(withoutDashes, out user) && user != null) return user;
+        }
+
+        if (id.Contains('@') && _userStore.TryGetByEmail(id, out user) && user != null)
+        {
+            return user;
+        }
+
+        if (!string.IsNullOrWhiteSpace(email) && _userStore.TryGetByEmail(email, out user) && user != null)
+        {
+            return user;
+        }
+
+        return null;
     }
 
     [HttpGet("{id}")]
     public IActionResult GetById(string id)
     {
-        if (!_userStore.TryGetById(id, out var user) || user is null)
+        var user = ResolveTargetUser(id);
+        if (user is null)
         {
             return NotFound(new { message = "User not found." });
         }
@@ -66,6 +128,12 @@ public sealed class UsersController : ControllerBase
             return Forbid();
         }
 
+        var user = ResolveTargetUser(id);
+        if (user is null)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
         if (request.Website is not null)
         {
             var trimmedWebsite = request.Website.Trim();
@@ -92,10 +160,32 @@ public sealed class UsersController : ControllerBase
 
         try
         {
-            var user = _userStore.UpdateProfile(id, request);
-            _growthService.TrackEvent(user.Id, user.Email, "profile_updated");
-            await TryAwardProfileCompletionBadgeAsync(user);
-            return Ok(UserStore.ToResponse(user));
+            var updated = _userStore.UpdateProfile(user.Id, request);
+            _growthService.TrackEvent(updated.Id, updated.Email, "profile_updated");
+            await TryAwardProfileCompletionBadgeAsync(updated);
+
+            // Synchronize with database entity (app_data.Users) for durable persistence
+            try
+            {
+                var targetIdGuid = Guid.TryParse(updated.Id, out var g) ? g : Guid.Empty;
+                var dbUser = await _dbContext.Users.FirstOrDefaultAsync(u => (targetIdGuid != Guid.Empty && u.Id == targetIdGuid) || u.Email == updated.Email);
+                if (dbUser != null)
+                {
+                    if (request.Name != null) dbUser.DisplayName = updated.Name;
+                    if (request.Bio != null) dbUser.Bio = updated.Bio;
+                    if (request.Location != null) dbUser.Location = updated.Location;
+                    if (request.Website != null) dbUser.Website = updated.Website;
+                    if (request.Avatar != null || request.AvatarUrl != null) dbUser.AvatarUrl = updated.Avatar;
+                    dbUser.UpdatedAt = DateTime.UtcNow;
+                    await _dbContext.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync profile updates to Postgres users table; file-backed store retained changes.");
+            }
+
+            return Ok(UserStore.ToResponse(updated));
         }
         catch (InvalidOperationException ex)
         {
@@ -105,6 +195,134 @@ public sealed class UsersController : ControllerBase
         {
             return NotFound(new { message = "User not found." });
         }
+    }
+
+    [HttpPost("{id}/avatar")]
+    [HttpPost("avatar")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> UploadAvatar(string? id, IFormFile? file, CancellationToken cancellationToken)
+    {
+        var targetId = string.IsNullOrWhiteSpace(id) ? "me" : id.Trim();
+        if (!CanAccessUser(targetId))
+        {
+            return Forbid();
+        }
+
+        var user = ResolveTargetUser(targetId);
+        if (user is null)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        file ??= Request.Form.Files.FirstOrDefault(f =>
+            string.Equals(f.Name, "file", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(f.Name, "avatar", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(f.Name, "image", StringComparison.OrdinalIgnoreCase));
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { message = "No image file provided. Please choose an image to upload." });
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        var allowedExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+        if (!allowedExts.Contains(ext))
+        {
+            return BadRequest(new { message = "Invalid image format. Supported formats: JPG, PNG, WebP, GIF." });
+        }
+
+        if (file.Length > 15 * 1024 * 1024)
+        {
+            return BadRequest(new { message = "Image size exceeds 15 MB limit." });
+        }
+
+        try
+        {
+            var avatarUrl = await SaveAvatarFileAsync(user, file, ext, cancellationToken);
+            var updated = _userStore.UpdateProfile(user.Id, new UpdateUserProfileRequest { Avatar = avatarUrl });
+
+            // Synchronize with database entity (app_data.Users) for durable persistence
+            try
+            {
+                var targetIdGuid = Guid.TryParse(user.Id, out var g) ? g : Guid.Empty;
+                var dbUser = await _dbContext.Users.FirstOrDefaultAsync(u => (targetIdGuid != Guid.Empty && u.Id == targetIdGuid) || u.Email == user.Email, cancellationToken);
+                if (dbUser != null)
+                {
+                    dbUser.AvatarUrl = avatarUrl;
+                    dbUser.UpdatedAt = DateTime.UtcNow;
+                    await _dbContext.SaveChangesAsync(cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync avatar update to Postgres users table; file-backed store retained changes.");
+            }
+
+            return Ok(new
+            {
+                success = true,
+                avatarUrl,
+                avatar = avatarUrl,
+                user = UserStore.ToResponse(updated)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to upload avatar for user {UserId}", user.Id);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to upload avatar image." });
+        }
+    }
+
+    private async Task<string> SaveAvatarFileAsync(UserRecord user, IFormFile file, string extension, CancellationToken cancellationToken)
+    {
+        var uniqueFileName = $"avatar_{user.Id}_{Guid.NewGuid():N}{extension}";
+
+        // 1. DigitalOcean Spaces / S3 Blob Storage if configured
+        if (_blobStorage != null && _blobStorage.IsConfigured)
+        {
+            var objectKey = $"wiseravenshare/avatars/{uniqueFileName}";
+            try
+            {
+                await using var blobStream = file.OpenReadStream();
+                var result = await _blobStorage.UploadAsync(
+                    objectKey,
+                    blobStream,
+                    file.ContentType ?? "image/jpeg",
+                    cancellationToken);
+
+                var streamUrl = StreamingUrlHelper.StreamByBlobPath(result.ObjectKey);
+                return string.IsNullOrWhiteSpace(streamUrl) ? result.PublicUrl : streamUrl;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Blob storage avatar upload failed; falling back to persistent local storage.");
+            }
+        }
+
+        // 2. Persistent local disk storage
+        var localFolders = new[]
+        {
+            Path.Combine(_environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot"), "uploads", "avatars"),
+            Path.Combine(_environment.ContentRootPath, "App_Data", "avatars"),
+            Path.Combine(_environment.ContentRootPath, "MediaStorage")
+        };
+
+        foreach (var dir in localFolders)
+        {
+            try
+            {
+                Directory.CreateDirectory(dir);
+                var fullPath = Path.Combine(dir, uniqueFileName);
+                await using var stream = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await file.CopyToAsync(stream, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not save avatar copy to directory: {Directory}", dir);
+            }
+        }
+
+        return $"/uploads/avatars/{uniqueFileName}";
     }
 
     [HttpGet("{id}/feeds")]
@@ -161,12 +379,45 @@ public sealed class UsersController : ControllerBase
 
     private bool CanAccessUser(string id)
     {
+        if (string.Equals(id, "me", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         var subjectId =
             User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? User.FindFirstValue("sub")
             ?? User.FindFirstValue("id")
             ?? User.FindFirstValue("userId");
-        return string.Equals(subjectId, id, StringComparison.Ordinal);
+
+        if (string.Equals(subjectId, id, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (Guid.TryParse(id, out var g1) && Guid.TryParse(subjectId, out var g2) && g1 == g2)
+        {
+            return true;
+        }
+
+        var email = User.FindFirstValue(ClaimTypes.Email)
+            ?? User.FindFirstValue("email")
+            ?? (User.Identity?.Name?.Contains('@') == true ? User.Identity.Name : null);
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            if (string.Equals(email, id, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (_userStore.TryGetByEmail(email, out var userByEmail) && userByEmail != null)
+            {
+                if (string.Equals(userByEmail.Id, id, StringComparison.OrdinalIgnoreCase)) return true;
+                if (Guid.TryParse(userByEmail.Id, out var gUser) && Guid.TryParse(id, out var gTarget) && gUser == gTarget) return true;
+            }
+        }
+
+        return false;
     }
 
     private bool IsConfiguredAdminRequest()

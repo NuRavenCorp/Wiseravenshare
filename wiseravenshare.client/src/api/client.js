@@ -452,6 +452,11 @@ const entityClient = (entityName) => ({
       body: JSON.stringify(options),
     });
   },
+  async get(id) {
+    return requestJson(`/api/entities/${encodeURIComponent(entityName)}/${encodeURIComponent(id)}`, {
+      method: "GET",
+    });
+  },
   async create(payload) {
     if (String(entityName || "").toLowerCase() === "post") {
       const createdPost = await requestJson("/api/posts", {
@@ -480,6 +485,11 @@ const entityClient = (entityName) => ({
     return requestJson(`/api/entities/${encodeURIComponent(entityName)}/bulk`, {
       method: "PATCH",
       body: JSON.stringify({ filter, update }),
+    });
+  },
+  async delete(id) {
+    return requestJson(`/api/entities/${encodeURIComponent(entityName)}/${encodeURIComponent(id)}`, {
+      method: "DELETE",
     });
   },
   subscribe(handler) {
@@ -858,6 +868,25 @@ export const apiClient = {
         method: "PUT",
         body: JSON.stringify(payload),
       });
+    },
+    async uploadAvatar(id, file) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const targetId = id || "me";
+        const res = await requestJson(`/api/users/${encodeURIComponent(targetId)}/avatar`, {
+          method: "POST",
+          body: formData,
+        });
+        return res?.avatarUrl || res?.avatar || res?.filePath || res?.mediaUrl;
+      } catch (err) {
+        // Fallback to media upload
+        const mediaRes = await uploadViaMediaController(file, {
+          title: "avatar",
+          destinationFolder: "avatars",
+        });
+        return mediaRes?.mediaUrl || mediaRes?.filePath || mediaRes?.file_url;
+      }
     },
   },
   app: {
