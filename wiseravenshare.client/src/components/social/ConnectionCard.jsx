@@ -72,6 +72,10 @@ export default function ConnectionCard({ platform, onStatusChange }) {
   const [bskyHandle, setBskyHandle]       = useState("");
   const [bskyAppPassword, setBskyAppPassword] = useState("");
   const [autoFilled, setAutoFilled]       = useState(false);
+  const [oauthUnavailable, setOauthUnavailable] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
   const applyDetails = useCallback((details) => {
     if (!details) return;
@@ -135,7 +139,7 @@ export default function ConnectionCard({ platform, onStatusChange }) {
 
   const handleConnect = async () => {
     if (platform === "bluesky") { return; } // handled via manual form below
-    setConnecting(true); setError("");
+    setConnecting(true); setError(""); setOauthUnavailable(false);
     try {
       const returnTarget = new URL(window.location.href);
       returnTarget.searchParams.set("social_connected", platform);
@@ -143,11 +147,18 @@ export default function ConnectionCard({ platform, onStatusChange }) {
       if (data?.authorize_url) {
         window.location.href = data.authorize_url;
       } else {
-        setError("No authorization URL returned. Check OAuth configuration for this platform.");
+        setOauthUnavailable(true);
+        setShowManual(true);
         setConnecting(false);
       }
     } catch (e) {
-      setError(e?.message || "Failed to start connection.");
+      // 409 = OAuth not configured on server — offer manual fallback instead of an error
+      if (e?.status === 409 || e?.status === 501) {
+        setOauthUnavailable(true);
+        setShowManual(true);
+      } else {
+        setError(e?.message || "Failed to start connection.");
+      }
       setConnecting(false);
     }
   };
@@ -224,7 +235,7 @@ export default function ConnectionCard({ platform, onStatusChange }) {
                 ) : statusError ? (
                   <><AlertCircle className="w-3 h-3 text-amber-500" /> Status unavailable</>
                 ) : isConnected ? (
-                  <><Check className="w-3 h-3 text-green-500" /> Connected</>
+                  <><Check className="w-3 h-3 text-green-500" /> Connected{username ? ` as @${username.replace(/^@/, "")}` : ""}</>
                 ) : (
                   <><Link2 className="w-3 h-3" /> Not connected</>
                 )}
@@ -233,11 +244,10 @@ export default function ConnectionCard({ platform, onStatusChange }) {
           </div>
           {isConnected && <Check className="w-5 h-5 text-green-500" />}
         </div>
-        {/* What this connection enables */}
         <p className="text-[11px] text-muted-foreground leading-relaxed pt-1">{capabilities}</p>
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3">
         {error && (
           <div className="flex items-center gap-2 p-2 rounded-md border border-destructive/30 bg-destructive/5 text-xs text-destructive">
             <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
@@ -251,73 +261,183 @@ export default function ConnectionCard({ platform, onStatusChange }) {
           </div>
         )}
 
+        {/* ── Not connected ── */}
         {!loading && !statusError && !isConnected && (
-          oauthSupported ? (
-            <Button onClick={handleConnect} disabled={connecting || !userId} className="w-full">
-              {connecting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Icon className={`w-4 h-4 mr-2 ${color}`} />}
-              Connect {label}
-            </Button>
-          ) : (
-            /* Bluesky manual connect via app-password */
-            <div className="space-y-3">
-              <p className="text-xs text-muted-foreground">
-                Bluesky uses <strong>App Passwords</strong> (not OAuth). Generate one in Bluesky Settings → App Passwords, then enter it below.
-              </p>
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">Handle (e.g. yourname.bsky.social)</Label>
-                <Input value={bskyHandle} onChange={e => setBskyHandle(e.target.value)} placeholder="yourname.bsky.social" className="h-9 text-sm" />
-                <Label className="text-xs text-muted-foreground">App Password</Label>
-                <Input type="password" value={bskyAppPassword} onChange={e => setBskyAppPassword(e.target.value)} placeholder="xxxx-xxxx-xxxx-xxxx" className="h-9 text-sm font-mono" />
+          <div className="space-y-3">
+            {platform === "bluesky" ? (
+              /* Bluesky: app-password flow */
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Bluesky uses <strong>App Passwords</strong>. Go to Bluesky → Settings → App Passwords, create one, then enter it here.
+                </p>
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Your Bluesky handle</Label>
+                  <Input value={bskyHandle} onChange={e => setBskyHandle(e.target.value)} placeholder="yourname.bsky.social" className="h-9 text-sm" />
+                  <Label className="text-xs text-muted-foreground">App Password</Label>
+                  <Input type="password" value={bskyAppPassword} onChange={e => setBskyAppPassword(e.target.value)} placeholder="xxxx-xxxx-xxxx-xxxx" className="h-9 text-sm font-mono" />
+                </div>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={consentChecked}
+                    onChange={e => setConsentChecked(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-border accent-primary"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    I authorise WiseRavenShare to post to my Bluesky account on my behalf using this App Password.
+                  </span>
+                </label>
+                <Button
+                  onClick={handleSave}
+                  disabled={saving || !bskyHandle.trim() || !bskyAppPassword.trim() || !consentChecked}
+                  className="w-full"
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Icon className={`w-4 h-4 mr-2 ${color}`} />}
+                  {saving ? "Connecting…" : "Connect Bluesky"}
+                </Button>
               </div>
-              <Button onClick={handleSave} disabled={saving || !bskyHandle.trim() || !bskyAppPassword.trim()} className="w-full">
-                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-                {saving ? "Saving…" : "Connect Bluesky"}
-              </Button>
-            </div>
-          )
+            ) : (
+              /* OAuth platforms */
+              <div className="space-y-3">
+                {/* Primary: sign in via OAuth */}
+                {!oauthUnavailable && (
+                  <Button onClick={handleConnect} disabled={connecting || !userId} className="w-full">
+                    {connecting
+                      ? <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      : <Icon className={`w-4 h-4 mr-2 ${color}`} />}
+                    {connecting ? "Redirecting to sign-in…" : `Sign in with ${label}`}
+                  </Button>
+                )}
+
+                {oauthUnavailable && (
+                  <div className="flex items-start gap-2 p-2 rounded-md border border-amber-500/30 bg-amber-500/5 text-xs text-amber-300">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    OAuth for {label} is not yet configured on this server. You can manually link your account below.
+                  </div>
+                )}
+
+                {/* Manual fallback: handle + consent checkbox */}
+                {!oauthUnavailable && (
+                  <button
+                    type="button"
+                    onClick={() => setShowManual(v => !v)}
+                    className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2 text-center"
+                  >
+                    {showManual ? "Hide manual link" : "Or link your account manually"}
+                  </button>
+                )}
+
+                {(showManual || oauthUnavailable) && (
+                  <div className="space-y-2 rounded-md border border-border p-3 bg-secondary/10">
+                    <p className="text-xs text-muted-foreground">
+                      Enter your {label} handle or profile URL so WiseRavenShare knows which account to target.
+                    </p>
+                    <Label className="text-xs text-muted-foreground">Your {label} handle / username</Label>
+                    <Input
+                      value={username}
+                      onChange={e => setUsername(e.target.value)}
+                      placeholder={`@your_${platform}_handle`}
+                      className="h-9 text-sm"
+                    />
+                    <Label className="text-xs text-muted-foreground">Profile URL <span className="opacity-60">(optional)</span></Label>
+                    <Input
+                      value={profileUrl}
+                      onChange={e => setProfileUrl(e.target.value)}
+                      placeholder={PLATFORM_URL_HINTS[platform] || "https://…"}
+                      className="h-9 text-sm"
+                    />
+                    <label className="flex items-start gap-2 cursor-pointer pt-1">
+                      <input
+                        type="checkbox"
+                        checked={consentChecked}
+                        onChange={e => setConsentChecked(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 rounded border-border accent-primary"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        I authorise WiseRavenShare to post to my {label} account on my behalf.
+                      </span>
+                    </label>
+                    <Button
+                      onClick={handleSave}
+                      disabled={saving || !username.trim() || !consentChecked}
+                      size="sm"
+                      className="w-full mt-1"
+                    >
+                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
+                      {saving ? "Saving…" : `Link ${label} account`}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
+        {/* ── Connected ── */}
         {!loading && isConnected && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {autoFilled && (
               <div className="flex items-center gap-1.5 text-xs text-accent">
                 <Sparkles className="w-3 h-3" />
-                Auto-filled from {label} — edit any field to correct it
+                Details filled from {label}
               </div>
             )}
 
-            <ProfileFields
-              platform={platform}
-              username={username} setUsername={setUsername}
-              profileUrl={profileUrl} setProfileUrl={setProfileUrl}
-              feedUrl={feedUrl} setFeedUrl={setFeedUrl}
-              designation={designation} setDesignation={setDesignation}
-              youtubeChannelId={youtubeChannelId} setYoutubeChannelId={setYoutubeChannelId}
-              youtubeUserId={youtubeUserId} setYoutubeUserId={setYoutubeUserId}
-              autoFilled={autoFilled}
-            />
+            {/* Profile link */}
+            {profileUrl && (
+              <a
+                href={profileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-xs text-primary hover:underline"
+              >
+                <ExternalLink className="w-3 h-3" />
+                View your {label} profile
+              </a>
+            )}
+
+            {/* Edit details toggle */}
+            <button
+              type="button"
+              onClick={() => setShowDetails(v => !v)}
+              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors"
+            >
+              {showDetails ? "Hide details" : "Edit handle / details"}
+            </button>
+
+            {showDetails && (
+              <ProfileFields
+                platform={platform}
+                username={username} setUsername={setUsername}
+                profileUrl={profileUrl} setProfileUrl={setProfileUrl}
+                feedUrl={feedUrl} setFeedUrl={setFeedUrl}
+                designation={designation} setDesignation={setDesignation}
+                youtubeChannelId={youtubeChannelId} setYoutubeChannelId={setYoutubeChannelId}
+                youtubeUserId={youtubeUserId} setYoutubeUserId={setYoutubeUserId}
+                autoFilled={autoFilled}
+              />
+            )}
 
             <div className="flex gap-2">
-              <Button onClick={handleSave} disabled={saving} size="sm" className="flex-1">
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
-                  : saved ? <Check className="w-3.5 h-3.5 mr-1.5 text-green-400" />
-                  : <Save className="w-3.5 h-3.5 mr-1.5" />}
-                {saving ? "Saving…" : saved ? "Saved!" : "Save Changes"}
-              </Button>
-              {profileUrl && (
-                <a href={profileUrl} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-center w-9 h-9 rounded-md border border-border text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                  title={`Open ${label} profile`}>
-                  <ExternalLink className="w-4 h-4" />
-                </a>
+              {showDetails && (
+                <Button onClick={handleSave} disabled={saving} size="sm" className="flex-1">
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                    : saved ? <Check className="w-3.5 h-3.5 mr-1.5 text-green-400" />
+                    : <Save className="w-3.5 h-3.5 mr-1.5" />}
+                  {saving ? "Saving…" : saved ? "Saved!" : "Save Changes"}
+                </Button>
               )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDisconnect}
+                disabled={disconnecting}
+                className={`text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/5 ${showDetails ? "" : "w-full"}`}
+              >
+                {disconnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Unlink className="w-3.5 h-3.5 mr-1.5" />}
+                Disconnect {label}
+              </Button>
             </div>
-
-            <Button variant="outline" size="sm" onClick={handleDisconnect} disabled={disconnecting}
-              className="w-full text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/5">
-              {disconnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Unlink className="w-3.5 h-3.5 mr-1.5" />}
-              Disconnect {label}
-            </Button>
           </div>
         )}
       </CardContent>

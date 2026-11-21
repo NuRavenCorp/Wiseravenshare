@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { X, Info, Facebook, Instagram, Linkedin, Music2, AlertTriangle } from "lucide-react";
+import { X, Info, Facebook, Instagram, Linkedin, Music2 } from "lucide-react";
 
 const STORAGE_KEY = "wrs_social_limitations_acknowledged_v1";
 
 const LIMITATIONS = [
-  { platform: "Facebook Pages", icon: Facebook, limitation: "Posts published as text-only feed posts. Photo and video uploads are not supported in this version." },
-  { platform: "Instagram Business", icon: Instagram, limitation: "Requires a publicly accessible media URL to publish. You provide the image or video link." },
-  { platform: "TikTok", icon: Music2, limitation: "Read-only. TikTok's API does not support content uploads; profile and video stats are viewable only." },
-  { platform: "LinkedIn", icon: Linkedin, limitation: "Posts published as text updates to your professional network. Media attachments are not supported in this version." },
+  { platform: "Facebook", icon: Facebook, limitation: "Sign in with your own Facebook account. Grant the permissions Facebook requests so we can post on your behalf." },
+  { platform: "Instagram", icon: Instagram, limitation: "Sign in with your Instagram account. We need media permissions — just check the boxes Instagram shows you." },
+  { platform: "TikTok", icon: Music2, limitation: "Sign in with your TikTok account and approve the sharing permissions. Read-only sync is available even without upload access." },
+  { platform: "LinkedIn", icon: Linkedin, limitation: "Sign in with your LinkedIn account. Grant the permissions shown to allow posting to your profile." },
 ];
 
 export default function LimitationsNotice() {
@@ -41,7 +41,7 @@ export default function LimitationsNotice() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            WiseRavenShare cross-posts to shared community accounts. Each platform has different capabilities — please review before posting.
+            Connect <strong>your personal accounts</strong> so WiseRavenShare can post to them on your behalf. Each platform will ask you to sign in and check permission boxes — just approve what it asks.
           </p>
           <div className="space-y-3">
             {LIMITATIONS.map((l) => {
@@ -57,9 +57,11 @@ export default function LimitationsNotice() {
               );
             })}
           </div>
-          <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <p className="text-xs text-amber-200/80">All posts go to the shared community accounts. Be respectful — this is a shared space.</p>
+          <div className="flex items-start gap-2 p-3 rounded-lg border border-primary/30 bg-primary/5">
+            <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+            <p className="text-xs text-muted-foreground">
+              WiseRavenShare only posts content <strong>you explicitly send</strong>. You can disconnect any account at any time.
+            </p>
           </div>
           <Button onClick={dismiss} className="w-full">Got it</Button>
         </CardContent>
