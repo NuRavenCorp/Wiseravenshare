@@ -20,12 +20,14 @@ public class TwitterPublisher : ICrossPlatformPublisher
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TwitterPublisher> _logger;
+    private readonly UserStore? _userStore;
 
-    public TwitterPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<TwitterPublisher> logger)
+    public TwitterPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<TwitterPublisher> logger, IServiceProvider serviceProvider)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
+        _userStore = serviceProvider.GetService<UserStore>();
     }
 
     public string Platform => SocialPlatforms.Twitter;
@@ -61,6 +63,14 @@ public class TwitterPublisher : ICrossPlatformPublisher
         }
 
         var accessToken = _configuration["Social:Twitter:AccessToken"];
+        if (request.UserId != Guid.Empty && _userStore != null)
+        {
+            if (_userStore.TryGetById(request.UserId.ToString("N"), out var user) &&
+                !string.IsNullOrWhiteSpace(user?.SocialFeeds?.Twitter?.AccessToken))
+            {
+                accessToken = user.SocialFeeds.Twitter.AccessToken;
+            }
+        }
         if (string.IsNullOrWhiteSpace(accessToken))
         {
             if (UseZernioFallback() && !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]))
@@ -550,5 +560,136 @@ public class LinkedInPublisher : ICrossPlatformPublisher
                 ["com.linkedin.ugc.MemberNetworkVisibility"] = "PUBLIC"
             }
         };
+    }
+}
+
+/// <summary>
+/// Publishes to Bluesky via AT Protocol com.atproto.repo.createRecord.
+/// Reads credentials from user profile or system configuration.
+/// </summary>
+public class BlueskyPublisher : ICrossPlatformPublisher
+{
+    private const string BlueskyApiBase = "https://bsky.social/xrpc";
+    private readonly HttpClient _httpClient;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<BlueskyPublisher> _logger;
+    private readonly UserStore? _userStore;
+
+    public BlueskyPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<BlueskyPublisher> logger, IServiceProvider serviceProvider)
+    {
+        _httpClient = httpClient;
+        _configuration = configuration;
+        _logger = logger;
+        _userStore = serviceProvider.GetService<UserStore>();
+    }
+
+    public string Platform => SocialPlatforms.Bluesky;
+
+    public bool IsConfigured()
+    {
+        return !string.IsNullOrWhiteSpace(_configuration["Social:Bluesky:Handle"])
+            || !string.IsNullOrWhiteSpace(_configuration["Social:Bluesky:AccessToken"]);
+    }
+
+    public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
+    {
+        // 300 grapheme limit for Bluesky posts
+        var text = request.Message.Truncate(string.IsNullOrWhiteSpace(request.MediaUrl) ? 300 : 270);
+        if (!string.IsNullOrWhiteSpace(request.MediaUrl))
+        {
+            text = $"{text} {request.MediaUrl}".Trim();
+        }
+
+        var handle = (_configuration["Social:Bluesky:Handle"] ?? string.Empty).Trim().TrimStart('@');
+        var accessJwt = (_configuration["Social:Bluesky:AccessToken"] ?? string.Empty).Trim();
+        var appPassword = (_configuration["Social:Bluesky:AppPassword"] ?? string.Empty).Trim();
+        var did = string.Empty;
+
+        if (request.UserId != Guid.Empty && _userStore != null)
+        {
+            if (_userStore.TryGetById(request.UserId.ToString("N"), out var user) && user?.SocialFeeds?.Bluesky is not null)
+            {
+                var bsky = user.SocialFeeds.Bluesky;
+                if (!string.IsNullOrWhiteSpace(bsky.AccessToken)) accessJwt = bsky.AccessToken;
+                if (!string.IsNullOrWhiteSpace(bsky.Username)) handle = bsky.Username.TrimStart('@');
+                if (!string.IsNullOrWhiteSpace(bsky.DestinationId)) did = bsky.DestinationId;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(accessJwt) && !string.IsNullOrWhiteSpace(handle) && !string.IsNullOrWhiteSpace(appPassword))
+        {
+            try
+            {
+                var sessionRequest = new { identifier = handle, password = appPassword };
+                var sessionContent = new StringContent(JsonSerializer.Serialize(sessionRequest), Encoding.UTF8, "application/json");
+                using var sessionResponse = await _httpClient.PostAsync($"{BlueskyApiBase}/com.atproto.server.createSession", sessionContent);
+                if (sessionResponse.IsSuccessStatusCode)
+                {
+                    await using var sStream = await sessionResponse.Content.ReadAsStreamAsync();
+                    using var sJson = await JsonDocument.ParseAsync(sStream);
+                    accessJwt = sJson.RootElement.TryGetProperty("accessJwt", out var aj) ? aj.GetString() ?? string.Empty : string.Empty;
+                    if (string.IsNullOrWhiteSpace(did))
+                        did = sJson.RootElement.TryGetProperty("did", out var dNode) ? dNode.GetString() ?? string.Empty : string.Empty;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to create Bluesky session for publishing.");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(accessJwt))
+        {
+            return CrossPlatformErrors.NotConfigured(Platform, "Bluesky access token / credentials unavailable.");
+        }
+
+        try
+        {
+            var repo = !string.IsNullOrWhiteSpace(did) ? did : (!string.IsNullOrWhiteSpace(handle) ? handle : "self");
+            var record = new
+            {
+                repo,
+                collection = "app.bsky.feed.post",
+                record = new
+                {
+                    type = "app.bsky.feed.post",
+                    text,
+                    createdAt = DateTime.UtcNow.ToString("o")
+                }
+            };
+
+            using var postRequest = new HttpRequestMessage(HttpMethod.Post, $"{BlueskyApiBase}/com.atproto.repo.createRecord");
+            postRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessJwt);
+            postRequest.Content = new StringContent(JsonSerializer.Serialize(record), Encoding.UTF8, "application/json");
+
+            using var postResponse = await _httpClient.SendAsync(postRequest);
+            var responseBody = await postResponse.Content.ReadAsStringAsync();
+
+            if (!postResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Bluesky publish failed ({Status}): {Body}", (int)postResponse.StatusCode, responseBody);
+                return CrossPlatformErrors.Failed(Platform, $"Bluesky publish failed: {responseBody.Truncate(300)}");
+            }
+
+            using var doc = JsonDocument.Parse(responseBody);
+            var uri = doc.RootElement.TryGetProperty("uri", out var uriNode) ? uriNode.GetString() ?? string.Empty : string.Empty;
+            var rkey = uri.Split('/').LastOrDefault() ?? string.Empty;
+            var postUrl = !string.IsNullOrWhiteSpace(handle) && !string.IsNullOrWhiteSpace(rkey)
+                ? $"https://bsky.app/profile/{handle}/post/{rkey}"
+                : null;
+
+            return new CrossPlatformPublishResultDto
+            {
+                Platform = Platform,
+                Success = true,
+                ExternalPostId = rkey,
+                ExternalPostUrl = postUrl
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Bluesky publish threw for post {PostId}", request.PostId);
+            return CrossPlatformErrors.Failed(Platform, $"Bluesky publish failed: {ex.Message}");
+        }
     }
 }

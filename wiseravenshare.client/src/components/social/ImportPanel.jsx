@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Download, Loader2, Check, RefreshCw } from "lucide-react";
 
 export default function ImportPanel() {
-  const [items, setItems] = useState({ facebook: [], instagram: [], tiktok: [], bluesky: [] });
+  const [items, setItems] = useState({ facebook: [], instagram: [], tiktok: [], twitter: [], bluesky: [] });
   const [selected, setSelected] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -22,11 +22,12 @@ export default function ImportPanel() {
         facebook: data.facebook || [],
         instagram: data.instagram || [],
         tiktok: data.tiktok || [],
+        twitter: data.twitter || data.x || [],
         bluesky: data.bluesky || [],
       });
       setSelected(new Set());
     } catch {
-      setItems({ facebook: [], instagram: [], tiktok: [], bluesky: [] });
+      setItems({ facebook: [], instagram: [], tiktok: [], twitter: [], bluesky: [] });
     } finally {
       setLoading(false);
     }
@@ -41,7 +42,7 @@ export default function ImportPanel() {
   };
 
   const handleImport = async () => {
-    const all = [...items.facebook, ...items.instagram, ...items.tiktok, ...items.bluesky];
+    const all = [...items.facebook, ...items.instagram, ...items.tiktok, ...items.twitter, ...items.bluesky];
     const chosen = all.filter((_, i) => selected.has(i));
     if (chosen.length === 0) return;
     setImporting(true);
@@ -63,6 +64,7 @@ export default function ImportPanel() {
     ...items.facebook,
     ...items.instagram,
     ...items.tiktok,
+    ...items.twitter,
     ...items.bluesky,
   ];
 

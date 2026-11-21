@@ -2674,6 +2674,7 @@ builder.Services.AddHttpClient<ICrossPlatformPublisher, InstagramPublisher>();
 builder.Services.AddHttpClient<ICrossPlatformPublisher, TikTokPublisher>();
 builder.Services.AddHttpClient<ICrossPlatformPublisher, TwitterPublisher>();
 builder.Services.AddHttpClient<ICrossPlatformPublisher, LinkedInPublisher>();
+builder.Services.AddHttpClient<ICrossPlatformPublisher, BlueskyPublisher>();
 builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
 builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
 builder.Services.AddScoped<ICrossPlatformPublishService, CrossPlatformPublishService>();

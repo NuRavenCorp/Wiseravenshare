@@ -70,7 +70,7 @@ const PLATFORM_META = {
     Icon: Cloud,
     label: "Bluesky",
     color: "text-blue-400",
-    oauthSupported: false,
+    oauthSupported: true,
     capabilities: "Post to Bluesky; connect with your decentralised network",
   },
   linkedin: {
@@ -316,9 +316,13 @@ export default function ConnectionCard({ platform, onStatusChange }) {
   };
 
   const handleConnect = async () => {
-    if (platform === "bluesky") return;
     if (!consentChecked) {
       setError("Please check the authorization box below to authorize sharing of information/content.");
+      return;
+    }
+
+    if (platform === "bluesky" && (!username || !appPassword)) {
+      setShowManual(true);
       return;
     }
 
@@ -350,7 +354,7 @@ export default function ConnectionCard({ platform, onStatusChange }) {
         setConnecting(false);
       }
     } catch (e) {
-      if (e?.status === 409 || e?.status === 501) {
+      if (e?.status === 409 || e?.status === 501 || platform === "bluesky") {
         setOauthUnavailable(true);
         setShowManual(true);
       } else {

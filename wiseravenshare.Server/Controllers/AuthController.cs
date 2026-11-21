@@ -2908,6 +2908,10 @@ public class AuthController : ControllerBase
                 ["code_challenge"] = string.IsNullOrWhiteSpace(codeChallenge) ? "challenge" : codeChallenge,
                 ["code_challenge_method"] = "S256"
             }),
+            "bluesky" => BuildUrl("https://bsky.app", new Dictionary<string, string?>
+            {
+                ["state"] = state
+            }),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
         };
     }
@@ -2927,7 +2931,152 @@ public class AuthController : ControllerBase
             "instagram" => await ResolveInstagramProfileAsync(httpClient, config, code, callbackUrl),
             "tiktok" => await ResolveTikTokProfileAsync(httpClient, config, code, callbackUrl),
             "youtube" => await ResolveYouTubeProfileAsync(httpClient, config, code, callbackUrl, codeVerifier),
+            "twitter" => await ResolveTwitterProfileAsync(httpClient, config, code, callbackUrl, codeVerifier),
+            "bluesky" => await ResolveBlueskyProfileAsync(httpClient, config, code, callbackUrl),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
+        };
+    }
+
+    private static async Task<SocialProfile> ResolveTwitterProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl, string codeVerifier = "")
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.twitter.com/2/oauth2/token");
+        var tokenParams = new Dictionary<string, string>
+        {
+            ["code"] = code,
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = config.ClientId,
+            ["redirect_uri"] = callbackUrl,
+            ["code_verifier"] = !string.IsNullOrWhiteSpace(codeVerifier) ? codeVerifier : "challenge"
+        };
+        request.Content = new FormUrlEncodedContent(tokenParams);
+
+        if (!string.IsNullOrWhiteSpace(config.ClientId) && !string.IsNullOrWhiteSpace(config.ClientSecret))
+        {
+            var authBytes = Encoding.UTF8.GetBytes($"{config.ClientId}:{config.ClientSecret}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(authBytes));
+        }
+
+        using var response = await httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var tokenJson = await JsonDocument.ParseAsync(stream);
+        var tokenRoot = tokenJson.RootElement;
+
+        var accessToken = tokenRoot.TryGetProperty("access_token", out var atNode) ? atNode.GetString() ?? string.Empty : string.Empty;
+        var refreshToken = tokenRoot.TryGetProperty("refresh_token", out var rtNode) ? rtNode.GetString() ?? string.Empty : string.Empty;
+        DateTimeOffset? tokenExpiresAt = null;
+        if (tokenRoot.TryGetProperty("expires_in", out var expNode) && expNode.TryGetInt32(out var expSeconds) && expSeconds > 0)
+        {
+            tokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expSeconds);
+        }
+
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            throw new InvalidOperationException("Twitter access token was not returned.");
+        }
+
+        var userRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.twitter.com/2/users/me?user.fields=profile_image_url,description,name,username");
+        userRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var userResponse = await httpClient.SendAsync(userRequest);
+        userResponse.EnsureSuccessStatusCode();
+
+        await using var userStream = await userResponse.Content.ReadAsStreamAsync();
+        using var userJson = await JsonDocument.ParseAsync(userStream);
+        var dataNode = userJson.RootElement.TryGetProperty("data", out var d) ? d : userJson.RootElement;
+
+        var twitterId = dataNode.TryGetProperty("id", out var idNode) ? idNode.GetString() ?? string.Empty : string.Empty;
+        var username = dataNode.TryGetProperty("username", out var uNode) ? uNode.GetString() ?? string.Empty : string.Empty;
+        var name = dataNode.TryGetProperty("name", out var nNode) ? nNode.GetString() ?? string.Empty : username;
+
+        return new SocialProfile
+        {
+            ProviderUserId = !string.IsNullOrWhiteSpace(username) ? username : twitterId,
+            Name = !string.IsNullOrWhiteSpace(name) ? name : username,
+            Email = $"{username}@x.com",
+            AccessToken = accessToken,
+            RefreshToken = refreshToken,
+            TokenExpiresAt = tokenExpiresAt,
+            DestinationId = twitterId,
+            DestinationName = username
+        };
+    }
+
+    private static async Task<SocialProfile> ResolveBlueskyProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    {
+        string identifier = config.ClientId;
+        string password = code;
+
+        if (code.Contains(':'))
+        {
+            var parts = code.Split(':', 2);
+            identifier = parts[0];
+            password = parts[1];
+        }
+
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            identifier = code;
+        }
+
+        string did = string.Empty;
+        string handle = identifier.TrimStart('@');
+        string displayName = handle;
+        string accessJwt = string.Empty;
+        string refreshJwt = string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(password) && password != identifier)
+        {
+            try
+            {
+                var sessionPayload = new
+                {
+                    identifier = identifier,
+                    password = password
+                };
+                var content = new StringContent(JsonSerializer.Serialize(sessionPayload), Encoding.UTF8, "application/json");
+                using var sessionResponse = await httpClient.PostAsync("https://bsky.social/xrpc/com.atproto.server.createSession", content);
+                if (sessionResponse.IsSuccessStatusCode)
+                {
+                    await using var sessionStream = await sessionResponse.Content.ReadAsStreamAsync();
+                    using var sessionJson = await JsonDocument.ParseAsync(sessionStream);
+                    var sRoot = sessionJson.RootElement;
+                    did = sRoot.TryGetProperty("did", out var didNode) ? didNode.GetString() ?? string.Empty : string.Empty;
+                    handle = sRoot.TryGetProperty("handle", out var hNode) ? hNode.GetString() ?? handle : handle;
+                    accessJwt = sRoot.TryGetProperty("accessJwt", out var ajNode) ? ajNode.GetString() ?? string.Empty : string.Empty;
+                    refreshJwt = sRoot.TryGetProperty("refreshJwt", out var rjNode) ? rjNode.GetString() ?? string.Empty : string.Empty;
+                }
+            }
+            catch
+            {
+                // Fall back to public profile resolution
+            }
+        }
+
+        try
+        {
+            using var profileResponse = await httpClient.GetAsync($"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={Uri.EscapeDataString(handle)}");
+            if (profileResponse.IsSuccessStatusCode)
+            {
+                await using var pStream = await profileResponse.Content.ReadAsStreamAsync();
+                using var pJson = await JsonDocument.ParseAsync(pStream);
+                var pRoot = pJson.RootElement;
+                if (string.IsNullOrWhiteSpace(did))
+                    did = pRoot.TryGetProperty("did", out var dNode) ? dNode.GetString() ?? string.Empty : string.Empty;
+                handle = pRoot.TryGetProperty("handle", out var hNode) ? hNode.GetString() ?? handle : handle;
+                displayName = pRoot.TryGetProperty("displayName", out var dnNode) ? dnNode.GetString() ?? handle : handle;
+            }
+        }
+        catch { }
+
+        return new SocialProfile
+        {
+            ProviderUserId = handle,
+            Name = !string.IsNullOrWhiteSpace(displayName) ? displayName : handle,
+            Email = $"{handle}@bsky.social",
+            AccessToken = !string.IsNullOrWhiteSpace(accessJwt) ? accessJwt : password,
+            RefreshToken = refreshJwt,
+            DestinationId = !string.IsNullOrWhiteSpace(did) ? did : handle,
+            DestinationName = handle
         };
     }
 
@@ -3719,12 +3868,13 @@ public class AuthController : ControllerBase
 
     /// <summary>
     /// Generates a PKCE code_verifier and S256 code_challenge pair.
-    /// Only Google and YouTube flows use PKCE; other providers receive empty strings.
+    /// Used by Google, YouTube, and Twitter/X OAuth 2.0 PKCE flows.
     /// </summary>
     private static (string verifier, string challenge) BuildPkceChallenge(string provider)
     {
         if (!string.Equals(provider, "google", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(provider, "youtube", StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(provider, "youtube", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(provider, "twitter", StringComparison.OrdinalIgnoreCase))
         {
             return (string.Empty, string.Empty);
         }

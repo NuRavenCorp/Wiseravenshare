@@ -119,10 +119,12 @@ const DEFAULT_FORM = {
 // ─── DailyPlanner ─────────────────────────────────────────────────────────────
 
 export default function DailyPlanner() {
-  const { isAuthenticated, isLoadingAuth, checkUserAuth } = useAuth();
+  const { isAuthenticated, isLoadingAuth, checkUserAuth, user } = useAuth();
 
   const calendarRef = useRef(null);
   const sessionSaveTimeoutRef = useRef(null);
+
+  const storageKey = `wiseravenshare_appointments_${user?.email || user?.id || "default"}`;
 
   const [events, setEvents]                   = useState([]);
   const [activeAlert, setActiveAlert]         = useState(null);
@@ -139,6 +141,32 @@ export default function DailyPlanner() {
   // Running list filter and search state
   const [listFilter, setListFilter]           = useState("upcoming"); // "upcoming" | "today" | "all"
   const [listSearch, setListSearch]           = useState("");
+
+  // ── Sync to local cache so appointments survive offline / page navigation ─
+  const syncLocalAppointments = useCallback((items) => {
+    if (typeof window === "undefined" || !Array.isArray(items)) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(items));
+    } catch (err) {
+      console.warn("Failed to cache planner appointments locally:", err);
+    }
+  }, [storageKey]);
+
+  // ── Immediate local hydration on mount or user change ────────────────────
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const cached = localStorage.getItem(storageKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setEvents(parsed);
+        }
+      }
+    } catch {
+      // Ignore cache parse errors
+    }
+  }, [storageKey]);
 
   const queueSessionSave = useCallback((overrides = {}) => {
     if (!sessionHydrated || !isAuthenticated) return;
@@ -242,6 +270,31 @@ export default function DailyPlanner() {
     return () => { mounted = false; };
   }, [isAuthenticated]);
 
+  // ── Fetch all appointments so running list & calendar are always complete ─
+  const loadAppointments = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const data = await apiClient.requestJson("/api/planner?all=true");
+      if (Array.isArray(data)) {
+        setEvents(data);
+        syncLocalAppointments(data);
+      }
+      setLoadError("");
+    } catch (err) {
+      if (err?.status === 401 || err?.status === 403) {
+        checkUserAuth(false);
+        return;
+      }
+      setLoadError(err?.message || "Failed to load appointments.");
+    }
+  }, [checkUserAuth, isAuthenticated, syncLocalAppointments]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadAppointments();
+    }
+  }, [isAuthenticated, loadAppointments]);
+
   // Request browser notification permission once mounted
   useEffect(() => {
     if ("Notification" in window && Notification.permission === "default") {
@@ -294,37 +347,33 @@ export default function DailyPlanner() {
     }
   };
 
-  // ── Fetch when calendar view changes ──────────────────────────────────────
-  const handleDatesSet = useCallback(async (dateInfo) => {
+  // ── Record view state when calendar dates change ────────────────────────
+  const handleDatesSet = useCallback((dateInfo) => {
     if (!isAuthenticated) return;
-    try {
-      const data = await apiClient.requestJson(
-        `/api/planner?start=${encodeURIComponent(dateInfo.startStr)}&end=${encodeURIComponent(dateInfo.endStr)}`
-      );
-      setEvents(Array.isArray(data) ? data : []);
-      setLoadError("");
-      queueSessionSave({
-        currentView: dateInfo?.view?.type,
-        focusDateUtc: dateInfo?.startStr ?? null,
-      });
-    } catch (err) {
-      if (err?.status === 401 || err?.status === 403) {
-        checkUserAuth(false);
-        return;
-      }
-      setLoadError(err?.message || "Failed to load appointments.");
+    queueSessionSave({
+      currentView: dateInfo?.view?.type,
+      focusDateUtc: dateInfo?.startStr ?? null,
+    });
+  }, [isAuthenticated, queueSessionSave]);
+
+  // ── Jump calendar view to a specific event's date ─────────────────────────
+  const handleJumpToEvent = useCallback((item) => {
+    if (!item?.start) return;
+    const api = calendarRef.current?.getApi();
+    if (api) {
+      api.gotoDate(new Date(item.start));
     }
-  }, [checkUserAuth, isAuthenticated, queueSessionSave]);
+  }, []);
 
   // ── Drag-drop / resize ────────────────────────────────────────────────────
   const handleEventChange = async (changeInfo) => {
     const ev = changeInfo.event;
     const payload = {
       title:                 ev.title,
-      description:           ev.extendedProps.description ?? "",
+      description:           ev.extendedProps?.description ?? "",
       startUtc:              ev.start.toISOString(),
       endUtc:                (ev.end ?? ev.start).toISOString(),
-      reminderMinutesBefore: ev.extendedProps.reminderMinutesBefore ?? 15,
+      reminderMinutesBefore: ev.extendedProps?.reminderMinutesBefore ?? 15,
       color:                 ev.backgroundColor ?? "#3788d8",
     };
     try {
@@ -332,8 +381,8 @@ export default function DailyPlanner() {
         method: "PUT",
         body: JSON.stringify(payload),
       });
-      setEvents((prev) =>
-        prev.map((item) =>
+      setEvents((prev) => {
+        const next = prev.map((item) =>
           item.id === ev.id
             ? {
                 ...item,
@@ -349,8 +398,10 @@ export default function DailyPlanner() {
                 },
               }
             : item
-        )
-      );
+        );
+        syncLocalAppointments(next);
+        return next;
+      });
       setLoadError("");
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) {
@@ -427,8 +478,11 @@ export default function DailyPlanner() {
     if (!window.confirm("Delete this appointment?")) return;
     try {
       await apiClient.requestJson(`/api/planner/${evId}`, { method: "DELETE" });
-      setEvents((prev) => prev.filter((ev) => ev.id !== evId));
-      refreshCalendar();
+      setEvents((prev) => {
+        const next = prev.filter((ev) => ev.id !== evId);
+        syncLocalAppointments(next);
+        return next;
+      });
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) {
         checkUserAuth(false);
@@ -476,8 +530,8 @@ export default function DailyPlanner() {
           method: "PUT",
           body: JSON.stringify(payload),
         });
-        setEvents((prev) =>
-          prev.map((ev) =>
+        setEvents((prev) => {
+          const next = prev.map((ev) =>
             ev.id === formData.id
               ? {
                   ...ev,
@@ -493,20 +547,28 @@ export default function DailyPlanner() {
                   },
                 }
               : ev
-          )
-        );
+          );
+          syncLocalAppointments(next);
+          return next;
+        });
       } else {
         const created = await apiClient.requestJson("/api/planner", {
           method: "POST",
           body: JSON.stringify(payload),
         });
         if (created?.id) {
-          setEvents((prev) => [...prev.filter((ev) => ev.id !== created.id), created]);
+          setEvents((prev) => {
+            const next = [...prev.filter((ev) => ev.id !== created.id), created];
+            syncLocalAppointments(next);
+            return next;
+          });
+        } else {
+          // If response format was alternative, re-fetch
+          loadAppointments();
         }
       }
       setModalOpen(false);
       queueSessionSave({ modalOpen: false, draftJson: null });
-      refreshCalendar();
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) {
         checkUserAuth(false);
@@ -527,8 +589,11 @@ export default function DailyPlanner() {
       await apiClient.requestJson(`/api/planner/${formData.id}`, { method: "DELETE" });
       setModalOpen(false);
       queueSessionSave({ modalOpen: false, draftJson: null });
-      setEvents((prev) => prev.filter((ev) => ev.id !== formData.id));
-      refreshCalendar();
+      setEvents((prev) => {
+        const next = prev.filter((ev) => ev.id !== formData.id);
+        syncLocalAppointments(next);
+        return next;
+      });
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) {
         checkUserAuth(false);
@@ -541,13 +606,7 @@ export default function DailyPlanner() {
   };
 
   const refreshCalendar = () => {
-    const api = calendarRef.current?.getApi();
-    if (!api) return;
-    handleDatesSet({
-      startStr: api.view.activeStart.toISOString(),
-      endStr:   api.view.activeEnd.toISOString(),
-      view:     api.view,
-    });
+    loadAppointments();
   };
 
   // ── Filtered running list memo ────────────────────────────────────────────
@@ -820,7 +879,10 @@ export default function DailyPlanner() {
               filteredEvents.map((item) => (
                 <div
                   key={item.id}
-                  onClick={() => handleOpenEditFromList(item)}
+                  onClick={() => {
+                    handleJumpToEvent(item);
+                    handleOpenEditFromList(item);
+                  }}
                   className="group relative rounded-lg border border-border/80 bg-background/60 p-3 hover:bg-muted/50 hover:border-primary/50 transition-all cursor-pointer space-y-1.5 shadow-sm"
                   style={{
                     borderLeftWidth: "4px",
@@ -832,6 +894,17 @@ export default function DailyPlanner() {
                       {item.title}
                     </span>
                     <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleJumpToEvent(item);
+                        }}
+                        className="p-1 text-muted-foreground hover:text-primary rounded hover:bg-muted"
+                        title="Focus on calendar"
+                      >
+                        <Calendar className="w-3 h-3" />
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => {
