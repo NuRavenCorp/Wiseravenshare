@@ -1,9 +1,23 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import { Bell, X, Loader2, Calendar, Clock, Trash2, Save, RefreshCw } from "lucide-react";
+import {
+  Bell,
+  X,
+  Loader2,
+  Calendar,
+  Clock,
+  Trash2,
+  Save,
+  RefreshCw,
+  Plus,
+  Search,
+  CalendarDays,
+  Edit3,
+  ListFilter
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiClient } from "@/api/client";
@@ -33,67 +47,105 @@ function normalizeDateTimeLocalValue(value) {
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed)) {
     return trimmed;
   }
-
   const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) {
-    return "";
-  }
-
+  if (Number.isNaN(parsed.getTime())) return "";
   return toLocalInputFormat(parsed);
 }
 
+function formatAppointmentTime(startStr, endStr) {
+  if (!startStr) return "";
+  const start = new Date(startStr);
+  const end = endStr ? new Date(endStr) : null;
+  const now = new Date();
+
+  const isToday =
+    start.getDate() === now.getDate() &&
+    start.getMonth() === now.getMonth() &&
+    start.getFullYear() === now.getFullYear();
+
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow =
+    start.getDate() === tomorrow.getDate() &&
+    start.getMonth() === tomorrow.getMonth() &&
+    start.getFullYear() === tomorrow.getFullYear();
+
+  const timeFormatter = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
+  const timeRange = end
+    ? `${timeFormatter.format(start)} – ${timeFormatter.format(end)}`
+    : timeFormatter.format(start);
+
+  if (isToday) {
+    return `Today • ${timeRange}`;
+  }
+  if (isTomorrow) {
+    return `Tomorrow • ${timeRange}`;
+  }
+
+  const dateFormatter = new Intl.DateTimeFormat([], { weekday: "short", month: "short", day: "numeric" });
+  return `${dateFormatter.format(start)} • ${timeRange}`;
+}
+
+const COLOR_PRESETS = [
+  "#3788d8", // Blue (default)
+  "#10b981", // Emerald
+  "#8b5cf6", // Violet
+  "#f59e0b", // Amber
+  "#ef4444", // Rose/Red
+  "#06b6d4", // Cyan
+  "#ec4899", // Pink
+];
+
 const REMINDER_OPTIONS = [
-  { value: 0,  label: "At time of event" },
-  { value: 5,  label: "5 minutes before" },
-  { value: 15, label: "15 minutes before" },
-  { value: 30, label: "30 minutes before" },
-  { value: 60, label: "1 hour before" },
+  { value: 0,   label: "At time of event" },
+  { value: 5,   label: "5 minutes before" },
+  { value: 15,  label: "15 minutes before (default)" },
+  { value: 30,  label: "30 minutes before" },
+  { value: 60,  label: "1 hour before" },
   { value: 120, label: "2 hours before" },
   { value: 1440, label: "1 day before" },
 ];
 
-const COLOR_PRESETS = [
-  "#3788d8", "#10b981", "#f59e0b", "#ef4444",
-  "#8b5cf6", "#ec4899", "#06b6d4", "#f97316",
-];
-
 const DEFAULT_FORM = {
-  id: null,
-  title: "",
-  description: "",
-  start: "",
-  end: "",
+  id:                    null,
+  title:                 "",
+  description:           "",
+  start:                 "",
+  end:                   "",
   reminderMinutesBefore: 15,
-  color: "#3788d8",
+  color:                 "#3788d8",
 };
 
 // ─── DailyPlanner ─────────────────────────────────────────────────────────────
 
 export default function DailyPlanner() {
-  // Knitted directly to WiseRavenShare authentication flow.
   const { isAuthenticated, isLoadingAuth, checkUserAuth } = useAuth();
 
   const calendarRef = useRef(null);
   const sessionSaveTimeoutRef = useRef(null);
 
-  const [events, setEvents]           = useState([]);
-  const [activeAlert, setActiveAlert] = useState(null);
-  const [loadError, setLoadError]     = useState("");
+  const [events, setEvents]                   = useState([]);
+  const [activeAlert, setActiveAlert]         = useState(null);
+  const [loadError, setLoadError]             = useState("");
   const [sessionHydrated, setSessionHydrated] = useState(false);
-  const [initialView, setInitialView] = useState("timeGridDay");
-  const [initialDate, setInitialDate] = useState(null);
-  const [modalOpen, setModalOpen]     = useState(false);
-  const [saving, setSaving]           = useState(false);
-  const [deleting, setDeleting]       = useState(false);
-  const [formData, setFormData]       = useState(DEFAULT_FORM);
-  const [formError, setFormError]     = useState("");
+  const [initialView, setInitialView]         = useState("timeGridDay");
+  const [initialDate, setInitialDate]         = useState(null);
+  const [modalOpen, setModalOpen]             = useState(false);
+  const [saving, setSaving]                   = useState(false);
+  const [deleting, setDeleting]               = useState(false);
+  const [formData, setFormData]               = useState(DEFAULT_FORM);
+  const [formError, setFormError]             = useState("");
+
+  // Running list filter and search state
+  const [listFilter, setListFilter]           = useState("upcoming"); // "upcoming" | "today" | "all"
+  const [listSearch, setListSearch]           = useState("");
 
   const queueSessionSave = useCallback((overrides = {}) => {
     if (!sessionHydrated || !isAuthenticated) return;
 
     const api = calendarRef.current?.getApi();
     const currentView = overrides.currentView ?? api?.view?.type ?? initialView;
-    const focusDateUtc = overrides.focusDateUtc ?? (api?.getDate ? api.getDate().toISOString() : null);
+    const focusDateUtc = overrides.focusDateUtc ?? api?.view?.activeStart?.toISOString() ?? null;
     const modalIsOpen = overrides.modalOpen ?? modalOpen;
 
     const hasDraft =
@@ -107,7 +159,9 @@ export default function DailyPlanner() {
 
     const draftJson = Object.prototype.hasOwnProperty.call(overrides, "draftJson")
       ? overrides.draftJson
-      : (hasDraft ? JSON.stringify(formData) : null);
+      : hasDraft
+        ? JSON.stringify(formData)
+        : null;
 
     if (sessionSaveTimeoutRef.current) {
       clearTimeout(sessionSaveTimeoutRef.current);
@@ -125,7 +179,6 @@ export default function DailyPlanner() {
           }),
         });
       } catch (err) {
-        // Session-state persistence is best-effort.
         console.warn("Failed to persist planner session state:", err?.message);
       }
     }, 350);
@@ -148,24 +201,30 @@ export default function DailyPlanner() {
           ? state.currentView.trim()
           : "timeGridDay";
         setInitialView(nextView);
-        setInitialDate(typeof state.focusDateUtc === "string" ? state.focusDateUtc : null);
 
-        if (state.draftJson) {
+        if (state.focusDateUtc) {
+          const parsedFocusDate = new Date(state.focusDateUtc);
+          if (!Number.isNaN(parsedFocusDate.getTime())) {
+            setInitialDate(parsedFocusDate);
+          }
+        }
+
+        if (state.draftJson && typeof state.draftJson === "string") {
           try {
-            const parsed = JSON.parse(state.draftJson);
-            if (parsed && typeof parsed === "object") {
-              setFormData((prev) => ({
-                ...prev,
-                ...parsed,
-                title: typeof parsed.title === "string" ? parsed.title : prev.title,
-                description: typeof parsed.description === "string" ? parsed.description : prev.description,
-                start: normalizeDateTimeLocalValue(parsed.start),
-                end: normalizeDateTimeLocalValue(parsed.end),
-                color: typeof parsed.color === "string" && parsed.color.trim() ? parsed.color : prev.color,
-              }));
+            const parsedDraft = JSON.parse(state.draftJson);
+            if (parsedDraft && typeof parsedDraft === "object") {
+              setFormData({
+                id: parsedDraft.id || null,
+                title: parsedDraft.title || "",
+                description: parsedDraft.description || "",
+                start: normalizeDateTimeLocalValue(parsedDraft.start),
+                end: normalizeDateTimeLocalValue(parsedDraft.end),
+                reminderMinutesBefore: Number(parsedDraft.reminderMinutesBefore) || 15,
+                color: parsedDraft.color || "#3788d8",
+              });
             }
           } catch {
-            // Ignore invalid persisted drafts and continue with defaults.
+            // Ignore corrupted draft
           }
         }
 
@@ -173,75 +232,59 @@ export default function DailyPlanner() {
           setModalOpen(true);
         }
       } catch (err) {
-        console.warn("Planner session state hydration note:", err?.message);
+        console.warn("Planner session hydration notice:", err?.message);
       } finally {
-        if (mounted) {
-          setSessionHydrated(true);
-        }
+        if (mounted) setSessionHydrated(true);
       }
     };
 
     loadSessionState();
-    return () => {
-      mounted = false;
-      if (sessionSaveTimeoutRef.current) {
-        clearTimeout(sessionSaveTimeoutRef.current);
-      }
-    };
+    return () => { mounted = false; };
   }, [isAuthenticated]);
 
-  useEffect(() => {
-    if (!sessionHydrated || !isAuthenticated) return;
-    queueSessionSave();
-  }, [sessionHydrated, isAuthenticated, modalOpen, formData, queueSessionSave]);
-
-  // ── Browser notification permission ───────────────────────────────────────
+  // Request browser notification permission once mounted
   useEffect(() => {
     if ("Notification" in window && Notification.permission === "default") {
       Notification.requestPermission();
     }
   }, []);
 
-  // ── Alert engine: check every 30 s ────────────────────────────────────────
+  // ── Reminder alert polling (every 30 seconds) ──────────────────────────────
   useEffect(() => {
-    const checkAlerts = () => {
+    if (!isAuthenticated) return;
+
+    const checkReminders = () => {
       const now = Date.now();
       for (const ev of events) {
         if (ev.extendedProps?.alertDismissed) continue;
-        const startMs   = new Date(ev.start).getTime();
-        const endMs     = new Date(ev.end ?? ev.start).getTime();
-        const triggerMs = startMs - (ev.extendedProps?.reminderMinutesBefore ?? 0) * 60_000;
-        if (now >= triggerMs && now <= endMs) {
-          triggerAlert(ev);
+        const startMs = new Date(ev.start).getTime();
+        const reminderMinutes = ev.extendedProps?.reminderMinutesBefore ?? 15;
+        const alertMs = startMs - reminderMinutes * 60 * 1000;
+
+        if (now >= alertMs && now < startMs) {
+          setActiveAlert(ev);
+          if ("Notification" in window && Notification.permission === "granted") {
+            try {
+              new Notification(`Upcoming: ${ev.title}`, {
+                body: `Starts in ${reminderMinutes} minute${reminderMinutes === 1 ? "" : "s"} at ${new Date(ev.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+                icon: "/favicon.ico",
+              });
+            } catch {
+              // Notification errors silently handled
+            }
+          }
           break;
         }
       }
     };
-    const interval = setInterval(checkAlerts, 30_000);
-    checkAlerts();
-    return () => clearInterval(interval);
-  }, [events]);
 
-  const triggerAlert = (ev) => {
-    setActiveAlert(ev);
-    new Audio("/alert-chime.mp3").play().catch(() => {});
-    if ("Notification" in window && Notification.permission === "granted") {
-      new Notification(`⏰ Upcoming: ${ev.title}`, {
-        body: `Starts at ${new Date(ev.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-        icon: "/favicon.ico",
-      });
-    }
-  };
+    checkReminders();
+    const timer = setInterval(checkReminders, 30_000);
+    return () => clearInterval(timer);
+  }, [events, isAuthenticated]);
 
   const dismissAlert = async (id) => {
     setActiveAlert(null);
-    setEvents((prev) =>
-      prev.map((ev) =>
-        ev.id === id
-          ? { ...ev, extendedProps: { ...ev.extendedProps, alertDismissed: true } }
-          : ev
-      )
-    );
     try {
       await apiClient.requestJson(`/api/planner/${id}/dismiss-alert`, { method: "PATCH" });
     } catch (err) {
@@ -266,12 +309,10 @@ export default function DailyPlanner() {
       });
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) {
-        // Unified auth session expired; let AuthContext sync
         checkUserAuth(false);
         return;
       }
       setLoadError(err?.message || "Failed to load appointments.");
-      console.error("Failed to load appointments:", err);
     }
   }, [checkUserAuth, isAuthenticated, queueSessionSave]);
 
@@ -291,6 +332,25 @@ export default function DailyPlanner() {
         method: "PUT",
         body: JSON.stringify(payload),
       });
+      setEvents((prev) =>
+        prev.map((item) =>
+          item.id === ev.id
+            ? {
+                ...item,
+                title: payload.title,
+                start: payload.startUtc,
+                end: payload.endUtc,
+                backgroundColor: payload.color,
+                borderColor: payload.color,
+                extendedProps: {
+                  ...item.extendedProps,
+                  description: payload.description,
+                  reminderMinutesBefore: payload.reminderMinutesBefore,
+                },
+              }
+            : item
+        )
+      );
       setLoadError("");
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) {
@@ -302,7 +362,7 @@ export default function DailyPlanner() {
     }
   };
 
-  // ── Date select (drag to create slot) ─────────────────────────────────────
+  // ── Date select (drag to create slot on calendar) ──────────────────────────
   const handleDateSelect = (selectInfo) => {
     setFormError("");
     setFormData({
@@ -313,20 +373,69 @@ export default function DailyPlanner() {
     setModalOpen(true);
   };
 
-  // ── Click existing event ──────────────────────────────────────────────────
+  // ── Click existing event on calendar ──────────────────────────────────────
   const handleEventClick = (clickInfo) => {
     setFormError("");
     const ev = clickInfo.event;
     setFormData({
       id:                    ev.id,
       title:                 ev.title,
-      description:           ev.extendedProps.description ?? "",
+      description:           ev.extendedProps?.description ?? "",
       start:                 toLocalInputFormat(ev.start),
       end:                   toLocalInputFormat(ev.end ?? ev.start),
-      reminderMinutesBefore: ev.extendedProps.reminderMinutesBefore ?? 15,
+      reminderMinutesBefore: ev.extendedProps?.reminderMinutesBefore ?? 15,
       color:                 ev.backgroundColor ?? "#3788d8",
     });
     setModalOpen(true);
+  };
+
+  // ── Open Create Modal with default round times ─────────────────────────────
+  const handleOpenCreateModal = (presetDate = null) => {
+    setFormError("");
+    const base = presetDate ? new Date(presetDate) : new Date();
+    const start = new Date(base);
+    start.setMinutes(start.getMinutes() >= 30 ? 60 : 30, 0, 0);
+    const end = new Date(start);
+    end.setHours(end.getHours() + 1);
+
+    setFormData({
+      ...DEFAULT_FORM,
+      start: toLocalInputFormat(start),
+      end:   toLocalInputFormat(end),
+    });
+    setModalOpen(true);
+  };
+
+  // ── Open Edit from Sidebar List ───────────────────────────────────────────
+  const handleOpenEditFromList = (item) => {
+    setFormError("");
+    setFormData({
+      id:                    item.id,
+      title:                 item.title,
+      description:           item.extendedProps?.description ?? "",
+      start:                 toLocalInputFormat(item.start),
+      end:                   toLocalInputFormat(item.end ?? item.start),
+      reminderMinutesBefore: item.extendedProps?.reminderMinutesBefore ?? 15,
+      color:                 item.backgroundColor ?? item.borderColor ?? "#3788d8",
+    });
+    setModalOpen(true);
+  };
+
+  // ── Delete from Sidebar List ──────────────────────────────────────────────
+  const handleDeleteFromList = async (e, evId) => {
+    e.stopPropagation();
+    if (!window.confirm("Delete this appointment?")) return;
+    try {
+      await apiClient.requestJson(`/api/planner/${evId}`, { method: "DELETE" });
+      setEvents((prev) => prev.filter((ev) => ev.id !== evId));
+      refreshCalendar();
+    } catch (err) {
+      if (err?.status === 401 || err?.status === 403) {
+        checkUserAuth(false);
+      } else {
+        alert(err?.message || "Failed to delete appointment.");
+      }
+    }
   };
 
   // ── Save (create or update) ───────────────────────────────────────────────
@@ -367,11 +476,33 @@ export default function DailyPlanner() {
           method: "PUT",
           body: JSON.stringify(payload),
         });
+        setEvents((prev) =>
+          prev.map((ev) =>
+            ev.id === formData.id
+              ? {
+                  ...ev,
+                  title: payload.title,
+                  start: payload.startUtc,
+                  end: payload.endUtc,
+                  backgroundColor: payload.color,
+                  borderColor: payload.color,
+                  extendedProps: {
+                    ...ev.extendedProps,
+                    description: payload.description,
+                    reminderMinutesBefore: payload.reminderMinutesBefore,
+                  },
+                }
+              : ev
+          )
+        );
       } else {
-        await apiClient.requestJson("/api/planner", {
+        const created = await apiClient.requestJson("/api/planner", {
           method: "POST",
           body: JSON.stringify(payload),
         });
+        if (created?.id) {
+          setEvents((prev) => [...prev.filter((ev) => ev.id !== created.id), created]);
+        }
       }
       setModalOpen(false);
       queueSessionSave({ modalOpen: false, draftJson: null });
@@ -388,7 +519,7 @@ export default function DailyPlanner() {
     }
   };
 
-  // ── Delete ────────────────────────────────────────────────────────────────
+  // ── Delete from Modal ─────────────────────────────────────────────────────
   const handleDelete = async () => {
     if (!formData.id || !window.confirm("Delete this appointment?")) return;
     setDeleting(true);
@@ -397,6 +528,7 @@ export default function DailyPlanner() {
       setModalOpen(false);
       queueSessionSave({ modalOpen: false, draftJson: null });
       setEvents((prev) => prev.filter((ev) => ev.id !== formData.id));
+      refreshCalendar();
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) {
         checkUserAuth(false);
@@ -414,10 +546,43 @@ export default function DailyPlanner() {
     handleDatesSet({
       startStr: api.view.activeStart.toISOString(),
       endStr:   api.view.activeEnd.toISOString(),
+      view:     api.view,
     });
   };
 
-  // ── Auth Loading State ──────────────────────────────────────────────────
+  // ── Filtered running list memo ────────────────────────────────────────────
+  const filteredEvents = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    return events
+      .filter((ev) => {
+        const evStart = new Date(ev.start);
+        const evEnd = new Date(ev.end ?? ev.start);
+
+        // Filter by tab
+        if (listFilter === "upcoming" && evEnd < now) {
+          return false;
+        }
+        if (listFilter === "today" && (evEnd < startOfToday || evStart > endOfToday)) {
+          return false;
+        }
+
+        // Filter by search keyword
+        if (listSearch.trim()) {
+          const q = listSearch.toLowerCase();
+          const matchTitle = (ev.title ?? "").toLowerCase().includes(q);
+          const matchDesc = (ev.extendedProps?.description ?? "").toLowerCase().includes(q);
+          if (!matchTitle && !matchDesc) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => new Date(a.start) - new Date(b.start));
+  }, [events, listFilter, listSearch]);
+
+  // ── Auth Loading State ────────────────────────────────────────────────────
   if (isLoadingAuth) {
     return (
       <div className="rounded-xl border border-border bg-card p-12 flex flex-col items-center justify-center gap-3">
@@ -427,7 +592,7 @@ export default function DailyPlanner() {
     );
   }
 
-  // ── Unauthenticated State (Unified Prompt) ──────────────────────────────
+  // ── Unauthenticated State (Unified Prompt) ────────────────────────────────
   if (!isAuthenticated) {
     const returnPath = typeof window !== "undefined"
       ? `${window.location.pathname}${window.location.search}`
@@ -452,7 +617,7 @@ export default function DailyPlanner() {
     );
   }
 
-  // ── Session Hydration State ─────────────────────────────────────────────
+  // ── Session Hydration State ───────────────────────────────────────────────
   if (!sessionHydrated) {
     return (
       <div className="rounded-xl border border-border bg-card p-6 flex items-center justify-center">
@@ -461,7 +626,7 @@ export default function DailyPlanner() {
     );
   }
 
-  // ─── Render ──────────────────────────────────────────────────────────────
+  // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
       {/* Alert banner */}
@@ -510,33 +675,200 @@ export default function DailyPlanner() {
         </div>
       )}
 
-      {/* FullCalendar */}
-      <div className="fc-dark rounded-xl overflow-hidden border border-border bg-card shadow-sm">
-        <FullCalendar
-          ref={calendarRef}
-          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-          initialView={initialView}
-          initialDate={initialDate || undefined}
-          headerToolbar={{
-            left:   "prev,next today",
-            center: "title",
-            right:  "dayGridMonth,timeGridWeek,timeGridDay",
-          }}
-          editable
-          selectable
-          selectMirror
-          dayMaxEvents
-          nowIndicator
-          slotDuration="00:30:00"
-          events={events}
-          datesSet={handleDatesSet}
-          select={handleDateSelect}
-          eventClick={handleEventClick}
-          eventDrop={handleEventChange}
-          eventResize={handleEventChange}
-          height="80vh"
-          eventTimeFormat={{ hour: "2-digit", minute: "2-digit", meridiem: "short" }}
-        />
+      {/* Main Grid: Calendar (left/center) + Running List (sidebar) */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
+        {/* ── Left / Center Column: Calendar ────────────────────────────── */}
+        <div className="lg:col-span-3 min-w-0 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="w-5 h-5 text-primary" />
+              <h2 className="text-base font-semibold text-foreground">Calendar Planner</h2>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => handleOpenCreateModal()}
+              className="gap-1.5 shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Appointment</span>
+            </Button>
+          </div>
+
+          <div className="fc-dark rounded-xl overflow-hidden border border-border bg-card shadow-sm">
+            <FullCalendar
+              ref={calendarRef}
+              plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+              initialView={initialView}
+              initialDate={initialDate || undefined}
+              headerToolbar={{
+                left:   "prev,next today",
+                center: "title",
+                right:  "dayGridMonth,timeGridWeek,timeGridDay",
+              }}
+              editable
+              selectable
+              selectMirror
+              dayMaxEvents
+              nowIndicator
+              slotDuration="00:30:00"
+              events={events}
+              datesSet={handleDatesSet}
+              select={handleDateSelect}
+              eventClick={handleEventClick}
+              eventDrop={handleEventChange}
+              eventResize={handleEventChange}
+              height="78vh"
+              eventTimeFormat={{ hour: "numeric", minute: "2-digit", meridiem: "short" }}
+            />
+          </div>
+        </div>
+
+        {/* ── Right Column: Running Appointments List ──────────────────── */}
+        <div className="lg:col-span-1 rounded-xl border border-border bg-card p-4 shadow-sm flex flex-col space-y-3">
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-border/70 pb-3">
+            <div className="flex items-center gap-2">
+              <ListFilter className="w-4 h-4 text-primary" />
+              <h3 className="font-semibold text-foreground text-sm">Appointments</h3>
+              <span className="px-2 py-0.5 text-[11px] rounded-full bg-primary/10 text-primary font-medium">
+                {events.length}
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleOpenCreateModal()}
+              className="h-7 px-2.5 text-xs gap-1"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add</span>
+            </Button>
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex items-center gap-1.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setListFilter("upcoming")}
+              className={`px-2.5 py-1 rounded-md transition-colors ${
+                listFilter === "upcoming"
+                  ? "bg-primary text-primary-foreground font-medium"
+                  : "bg-muted/50 text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              Upcoming
+            </button>
+            <button
+              type="button"
+              onClick={() => setListFilter("today")}
+              className={`px-2.5 py-1 rounded-md transition-colors ${
+                listFilter === "today"
+                  ? "bg-primary text-primary-foreground font-medium"
+                  : "bg-muted/50 text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => setListFilter("all")}
+              className={`px-2.5 py-1 rounded-md transition-colors ${
+                listFilter === "all"
+                  ? "bg-primary text-primary-foreground font-medium"
+                  : "bg-muted/50 text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              All
+            </button>
+          </div>
+
+          {/* Search Box */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={listSearch}
+              onChange={(e) => setListSearch(e.target.value)}
+              placeholder="Filter by title…"
+              className="h-8 pl-8 text-xs bg-background"
+            />
+          </div>
+
+          {/* Scrollable list */}
+          <div className="space-y-2 overflow-y-auto max-h-[62vh] pr-1">
+            {filteredEvents.length === 0 ? (
+              <div className="py-8 px-4 text-center space-y-2 rounded-lg border border-dashed border-border/70">
+                <Calendar className="w-8 h-8 text-muted-foreground/60 mx-auto" />
+                <p className="text-xs text-muted-foreground font-medium">No appointments found</p>
+                <p className="text-[11px] text-muted-foreground/80">
+                  {listFilter === "upcoming"
+                    ? "You have no upcoming sessions."
+                    : listFilter === "today"
+                      ? "Nothing scheduled for today."
+                      : "No scheduled sessions."}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleOpenCreateModal()}
+                  className="mt-2 text-xs h-7"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Schedule One
+                </Button>
+              </div>
+            ) : (
+              filteredEvents.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => handleOpenEditFromList(item)}
+                  className="group relative rounded-lg border border-border/80 bg-background/60 p-3 hover:bg-muted/50 hover:border-primary/50 transition-all cursor-pointer space-y-1.5 shadow-sm"
+                  style={{
+                    borderLeftWidth: "4px",
+                    borderLeftColor: item.backgroundColor || "#3788d8",
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-semibold text-xs text-foreground line-clamp-1 group-hover:text-primary transition-colors">
+                      {item.title}
+                    </span>
+                    <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenEditFromList(item);
+                        }}
+                        className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-muted"
+                        title="Edit appointment"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteFromList(e, item.id)}
+                        className="p-1 text-muted-foreground hover:text-red-400 rounded hover:bg-red-500/10"
+                        title="Delete appointment"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <Clock className="w-3 h-3 text-muted-foreground/70 shrink-0" />
+                    <span>{formatAppointmentTime(item.start, item.end)}</span>
+                  </div>
+
+                  {item.extendedProps?.description && (
+                    <p className="text-[11px] text-muted-foreground/80 line-clamp-2 italic">
+                      {item.extendedProps.description}
+                    </p>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Create / Edit Modal */}

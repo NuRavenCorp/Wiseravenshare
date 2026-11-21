@@ -3,6 +3,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -20,7 +21,8 @@ namespace Wiseravenshare.Server.Controllers;
 /// Calendar appointment CRUD for the Daily Planner.
 /// Knitted seamlessly to WiseRavenShare's unified authentication flow
 /// (JWT Bearer tokens, Identity cookies, and cookie authentication).
-/// All times are stored and returned in UTC; the browser converts to local.
+/// Supports dual persistence: PostgreSQL when available, and durable file-backed local storage
+/// (App_Data/planner_appointments.json) for development and offline resilience.
 ///
 /// Routes:
 ///   GET    /api/planner?start=&amp;end=         – list in date window
@@ -39,12 +41,127 @@ public sealed class AppointmentsController(
 {
     private static readonly ConcurrentDictionary<Guid, Appointment> InMemoryAppointments = new();
     private static readonly ConcurrentDictionary<Guid, PlannerSessionStateRequest> InMemorySessionStates = new();
+    private static readonly object StorageLock = new();
+    private static bool _storageLoaded;
+    private static string? _appDataDirectory;
+
+    private static string GetAppDataDir()
+    {
+        if (_appDataDirectory is not null) return _appDataDirectory;
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        var dir = Path.Combine(baseDir, "App_Data");
+        if (!Directory.Exists(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+        _appDataDirectory = dir;
+        return _appDataDirectory;
+    }
+
+    private static string GetAppointmentsFilePath() => Path.Combine(GetAppDataDir(), "planner_appointments.json");
+    private static string GetSessionStateFilePath() => Path.Combine(GetAppDataDir(), "planner_session_state.json");
+
+    private static void EnsureStorageLoaded()
+    {
+        if (_storageLoaded) return;
+        lock (StorageLock)
+        {
+            if (_storageLoaded) return;
+            try
+            {
+                var apptFile = GetAppointmentsFilePath();
+                if (System.IO.File.Exists(apptFile))
+                {
+                    var json = System.IO.File.ReadAllText(apptFile);
+                    var list = JsonSerializer.Deserialize<List<AppointmentPersistDto>>(json);
+                    if (list is not null)
+                    {
+                        foreach (var item in list)
+                        {
+                            var appt = new Appointment
+                            {
+                                Id = item.Id,
+                                UserId = item.UserId,
+                                Title = item.Title,
+                                Description = item.Description,
+                                StartUtc = item.StartUtc,
+                                EndUtc = item.EndUtc,
+                                ReminderMinutesBefore = item.ReminderMinutesBefore,
+                                AlertDismissed = item.AlertDismissed,
+                                Color = item.Color,
+                                CreatedAt = item.CreatedAt,
+                                UpdatedAt = item.UpdatedAt,
+                                IsDeleted = item.IsDeleted
+                            };
+                            InMemoryAppointments[appt.Id] = appt;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                var stateFile = GetSessionStateFilePath();
+                if (System.IO.File.Exists(stateFile))
+                {
+                    var json = System.IO.File.ReadAllText(stateFile);
+                    var dict = JsonSerializer.Deserialize<Dictionary<Guid, PlannerSessionStateRequest>>(json);
+                    if (dict is not null)
+                    {
+                        foreach (var kvp in dict)
+                        {
+                            InMemorySessionStates[kvp.Key] = kvp.Value;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            _storageLoaded = true;
+        }
+    }
+
+    private static void PersistStorageToFile()
+    {
+        try
+        {
+            lock (StorageLock)
+            {
+                var list = InMemoryAppointments.Values
+                    .Select(a => new AppointmentPersistDto
+                    {
+                        Id = a.Id,
+                        UserId = a.UserId,
+                        Title = a.Title,
+                        Description = a.Description,
+                        StartUtc = a.StartUtc,
+                        EndUtc = a.EndUtc,
+                        ReminderMinutesBefore = a.ReminderMinutesBefore,
+                        AlertDismissed = a.AlertDismissed,
+                        Color = a.Color,
+                        CreatedAt = a.CreatedAt,
+                        UpdatedAt = a.UpdatedAt,
+                        IsDeleted = a.IsDeleted
+                    })
+                    .ToList();
+
+                var apptJson = JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true });
+                System.IO.File.WriteAllText(GetAppointmentsFilePath(), apptJson);
+
+                var stateJson = JsonSerializer.Serialize(InMemorySessionStates, new JsonSerializerOptions { WriteIndented = true });
+                System.IO.File.WriteAllText(GetSessionStateFilePath(), stateJson);
+            }
+        }
+        catch { }
+    }
 
     // ── Session State ─────────────────────────────────────────────────────
 
     [HttpGet("session-state")]
     public async Task<IActionResult> GetSessionState(CancellationToken ct = default)
     {
+        EnsureStorageLoaded();
         var defaultState = new
         {
             currentView = "timeGridDay",
@@ -87,7 +204,19 @@ LIMIT 1";
 
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             if (!await reader.ReadAsync(ct))
+            {
+                if (InMemorySessionStates.TryGetValue(userId, out var memFallback))
+                {
+                    return Ok(new
+                    {
+                        currentView = memFallback.CurrentView ?? "timeGridDay",
+                        focusDateUtc = memFallback.FocusDateUtc,
+                        draftJson = memFallback.DraftJson,
+                        modalOpen = memFallback.ModalOpen
+                    });
+                }
                 return Ok(defaultState);
+            }
 
             return Ok(new
             {
@@ -109,6 +238,7 @@ LIMIT 1";
         [FromBody] PlannerSessionStateRequest body,
         CancellationToken ct = default)
     {
+        EnsureStorageLoaded();
         try
         {
             var userId = await ResolveUserIdAsync(ct);
@@ -119,6 +249,7 @@ LIMIT 1";
                 return BadRequest(new { message = "CurrentView exceeds the 50 character limit." });
 
             InMemorySessionStates[userId] = body;
+            PersistStorageToFile();
 
             var connStr = db.Database.GetConnectionString();
             if (string.IsNullOrWhiteSpace(connStr)) return NoContent();
@@ -161,60 +292,57 @@ ON CONFLICT (""UserId"") DO UPDATE
         [FromQuery] DateTimeOffset? end,
         CancellationToken ct = default)
     {
+        EnsureStorageLoaded();
         var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
         var from = (start ?? DateTimeOffset.UtcNow.AddMonths(-1)).UtcDateTime;
-        var to   = (end   ?? DateTimeOffset.UtcNow.AddMonths(2)).UtcDateTime;
+        var to   = (end   ?? DateTimeOffset.UtcNow.AddMonths(3)).UtcDateTime;
 
+        var merged = new Dictionary<Guid, Appointment>();
+
+        // 1. Load from durable in-memory storage first
+        foreach (var appt in InMemoryAppointments.Values)
+        {
+            if (appt.UserId == userId && !appt.IsDeleted && appt.StartUtc < to && appt.EndUtc > from)
+            {
+                merged[appt.Id] = appt;
+            }
+        }
+
+        // 2. Query database if available and merge
         var connStr = db.Database.GetConnectionString();
-        if (string.IsNullOrWhiteSpace(connStr))
+        if (!string.IsNullOrWhiteSpace(connStr))
         {
-            var memEvents = InMemoryAppointments.Values
-                .Where(a => a.UserId == userId && !a.IsDeleted && a.StartUtc < to && a.EndUtc > from)
-                .OrderBy(a => a.StartUtc)
-                .Select(MapDto)
-                .ToList();
-            return Ok(memEvents);
-        }
+            try
+            {
+                var dbList = await db.Appointments
+                    .AsNoTracking()
+                    .Where(a => a.UserId == userId
+                             && !a.IsDeleted
+                             && a.StartUtc < to
+                             && a.EndUtc   > from)
+                    .OrderBy(a => a.StartUtc)
+                    .ToListAsync(ct);
 
-        try
-        {
-            var events = await db.Appointments
-                .Where(a => a.UserId == userId
-                         && !a.IsDeleted
-                         && a.StartUtc < to
-                         && a.EndUtc   > from)
-                .OrderBy(a => a.StartUtc)
-                .Select(a => new
+                foreach (var appt in dbList)
                 {
-                    id              = a.Id.ToString(),
-                    title           = a.Title,
-                    start           = DateTime.SpecifyKind(a.StartUtc, DateTimeKind.Utc),
-                    end             = DateTime.SpecifyKind(a.EndUtc,   DateTimeKind.Utc),
-                    backgroundColor = a.Color,
-                    borderColor     = a.Color,
-                    extendedProps   = new
-                    {
-                        description           = a.Description,
-                        reminderMinutesBefore = a.ReminderMinutesBefore,
-                        alertDismissed        = a.AlertDismissed,
-                    }
-                })
-                .ToListAsync(ct);
+                    merged[appt.Id] = appt;
+                    InMemoryAppointments[appt.Id] = appt;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Database query for appointments failed; using file/memory cache.");
+            }
+        }
 
-            return Ok(events);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Database query for appointments failed; falling back to in-memory store.");
-            var fallbackEvents = InMemoryAppointments.Values
-                .Where(a => a.UserId == userId && !a.IsDeleted && a.StartUtc < to && a.EndUtc > from)
-                .OrderBy(a => a.StartUtc)
-                .Select(MapDto)
-                .ToList();
-            return Ok(fallbackEvents);
-        }
+        var result = merged.Values
+            .OrderBy(a => a.StartUtc)
+            .Select(MapDto)
+            .ToList();
+
+        return Ok(result);
     }
 
     // ── Create ────────────────────────────────────────────────────────────
@@ -222,6 +350,7 @@ ON CONFLICT (""UserId"") DO UPDATE
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] AppointmentRequest body, CancellationToken ct = default)
     {
+        EnsureStorageLoaded();
         var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
@@ -247,57 +376,54 @@ ON CONFLICT (""UserId"") DO UPDATE
             UpdatedAt             = DateTime.UtcNow,
         };
 
+        // Always save to in-memory store and persist to file
+        InMemoryAppointments[entity.Id] = entity;
+        PersistStorageToFile();
+
         var connStr = db.Database.GetConnectionString();
-        if (string.IsNullOrWhiteSpace(connStr))
+        if (!string.IsNullOrWhiteSpace(connStr))
         {
-            InMemoryAppointments[entity.Id] = entity;
-            logger.LogInformation("Appointment {Id} created in memory for user {UserId}", entity.Id, userId);
-            return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
-        }
-
-        try
-        {
-            db.Appointments.Add(entity);
-            await db.SaveChangesAsync(ct);
-            logger.LogInformation("Appointment {Id} created in DB by user {UserId}", entity.Id, userId);
-            return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "EF save failed for appointment {Id}; attempting direct SQL fallback.", entity.Id);
-            try { db.Entry(entity).State = EntityState.Detached; } catch { }
-
             try
             {
-                await using var conn = new NpgsqlConnection(connStr);
-                await conn.OpenAsync(ct);
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandText = @"
+                db.Appointments.Add(entity);
+                await db.SaveChangesAsync(ct);
+                logger.LogInformation("Appointment {Id} created in DB for user {UserId}", entity.Id, userId);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "EF save failed for appointment {Id}; attempting direct SQL fallback.", entity.Id);
+                try { db.Entry(entity).State = EntityState.Detached; } catch { }
+
+                try
+                {
+                    await using var conn = new NpgsqlConnection(connStr);
+                    await conn.OpenAsync(ct);
+                    await using var cmd = conn.CreateCommand();
+                    cmd.CommandText = @"
 INSERT INTO app_data.""Appointments"" (""Id"", ""UserId"", ""Title"", ""Description"", ""StartUtc"", ""EndUtc"", ""ReminderMinutesBefore"", ""AlertDismissed"", ""Color"", ""CreatedAt"", ""UpdatedAt"", ""IsDeleted"")
 VALUES (@id, @uid, @title, @desc, @start, @end, @reminder, @alert, @color, @created, @updated, FALSE)
 ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt"" = NOW();";
-                cmd.Parameters.AddWithValue("id", entity.Id);
-                cmd.Parameters.AddWithValue("uid", entity.UserId);
-                cmd.Parameters.AddWithValue("title", entity.Title);
-                cmd.Parameters.Add(new NpgsqlParameter("desc", NpgsqlDbType.Text) { Value = (object?)entity.Description ?? DBNull.Value });
-                cmd.Parameters.Add(new NpgsqlParameter("start", NpgsqlDbType.TimestampTz) { Value = entity.StartUtc });
-                cmd.Parameters.Add(new NpgsqlParameter("end", NpgsqlDbType.TimestampTz) { Value = entity.EndUtc });
-                cmd.Parameters.AddWithValue("reminder", entity.ReminderMinutesBefore);
-                cmd.Parameters.AddWithValue("alert", entity.AlertDismissed);
-                cmd.Parameters.AddWithValue("color", entity.Color);
-                cmd.Parameters.Add(new NpgsqlParameter("created", NpgsqlDbType.TimestampTz) { Value = entity.CreatedAt });
-                cmd.Parameters.Add(new NpgsqlParameter("updated", NpgsqlDbType.TimestampTz) { Value = entity.UpdatedAt });
-                await cmd.ExecuteNonQueryAsync(ct);
-
-                return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
-            }
-            catch (Exception sqlEx)
-            {
-                logger.LogWarning(sqlEx, "Direct SQL fallback insert also failed for appointment {Id}; saving in memory.", entity.Id);
-                InMemoryAppointments[entity.Id] = entity;
-                return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
+                    cmd.Parameters.AddWithValue("id", entity.Id);
+                    cmd.Parameters.AddWithValue("uid", entity.UserId);
+                    cmd.Parameters.AddWithValue("title", entity.Title);
+                    cmd.Parameters.Add(new NpgsqlParameter("desc", NpgsqlDbType.Text) { Value = (object?)entity.Description ?? DBNull.Value });
+                    cmd.Parameters.Add(new NpgsqlParameter("start", NpgsqlDbType.TimestampTz) { Value = entity.StartUtc });
+                    cmd.Parameters.Add(new NpgsqlParameter("end", NpgsqlDbType.TimestampTz) { Value = entity.EndUtc });
+                    cmd.Parameters.AddWithValue("reminder", entity.ReminderMinutesBefore);
+                    cmd.Parameters.AddWithValue("alert", entity.AlertDismissed);
+                    cmd.Parameters.AddWithValue("color", entity.Color);
+                    cmd.Parameters.Add(new NpgsqlParameter("created", NpgsqlDbType.TimestampTz) { Value = entity.CreatedAt });
+                    cmd.Parameters.Add(new NpgsqlParameter("updated", NpgsqlDbType.TimestampTz) { Value = entity.UpdatedAt });
+                    await cmd.ExecuteNonQueryAsync(ct);
+                }
+                catch (Exception sqlEx)
+                {
+                    logger.LogWarning(sqlEx, "Direct SQL fallback insert also failed; retained in file-backed storage.");
+                }
             }
         }
+
+        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, MapDto(entity));
     }
 
     // ── Get single (used by CreatedAtAction) ──────────────────────────────
@@ -305,33 +431,33 @@ ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt""
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct = default)
     {
+        EnsureStorageLoaded();
         var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
+        if (InMemoryAppointments.TryGetValue(id, out var mem) && mem.UserId == userId && !mem.IsDeleted)
+        {
+            return Ok(MapDto(mem));
+        }
+
         var connStr = db.Database.GetConnectionString();
-        if (string.IsNullOrWhiteSpace(connStr))
+        if (!string.IsNullOrWhiteSpace(connStr))
         {
-            if (InMemoryAppointments.TryGetValue(id, out var mem) && mem.UserId == userId && !mem.IsDeleted)
+            try
             {
-                return Ok(MapDto(mem));
+                var entity = await db.Appointments
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
+                if (entity is not null)
+                {
+                    InMemoryAppointments[entity.Id] = entity;
+                    return Ok(MapDto(entity));
+                }
             }
-            return NotFound();
-        }
-
-        try
-        {
-            var entity = await db.Appointments.FirstOrDefaultAsync(
-                a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
-            if (entity is not null) return Ok(MapDto(entity));
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to query appointment {Id} from DB", id);
-        }
-
-        if (InMemoryAppointments.TryGetValue(id, out var fallback) && fallback.UserId == userId && !fallback.IsDeleted)
-        {
-            return Ok(MapDto(fallback));
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to query appointment {Id} from DB", id);
+            }
         }
 
         return NotFound();
@@ -342,47 +468,50 @@ ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt""
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] AppointmentRequest body, CancellationToken ct = default)
     {
+        EnsureStorageLoaded();
         var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
         if (InMemoryAppointments.TryGetValue(id, out var mem) && mem.UserId == userId && !mem.IsDeleted)
         {
-            mem.Title = body.Title.Trim();
-            mem.Description = body.Description?.Trim();
-            mem.StartUtc = ToUtcDt(body.StartUtc);
-            mem.EndUtc = ToUtcDt(body.EndUtc);
+            mem.Title                 = body.Title.Trim();
+            mem.Description           = body.Description?.Trim();
+            mem.StartUtc              = ToUtcDt(body.StartUtc);
+            mem.EndUtc                = ToUtcDt(body.EndUtc);
             mem.ReminderMinutesBefore = body.ReminderMinutesBefore;
-            mem.Color = string.IsNullOrWhiteSpace(body.Color) ? mem.Color : body.Color;
-            mem.UpdatedAt = DateTime.UtcNow;
+            mem.Color                 = string.IsNullOrWhiteSpace(body.Color) ? mem.Color : body.Color;
+            mem.UpdatedAt             = DateTime.UtcNow;
             if (mem.StartUtc > DateTime.UtcNow) mem.AlertDismissed = false;
+            PersistStorageToFile();
         }
 
         var connStr = db.Database.GetConnectionString();
-        if (string.IsNullOrWhiteSpace(connStr)) return NoContent();
-
-        try
+        if (!string.IsNullOrWhiteSpace(connStr))
         {
-            var entity = await db.Appointments.FirstOrDefaultAsync(
-                a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
-            if (entity is not null)
+            try
             {
-                entity.Title                 = body.Title.Trim();
-                entity.Description           = body.Description?.Trim();
-                entity.StartUtc              = ToUtcDt(body.StartUtc);
-                entity.EndUtc                = ToUtcDt(body.EndUtc);
-                entity.ReminderMinutesBefore = body.ReminderMinutesBefore;
-                entity.Color                 = string.IsNullOrWhiteSpace(body.Color) ? entity.Color : body.Color;
-                entity.UpdatedAt             = DateTime.UtcNow;
+                var entity = await db.Appointments.FirstOrDefaultAsync(
+                    a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
+                if (entity is not null)
+                {
+                    entity.Title                 = body.Title.Trim();
+                    entity.Description           = body.Description?.Trim();
+                    entity.StartUtc              = ToUtcDt(body.StartUtc);
+                    entity.EndUtc                = ToUtcDt(body.EndUtc);
+                    entity.ReminderMinutesBefore = body.ReminderMinutesBefore;
+                    entity.Color                 = string.IsNullOrWhiteSpace(body.Color) ? entity.Color : body.Color;
+                    entity.UpdatedAt             = DateTime.UtcNow;
 
-                if (entity.StartUtc > DateTime.UtcNow)
-                    entity.AlertDismissed = false;
+                    if (entity.StartUtc > DateTime.UtcNow)
+                        entity.AlertDismissed = false;
 
-                await db.SaveChangesAsync(ct);
+                    await db.SaveChangesAsync(ct);
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to update appointment {Id} in DB", id);
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to update appointment {Id} in DB", id);
+            }
         }
 
         return NoContent();
@@ -393,32 +522,35 @@ ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt""
     [HttpPatch("{id:guid}/dismiss-alert")]
     public async Task<IActionResult> DismissAlert(Guid id, CancellationToken ct = default)
     {
+        EnsureStorageLoaded();
         var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
         if (InMemoryAppointments.TryGetValue(id, out var mem) && mem.UserId == userId && !mem.IsDeleted)
         {
             mem.AlertDismissed = true;
-            mem.UpdatedAt = DateTime.UtcNow;
+            mem.UpdatedAt      = DateTime.UtcNow;
+            PersistStorageToFile();
         }
 
         var connStr = db.Database.GetConnectionString();
-        if (string.IsNullOrWhiteSpace(connStr)) return NoContent();
-
-        try
+        if (!string.IsNullOrWhiteSpace(connStr))
         {
-            var entity = await db.Appointments.FirstOrDefaultAsync(
-                a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
-            if (entity is not null)
+            try
             {
-                entity.AlertDismissed = true;
-                entity.UpdatedAt      = DateTime.UtcNow;
-                await db.SaveChangesAsync(ct);
+                var entity = await db.Appointments.FirstOrDefaultAsync(
+                    a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
+                if (entity is not null)
+                {
+                    entity.AlertDismissed = true;
+                    entity.UpdatedAt      = DateTime.UtcNow;
+                    await db.SaveChangesAsync(ct);
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to dismiss alert for appointment {Id} in DB", id);
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to dismiss alert for appointment {Id} in DB", id);
+            }
         }
 
         return NoContent();
@@ -429,6 +561,7 @@ ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt""
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
+        EnsureStorageLoaded();
         var userId = await ResolveUserIdAsync(ct);
         if (userId == Guid.Empty) return Unauthorized();
 
@@ -437,26 +570,28 @@ ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt""
             mem.IsDeleted = true;
             mem.DeletedAt = DateTime.UtcNow;
             mem.UpdatedAt = DateTime.UtcNow;
+            PersistStorageToFile();
         }
 
         var connStr = db.Database.GetConnectionString();
-        if (string.IsNullOrWhiteSpace(connStr)) return NoContent();
-
-        try
+        if (!string.IsNullOrWhiteSpace(connStr))
         {
-            var entity = await db.Appointments.FirstOrDefaultAsync(
-                a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
-            if (entity is not null)
+            try
             {
-                entity.IsDeleted = true;
-                entity.DeletedAt = DateTime.UtcNow;
-                entity.UpdatedAt = DateTime.UtcNow;
-                await db.SaveChangesAsync(ct);
+                var entity = await db.Appointments.FirstOrDefaultAsync(
+                    a => a.Id == id && a.UserId == userId && !a.IsDeleted, ct);
+                if (entity is not null)
+                {
+                    entity.IsDeleted = true;
+                    entity.DeletedAt = DateTime.UtcNow;
+                    entity.UpdatedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync(ct);
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to delete appointment {Id} in DB", id);
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to delete appointment {Id} in DB", id);
+            }
         }
 
         return NoContent();
@@ -483,27 +618,46 @@ ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt""
         }
     };
 
-    private async Task<Guid> ResolveUserIdAsync(CancellationToken ct)
+    private Guid ResolveStableUserId()
     {
         var claimUserId = User.GetUserId();
+        if (claimUserId != Guid.Empty) return claimUserId;
 
-        var email = User.FindFirstValue(ClaimTypes.Email)
+        var rawId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+            ?? User.FindFirstValue("sub")
+            ?? User.FindFirstValue("id")
+            ?? User.FindFirstValue(ClaimTypes.Email)
             ?? User.FindFirstValue(JwtRegisteredClaimNames.Email)
-            ?? User.FindFirstValue("email");
+            ?? User.FindFirstValue("email")
+            ?? User.FindFirstValue(ClaimTypes.Name)
+            ?? User.Identity?.Name;
 
-        var normalizedEmail = !string.IsNullOrWhiteSpace(email) ? email.Trim() : null;
+        if (!string.IsNullOrWhiteSpace(rawId))
+        {
+            if (Guid.TryParse(rawId, out var parsed))
+            {
+                return parsed;
+            }
+
+            using var md5 = MD5.Create();
+            var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(rawId.Trim().ToLowerInvariant()));
+            return new Guid(hash);
+        }
+
+        return Guid.Empty;
+    }
+
+    private async Task<Guid> ResolveUserIdAsync(CancellationToken ct)
+    {
+        EnsureStorageLoaded();
+        var stableId = ResolveStableUserId();
+        if (stableId == Guid.Empty) return Guid.Empty;
+
         var connStr = db.Database.GetConnectionString();
-
         if (string.IsNullOrWhiteSpace(connStr))
         {
-            if (claimUserId != Guid.Empty) return claimUserId;
-            if (!string.IsNullOrWhiteSpace(normalizedEmail))
-            {
-                using var md5 = MD5.Create();
-                var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(normalizedEmail.ToLowerInvariant()));
-                return new Guid(hash);
-            }
-            return Guid.NewGuid();
+            return stableId;
         }
 
         try
@@ -511,41 +665,36 @@ ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt""
             await using var conn = new NpgsqlConnection(connStr);
             await conn.OpenAsync(ct);
 
-            // A. Check if user already exists in app_data.Users by Id
-            if (claimUserId != Guid.Empty)
+            // A. Check if user already exists in app_data.Users by stableId
+            await using var checkIdCmd = conn.CreateCommand();
+            checkIdCmd.CommandText = @"SELECT ""Id"" FROM app_data.""Users"" WHERE ""Id"" = @uid LIMIT 1;";
+            checkIdCmd.Parameters.AddWithValue("uid", stableId);
+            var existingId = await checkIdCmd.ExecuteScalarAsync(ct);
+            if (existingId is Guid gid && gid != Guid.Empty)
             {
-                await using var checkIdCmd = conn.CreateCommand();
-                checkIdCmd.CommandText = @"SELECT ""Id"" FROM app_data.""Users"" WHERE ""Id"" = @uid LIMIT 1;";
-                checkIdCmd.Parameters.AddWithValue("uid", claimUserId);
-                var existingId = await checkIdCmd.ExecuteScalarAsync(ct);
-                if (existingId is Guid gid && gid != Guid.Empty)
-                {
-                    return gid;
-                }
+                return gid;
             }
 
             // B. Check if user already exists by Email
-            if (!string.IsNullOrWhiteSpace(normalizedEmail))
+            var email = User.FindFirstValue(ClaimTypes.Email)
+                ?? User.FindFirstValue(JwtRegisteredClaimNames.Email)
+                ?? User.FindFirstValue("email");
+            var normalizedEmail = !string.IsNullOrWhiteSpace(email) ? email.Trim() : $"{stableId:N}@local.wiseravenshare.internal";
+
+            await using var checkEmailCmd = conn.CreateCommand();
+            checkEmailCmd.CommandText = @"SELECT ""Id"" FROM app_data.""Users"" WHERE LOWER(""Email"") = LOWER(@em) LIMIT 1;";
+            checkEmailCmd.Parameters.AddWithValue("em", normalizedEmail);
+            var existingEmailId = await checkEmailCmd.ExecuteScalarAsync(ct);
+            if (existingEmailId is Guid gidEmail && gidEmail != Guid.Empty)
             {
-                await using var checkEmailCmd = conn.CreateCommand();
-                checkEmailCmd.CommandText = @"SELECT ""Id"" FROM app_data.""Users"" WHERE LOWER(""Email"") = LOWER(@em) LIMIT 1;";
-                checkEmailCmd.Parameters.AddWithValue("em", normalizedEmail);
-                var existingEmailId = await checkEmailCmd.ExecuteScalarAsync(ct);
-                if (existingEmailId is Guid gidEmail && gidEmail != Guid.Empty)
-                {
-                    return gidEmail;
-                }
+                return gidEmail;
             }
 
             // C. Insert minimal domain user row so foreign key FK_Appointments_Users_UserId is satisfied
-            var targetId = claimUserId != Guid.Empty ? claimUserId : Guid.NewGuid();
-            var safeEmail = !string.IsNullOrWhiteSpace(normalizedEmail)
-                ? normalizedEmail
-                : $"{targetId:N}@local.wiseravenshare.internal";
-            var rawUsername = safeEmail.Split('@')[0];
+            var rawUsername = normalizedEmail.Split('@')[0];
             var sanitizedUsername = new string(rawUsername.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(sanitizedUsername)) sanitizedUsername = "user";
-            var finalUsername = $"{sanitizedUsername}_{targetId:N}"[..Math.Min(30, $"{sanitizedUsername}_{targetId:N}".Length)];
+            var finalUsername = $"{sanitizedUsername}_{stableId:N}"[..Math.Min(30, $"{sanitizedUsername}_{stableId:N}".Length)];
             var displayName = rawUsername.Length > 0 ? rawUsername : finalUsername;
 
             await using var insertCmd = conn.CreateCommand();
@@ -553,8 +702,8 @@ ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt""
 INSERT INTO app_data.""Users"" (""Id"", ""Email"", ""Username"", ""DisplayName"", ""PasswordHash"", ""IsActive"", ""TruthScore"", ""CreatedAt"", ""UpdatedAt"", ""IsDeleted"")
 VALUES (@id, @email, @username, @displayName, '', TRUE, 50.00, NOW(), NOW(), FALSE)
 ON CONFLICT (""Id"") DO NOTHING;";
-            insertCmd.Parameters.AddWithValue("id", targetId);
-            insertCmd.Parameters.AddWithValue("email", safeEmail);
+            insertCmd.Parameters.AddWithValue("id", stableId);
+            insertCmd.Parameters.AddWithValue("email", normalizedEmail);
             insertCmd.Parameters.AddWithValue("username", finalUsername);
             insertCmd.Parameters.AddWithValue("displayName", displayName);
             await insertCmd.ExecuteNonQueryAsync(ct);
@@ -562,21 +711,37 @@ ON CONFLICT (""Id"") DO NOTHING;";
             // Re-fetch in case ON CONFLICT triggered or user was concurrently inserted
             await using var verifyCmd = conn.CreateCommand();
             verifyCmd.CommandText = @"SELECT ""Id"" FROM app_data.""Users"" WHERE ""Id"" = @id OR LOWER(""Email"") = LOWER(@email) LIMIT 1;";
-            verifyCmd.Parameters.AddWithValue("id", targetId);
-            verifyCmd.Parameters.AddWithValue("email", safeEmail);
+            verifyCmd.Parameters.AddWithValue("id", stableId);
+            verifyCmd.Parameters.AddWithValue("email", normalizedEmail);
             var verifiedId = await verifyCmd.ExecuteScalarAsync(ct);
             if (verifiedId is Guid vGid && vGid != Guid.Empty)
             {
                 return vGid;
             }
 
-            return targetId;
+            return stableId;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to resolve or provision user in PostgreSQL; falling back to target ID {ClaimUserId}", claimUserId);
-            return claimUserId != Guid.Empty ? claimUserId : Guid.NewGuid();
+            logger.LogWarning(ex, "Failed to resolve or provision user in PostgreSQL; using stable ID {StableId}", stableId);
+            return stableId;
         }
+    }
+
+    private sealed class AppointmentPersistDto
+    {
+        public Guid Id { get; set; }
+        public Guid UserId { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public DateTime StartUtc { get; set; }
+        public DateTime EndUtc { get; set; }
+        public int ReminderMinutesBefore { get; set; } = 15;
+        public bool AlertDismissed { get; set; }
+        public string Color { get; set; } = "#3788d8";
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+        public bool IsDeleted { get; set; }
     }
 }
 
