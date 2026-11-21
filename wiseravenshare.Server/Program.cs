@@ -2233,7 +2233,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>
                                Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto |
                                Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost;
     // Clearing networks automatically trusts the nearest proxy (e.g. docker network or cloud provider proxy)
-    options.KnownNetworks.Clear();
+    options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
 });
 
@@ -2404,7 +2404,7 @@ builder.Services.AddHttpClient<Wiseravenshare.Server.Services.LyricScoringClient
     client.BaseAddress = new Uri(builder.Configuration["LyricScorer:BaseUrl"] ?? "http://127.0.0.1:8100/");
     client.Timeout = TimeSpan.FromSeconds(15);
 });
-builder.Services.AddSingleton<Azure.Storage.Blobs.BlobServiceClient?>(sp =>
+builder.Services.AddSingleton<Azure.Storage.Blobs.BlobServiceClient>(sp =>
 {
     var blobConnectionString =
         builder.Configuration["ConnectionStrings:BlobStorage"] ??
@@ -2413,7 +2413,7 @@ builder.Services.AddSingleton<Azure.Storage.Blobs.BlobServiceClient?>(sp =>
     {
         sp.GetRequiredService<ILogger<Program>>()
             .LogWarning("ConnectionStrings:BlobStorage is not configured. Karaoke recording upload and blob features will be unavailable.");
-        return null;
+        return null!;
     }
     return new Azure.Storage.Blobs.BlobServiceClient(blobConnectionString);
 });

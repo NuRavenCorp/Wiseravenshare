@@ -151,11 +151,7 @@ ON CONFLICT (setting_key) DO NOTHING;
             builder.Pooling = parsedPooling;
         }
 
-        if (!string.IsNullOrWhiteSpace(trustServerCertificate)
-            && bool.TryParse(trustServerCertificate, out var parsedTrust))
-        {
-            builder.TrustServerCertificate = parsedTrust;
-        }
+
 
         return builder.ConnectionString;
     }

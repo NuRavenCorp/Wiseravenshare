@@ -25,17 +25,16 @@ export default function GoogleTrafficWidget() {
     setError(null);
     try {
       const res = await apiClient.functions.invoke("GetAnalyticsData", { mode: "listProperties" });
-      const props = res.data.properties || [];
+      const props = res.data?.properties || [];
       setProperties(props);
-      if (props.length === 1) {
-        setSelected(props[0].id);
-      } else if (props.length > 1) {
+      if (props.length > 0) {
         const wrs = props.find((p) => p.displayName?.toLowerCase().includes("wiseraven"));
-        if (wrs) setSelected(wrs.id);
+        setSelected(wrs ? wrs.id : props[0].id);
       }
     } catch (e) {
-      const msg = e?.response?.data?.error || e?.message || "";
-      if (e?.response?.status === 403 || msg.includes("Forbidden")) {
+      const status = e?.status || e?.response?.status;
+      const msg = e?.data?.error || e?.response?.data?.error || e?.message || "";
+      if (status === 403 || msg.includes("Forbidden") || msg.includes("403")) {
         setForbidden(true);
       } else {
         setError(msg || "Failed to load properties");
@@ -57,7 +56,13 @@ export default function GoogleTrafficWidget() {
       });
       setReport(res.data);
     } catch (e) {
-      setError(e?.response?.data?.error || e?.message || "Failed to load report");
+      const status = e?.status || e?.response?.status;
+      const msg = e?.data?.error || e?.response?.data?.error || e?.message || "Failed to load report";
+      if (status === 403 || msg.includes("Forbidden") || msg.includes("403")) {
+        setForbidden(true);
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoadingReport(false);
     }

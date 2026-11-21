@@ -213,12 +213,6 @@ public class CopyrightFilingController : ControllerBase
 
     /// <summary>
     /// GET /api/copyright-filing/user/filings
-    /// Lists all filings for the authenticated user
-    /// </summary>
-    [HttpGet("user/filings")]
-    [ProducesResponseType(200)]
-    /// <summary>
-    /// GET /api/copyright-filing/user/filings
     /// Lists all filings for the authenticated user. Not yet implemented.
     /// </summary>
     [HttpGet("user/filings")]

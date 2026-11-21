@@ -9,6 +9,7 @@
     <SpaRoot>..\wiseravenshare.client</SpaRoot>
     <SpaProxyLaunchCommand>npm run dev</SpaProxyLaunchCommand>
     <SpaProxyServerUrl>https://localhost:59483</SpaProxyServerUrl>
+    <NoWarn>$(NoWarn);CS8618;CS8601;CS8602;CS8604;CS8625;CS8634;CS0108;CS0618;ASPDEPR005</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

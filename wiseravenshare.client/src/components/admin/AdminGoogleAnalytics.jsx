@@ -26,10 +26,14 @@ export default function AdminGoogleAnalytics() {
     setError(null);
     try {
       const res = await apiClient.functions.invoke("GetAnalyticsData", { mode: "listProperties" });
-      setProperties(res.data.properties || []);
-      if ((res.data.properties || []).length === 1) setSelected(res.data.properties[0].id);
+      const props = res.data?.properties || [];
+      setProperties(props);
+      if (props.length > 0) {
+        const wrs = props.find((p) => p.displayName?.toLowerCase().includes("wiseraven"));
+        setSelected(wrs ? wrs.id : props[0].id);
+      }
     } catch (e) {
-      setError(e.response?.data?.error || e.message || "Failed to load properties");
+      setError(e?.data?.error || e?.response?.data?.error || e?.message || "Failed to load properties");
     } finally {
       setLoadingProps(false);
     }
@@ -47,7 +51,7 @@ export default function AdminGoogleAnalytics() {
       });
       setReport(res.data);
     } catch (e) {
-      setError(e.response?.data?.error || e.message || "Failed to load report");
+      setError(e?.data?.error || e?.response?.data?.error || e?.message || "Failed to load report");
     } finally {
       setLoadingReport(false);
     }

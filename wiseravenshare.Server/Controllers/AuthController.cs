@@ -2001,8 +2001,9 @@ public class AuthController : ControllerBase
             new("access_scope", accessScope)
         };
 
-        if (string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(accessScope, "admin", StringComparison.OrdinalIgnoreCase) || IsConfiguredAdminUser(email))
         {
+            claims.Add(new Claim(ClaimTypes.Role, "Admin"));
             claims.Add(new Claim("admin_pass", "all-access"));
         }
 

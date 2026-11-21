@@ -12,7 +12,6 @@ namespace Wiseravenshare.Server.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/python-matrix")]
-[AllowAnonymous]
 public sealed class PythonMatrixController : ControllerBase
 {
     private readonly IHttpClientFactory _httpClientFactory;
