@@ -1385,8 +1385,9 @@ export const apiClient = {
     },
   },
   notifications: {
-    list(page = 1, pageSize = 20) {
-      return requestJson(`/api/notifications?page=${page}&pageSize=${pageSize}`, { method: "GET" });
+    list(page = 1, pageSize = 20, type = "") {
+      const q = type ? `&type=${encodeURIComponent(type)}` : "";
+      return requestJson(`/api/notifications?page=${page}&pageSize=${pageSize}${q}`, { method: "GET" });
     },
     unreadCount() {
       return requestJson("/api/notifications/count", { method: "GET" });
@@ -1402,6 +1403,14 @@ export const apiClient = {
         method: "POST",
         body: JSON.stringify({ all: true }),
       });
+    },
+  },
+  engagementBots: {
+    status() {
+      return requestJson("/api/engagement-bots/status", { method: "GET" });
+    },
+    trigger() {
+      return requestJson("/api/engagement-bots/trigger", { method: "POST" });
     },
   },
   functions: {

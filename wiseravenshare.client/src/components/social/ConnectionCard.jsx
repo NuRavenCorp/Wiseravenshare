@@ -28,6 +28,9 @@ import {
   Globe,
   ChevronDown,
   ChevronUp,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 const PLATFORM_META = {
@@ -175,6 +178,8 @@ export default function ConnectionCard({ platform, onStatusChange }) {
 
   // Editable fields
   const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [profileUrl, setProfileUrl] = useState("");
   const [feedUrl, setFeedUrl] = useState("");
   const [designation, setDesignation] = useState("");
@@ -364,6 +369,14 @@ export default function ConnectionCard({ platform, onStatusChange }) {
       return;
     }
 
+    const cleanUsername = (platform === "bluesky" ? bskyHandle : (username || youtubeUserId)).trim();
+    const cleanPassword = (platform === "bluesky" ? bskyAppPassword : password).trim();
+
+    if (!isConnected && (!cleanUsername || !cleanPassword)) {
+      setError(`Username/handle and password are required to sign in and connect your ${label} account.`);
+      return;
+    }
+
     setSaving(true);
     setSaved(false);
     setError("");
@@ -372,35 +385,37 @@ export default function ConnectionCard({ platform, onStatusChange }) {
       const sharingData = buildSharingPayload();
       const payload = {
         ...sharingData,
-        username: username.trim(),
+        username: cleanUsername,
+        password: cleanPassword,
         profile_url: profileUrl.trim(),
         feed_url: feedUrl.trim(),
         designation: designation.trim(),
       };
 
       if (platform === "youtube") {
-        const normalizedHandle = youtubeUserId.trim().replace(/^@/, "");
-        payload.username = normalizedHandle || payload.username;
+        const normalizedHandle = (youtubeUserId || username).trim().replace(/^@/, "");
+        payload.username = normalizedHandle || cleanUsername;
         payload.channel_handle = normalizedHandle;
         payload.channel_id = youtubeChannelId.trim();
         payload.youtube_user_id = normalizedHandle;
         payload.youtube_channel_id = youtubeChannelId.trim();
       }
 
-      if (platform === "bluesky" && bskyHandle) {
-        payload.username = bskyHandle.replace(/^@/, "").trim();
+      if (platform === "bluesky") {
+        payload.username = cleanUsername.replace(/^@/, "");
         payload.profile_url = `https://bsky.app/profile/${payload.username}`;
-        if (bskyAppPassword) payload.app_password = bskyAppPassword;
+        if (cleanPassword) payload.app_password = cleanPassword;
       }
 
       await apiClient.social.saveDetails(platform, userId, payload);
       setSaved(true);
+      setPassword("");
       setBskyAppPassword("");
       setTimeout(() => setSaved(false), 2500);
       await fetchStatus();
       onStatusChange?.();
     } catch (e) {
-      setError(e?.message || "Save failed.");
+      setError(e?.message || "Sign in failed. Please verify credentials.");
     } finally {
       setSaving(false);
     }
@@ -414,6 +429,7 @@ export default function ConnectionCard({ platform, onStatusChange }) {
       await apiClient.social.disconnect(platform, userId);
       setStatus({ connected: false, details: {} });
       setUsername("");
+      setPassword("");
       setProfileUrl("");
       setFeedUrl("");
       setDesignation("");
@@ -517,6 +533,9 @@ export default function ConnectionCard({ platform, onStatusChange }) {
                 <p className="text-[11px] text-muted-foreground leading-snug">
                   Check whichever boxes are necessary for sharing information and content with your {label} account:
                 </p>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Authentication is completed on {label}'s official login page using your username and password, then you approve the requested permissions.
+                </p>
 
                 <div className="space-y-2 pt-1">
                   {SHARING_SCOPES.map((opt) => {
@@ -572,94 +591,156 @@ export default function ConnectionCard({ platform, onStatusChange }) {
               </div>
 
               {/* ── Section: Sign In Actions ── */}
-              {platform === "bluesky" ? (
-                /* Bluesky: live AT Protocol cryptographic handshake */
-                <div className="space-y-3 rounded-lg border border-border p-3.5 bg-secondary/10">
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <Cloud className="w-4 h-4 text-blue-400" /> AT Protocol Handshake Authentication
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      WiseRavenShare will perform a direct cryptographic session handshake with <strong>bsky.social</strong> to verify your account and obtain a verified AT Protocol access JWT.
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Bluesky Handle</Label>
-                    <Input
-                      value={bskyHandle}
-                      onChange={(e) => setBskyHandle(e.target.value)}
-                      placeholder="yourname.bsky.social"
-                      className="h-9 text-sm"
-                    />
-                    <Label className="text-xs text-muted-foreground">App Password</Label>
-                    <Input
-                      type="password"
-                      value={bskyAppPassword}
-                      onChange={(e) => setBskyAppPassword(e.target.value)}
-                      placeholder="xxxx-xxxx-xxxx-xxxx"
-                      className="h-9 text-sm font-mono"
-                    />
-                    <p className="text-[10px] text-muted-foreground">
-                      Generate an App Password from your Bluesky app: <em>Settings → Privacy &amp; Security → App Passwords</em>.
-                    </p>
-                  </div>
-                  <Button
-                    onClick={handleSave}
-                    disabled={saving || !bskyHandle.trim() || !bskyAppPassword.trim() || !consentChecked}
-                    className="w-full font-medium"
-                  >
-                    {saving ? (
-                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    ) : (
-                      <Icon className={`w-4 h-4 mr-2 ${color}`} />
-                    )}
-                    {saving ? "Performing Handshake with bsky.social…" : "Sign In & Authenticate with Bluesky"}
-                  </Button>
-                  {!consentChecked && (
-                    <p className="text-[11px] text-amber-400 text-center">
-                      * Check the authorization box above to enable authentication.
-                    </p>
-                  )}
+              <div className="space-y-3 rounded-lg border border-border p-3.5 bg-secondary/10">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <KeyRound className="w-4 h-4 text-primary" /> Sign In &amp; Connect with {label}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {platform === "bluesky"
+                      ? "WiseRavenShare will perform an AT Protocol session handshake with bsky.social using your handle and App Password."
+                      : `Enter your ${label} username and password/credential to authenticate and connect your account.`}
+                  </p>
                 </div>
-              ) : (
-                /* Standard OAuth 2.0 Web Authentication Flow */
-                <div className="space-y-3">
-                  {!oauthUnavailable ? (
-                    <div className="space-y-2">
-                      <Button
-                        onClick={handleConnect}
-                        disabled={connecting || !userId || !consentChecked}
-                        className="w-full font-medium text-sm h-10 shadow-sm"
-                      >
-                        {connecting ? (
-                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                        ) : (
-                          <Icon className={`w-4 h-4 mr-2 ${color}`} />
-                        )}
-                        {connecting ? `Connecting to ${label}…` : `Sign in with ${label}`}
-                      </Button>
-                      <p className="text-[11px] text-muted-foreground text-center">
-                        Redirects directly to {label} for secure login and OAuth 2.0 handshake verification.
-                      </p>
-                      {!consentChecked && (
-                        <p className="text-[11px] text-amber-400 text-center">
-                          * Check the authorization box above to enable {label} sign-in.
-                        </p>
-                      )}
+
+                <div className="space-y-2.5">
+                  {platform === "youtube" ? (
+                    <>
+                      <div>
+                        <Label className="text-xs text-muted-foreground block mb-1">YouTube Channel ID or Handle</Label>
+                        <Input
+                          value={username || youtubeUserId}
+                          onChange={(e) => {
+                            setUsername(e.target.value);
+                            setYoutubeUserId(e.target.value);
+                          }}
+                          placeholder="@channel_handle or UCxxxxxx"
+                          className="h-9 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground block mb-1">
+                          Channel ID <span className="opacity-60">(optional if handle provided)</span>
+                        </Label>
+                        <Input
+                          value={youtubeChannelId}
+                          onChange={(e) => setYoutubeChannelId(e.target.value)}
+                          placeholder="UCxxxxxxxxxxxxxxxxxxxxxx"
+                          className="h-9 text-sm"
+                        />
+                      </div>
+                    </>
+                  ) : platform === "bluesky" ? (
+                    <div>
+                      <Label className="text-xs text-muted-foreground block mb-1">Bluesky Handle</Label>
+                      <Input
+                        value={bskyHandle || username}
+                        onChange={(e) => {
+                          setBskyHandle(e.target.value);
+                          setUsername(e.target.value);
+                        }}
+                        placeholder="yourname.bsky.social"
+                        className="h-9 text-sm"
+                      />
                     </div>
                   ) : (
-                    <div className="flex items-start gap-2.5 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200">
-                      <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
-                      <div className="space-y-1">
-                        <p className="font-semibold text-amber-300">OAuth Handshake Setup Required</p>
-                        <p className="text-muted-foreground leading-snug">
-                          Authentic connection requires logging in directly at {label}'s official site. Configure {label} OAuth credentials (Client ID &amp; Client Secret) in your server settings to complete the handshake.
-                        </p>
-                      </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground block mb-1">Username / Handle / Email</Label>
+                      <Input
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder={
+                          platform === "twitter"
+                            ? "@your_x_handle"
+                            : platform === "instagram"
+                            ? "@your_instagram"
+                            : platform === "tiktok"
+                            ? "@your_tiktok"
+                            : platform === "facebook"
+                            ? "your_facebook_username_or_email"
+                            : platform === "linkedin"
+                            ? "your_linkedin_email_or_profile"
+                            : `@your_${platform}_account`
+                        }
+                        className="h-9 text-sm"
+                      />
                     </div>
                   )}
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <Label className="text-xs text-muted-foreground">
+                        {platform === "bluesky" ? "App Password" : "Password / App Credential"}
+                      </Label>
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="text-[11px] text-primary hover:underline flex items-center gap-1"
+                      >
+                        {showPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        {showPassword ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                    <Input
+                      type={showPassword ? "text" : "password"}
+                      value={password || (platform === "bluesky" ? bskyAppPassword : "")}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        if (platform === "bluesky") setBskyAppPassword(e.target.value);
+                      }}
+                      placeholder={platform === "bluesky" ? "xxxx-xxxx-xxxx-xxxx" : "Enter your account password"}
+                      className="h-9 text-sm font-mono"
+                    />
+                    {platform === "bluesky" && (
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Generate an App Password from: <em>Settings → Privacy &amp; Security → App Passwords</em>.
+                      </p>
+                    )}
+                  </div>
                 </div>
-              )}
+
+                <Button
+                  onClick={handleSave}
+                  disabled={
+                    saving ||
+                    !(username || bskyHandle || youtubeUserId).trim() ||
+                    !(password || bskyAppPassword).trim() ||
+                    !consentChecked
+                  }
+                  className="w-full font-medium text-sm h-10 shadow-sm mt-1"
+                >
+                  {saving ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <Icon className={`w-4 h-4 mr-2 ${color}`} />
+                  )}
+                  {saving ? `Authenticating with ${label}…` : `Sign in & Connect ${label}`}
+                </Button>
+
+                {!consentChecked && (
+                  <p className="text-[11px] text-amber-400 text-center">
+                    * Check the authorization box above to enable {label} sign-in.
+                  </p>
+                )}
+
+                {/* Alternative: OAuth 2.0 redirect button */}
+                <div className="pt-2 border-t border-border/50 text-center">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleConnect}
+                    disabled={connecting || !userId || !consentChecked}
+                    className="text-xs text-muted-foreground hover:text-foreground h-8"
+                  >
+                    {connecting ? (
+                      <Loader2 className="w-3 h-3 animate-spin mr-1.5" />
+                    ) : (
+                      <ExternalLink className="w-3 h-3 mr-1.5" />
+                    )}
+                    Or sign in via {label} website (OAuth redirect)
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 

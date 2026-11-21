@@ -6,10 +6,10 @@ import { X, Info, Facebook, Instagram, Linkedin, Music2 } from "lucide-react";
 const STORAGE_KEY = "wrs_social_limitations_acknowledged_v1";
 
 const LIMITATIONS = [
-  { platform: "Facebook", icon: Facebook, limitation: "Sign in with your own Facebook account. Grant the permissions Facebook requests so we can post on your behalf." },
-  { platform: "Instagram", icon: Instagram, limitation: "Sign in with your Instagram account. We need media permissions — just check the boxes Instagram shows you." },
-  { platform: "TikTok", icon: Music2, limitation: "Sign in with your TikTok account and approve the sharing permissions. Read-only sync is available even without upload access." },
-  { platform: "LinkedIn", icon: Linkedin, limitation: "Sign in with your LinkedIn account. Grant the permissions shown to allow posting to your profile." },
+  { platform: "Facebook", icon: Facebook, limitation: "Log in at Facebook with your username/password, then grant the permissions Facebook requests so we can post on your behalf." },
+  { platform: "Instagram", icon: Instagram, limitation: "Log in at Instagram with your username/password. We need media permissions — just check the boxes Instagram shows you." },
+  { platform: "TikTok", icon: Music2, limitation: "Log in at TikTok with your username/password and approve sharing permissions. Read-only sync is available even without upload access." },
+  { platform: "LinkedIn", icon: Linkedin, limitation: "Log in at LinkedIn with your username/password, then grant the permissions shown to allow posting to your profile." },
 ];
 
 export default function LimitationsNotice() {
@@ -41,7 +41,7 @@ export default function LimitationsNotice() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Connect <strong>your personal accounts</strong> so WiseRavenShare can post to them on your behalf. Each platform will ask you to sign in and check permission boxes — just approve what it asks.
+            Connect <strong>your personal accounts</strong> so WiseRavenShare can post to them on your behalf. Each platform handles sign-in on its own secure page with your username/password and asks for your consent checkboxes there.
           </p>
           <div className="space-y-3">
             {LIMITATIONS.map((l) => {

@@ -72,7 +72,7 @@ export default function SocialHub() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="feed">
+          <TabsContent value="feed" className="space-y-8">
             <PostsFeed />
             <SystemFeedSection />
           </TabsContent>

@@ -126,6 +126,18 @@ public sealed class AppointmentsController(
                             {
                                 foreach (var item in list)
                                 {
+                                    if (string.IsNullOrWhiteSpace(item.UserEmail) && item.UserId != Guid.Empty)
+                                    {
+                                        if (userStore.TryGetById(item.UserId.ToString("N"), out var uBack) && !string.IsNullOrWhiteSpace(uBack?.Email))
+                                        {
+                                            item.UserEmail = uBack.Email;
+                                        }
+                                        else if (userStore.TryGetById(item.UserId.ToString(), out uBack) && !string.IsNullOrWhiteSpace(uBack?.Email))
+                                        {
+                                            item.UserEmail = uBack.Email;
+                                        }
+                                    }
+
                                     if (InMemoryAppointments.TryGetValue(item.Id, out var existing))
                                     {
                                         if (item.UpdatedAt >= existing.UpdatedAt)
@@ -828,6 +840,44 @@ ON CONFLICT (""Id"") DO UPDATE SET ""Title"" = EXCLUDED.""Title"", ""UpdatedAt""
             var emailHash = new Guid(md5.ComputeHash(Encoding.UTF8.GetBytes(email.Trim().ToLowerInvariant())));
             ids.Add(emailHash);
             if (primaryUserId == Guid.Empty) primaryUserId = emailHash;
+
+            // Also include any UserId from past appointments that had this user's email
+            foreach (var pastAppt in InMemoryAppointments.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(pastAppt.UserEmail) &&
+                    string.Equals(pastAppt.UserEmail.Trim(), email, StringComparison.OrdinalIgnoreCase))
+                {
+                    ids.Add(pastAppt.UserId);
+                }
+            }
+
+            // Include any domain-user IDs that share this email so appointments remain visible
+            // even when auth providers issue different subject IDs across logins.
+            try
+            {
+                var normalizedEmail = email.Trim().ToLowerInvariant();
+                var dbUserIds = await db.Users
+                    .AsNoTracking()
+                    .Where(u => !u.IsDeleted && u.Email != null && u.Email.ToLower() == normalizedEmail)
+                    .Select(u => u.Id)
+                    .Distinct()
+                    .ToListAsync(ct);
+
+                foreach (var dbUserId in dbUserIds)
+                {
+                    ids.Add(dbUserId);
+                }
+
+                if (dbUserIds.Count > 0)
+                {
+                    // Prefer the first persisted DB user for stable FK ownership.
+                    primaryUserId = dbUserIds[0];
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to expand appointment user aliases by email {Email}", email);
+            }
         }
 
         return (ids, email, primaryUserId);

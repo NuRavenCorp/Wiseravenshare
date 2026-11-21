@@ -382,7 +382,24 @@ public sealed class UserStore
 
     public bool TryGetById(string id, out UserRecord? user)
     {
-        user = _usersByEmail.Values.FirstOrDefault(u => string.Equals(u.Id, id, StringComparison.Ordinal));
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            user = null;
+            return false;
+        }
+
+        var clean = id.Trim();
+        var cleanNoHyphens = clean.Replace("-", "");
+
+        user = _usersByEmail.Values.FirstOrDefault(u =>
+            string.Equals(u.Id, clean, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(u.Id.Replace("-", ""), cleanNoHyphens, StringComparison.OrdinalIgnoreCase));
+
+        if (user is null && clean.Contains('@'))
+        {
+            TryGetByEmail(clean, out user);
+        }
+
         return user is not null;
     }
 
@@ -400,7 +417,8 @@ public sealed class UserStore
             return false;
         }
 
-        if (string.Equals(user.Id, normalizedUserId, StringComparison.Ordinal))
+        if (string.Equals(user.Id, normalizedUserId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(user.Id.Replace("-", ""), normalizedUserId.Replace("-", ""), StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

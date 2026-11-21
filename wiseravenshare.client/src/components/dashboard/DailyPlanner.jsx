@@ -144,24 +144,6 @@ export default function DailyPlanner() {
   const [listFilter, setListFilter]           = useState("upcoming"); // "upcoming" | "today" | "all"
   const [listSearch, setListSearch]           = useState("");
 
-  // ── Sync to local cache so appointments survive offline / page navigation / logins ─
-  const syncLocalAppointments = useCallback((items) => {
-    if (typeof window === "undefined" || !Array.isArray(items)) return;
-    try {
-      const serialized = JSON.stringify(items);
-      localStorage.setItem(storageKey, serialized);
-      localStorage.setItem(globalStorageKey, serialized);
-      if (user?.id) {
-        localStorage.setItem(`wiseravenshare_appointments_${user.id}`, serialized);
-      }
-      if (user?.email) {
-        localStorage.setItem(`wiseravenshare_appointments_${user.email.toLowerCase()}`, serialized);
-      }
-    } catch (err) {
-      console.warn("Failed to cache planner appointments locally:", err);
-    }
-  }, [storageKey, user?.id, user?.email]);
-
   const readLocalCachedAppointments = useCallback(() => {
     if (typeof window === "undefined") return [];
     const candidateKeys = [
@@ -187,6 +169,29 @@ export default function DailyPlanner() {
     }
     return [];
   }, [storageKey, user?.email, user?.id]);
+
+  // ── Sync to local cache so appointments survive offline / page navigation / logins ─
+  const syncLocalAppointments = useCallback((items, forceClear = false) => {
+    if (typeof window === "undefined" || !Array.isArray(items)) return;
+    try {
+      if (items.length === 0 && !forceClear) {
+        // Guard against transient empty fetches wiping out stored appointments across logins/page navigation
+        const existing = readLocalCachedAppointments();
+        if (existing.length > 0) return;
+      }
+      const serialized = JSON.stringify(items);
+      localStorage.setItem(storageKey, serialized);
+      localStorage.setItem(globalStorageKey, serialized);
+      if (user?.id) {
+        localStorage.setItem(`wiseravenshare_appointments_${user.id}`, serialized);
+      }
+      if (user?.email) {
+        localStorage.setItem(`wiseravenshare_appointments_${user.email.toLowerCase()}`, serialized);
+      }
+    } catch (err) {
+      console.warn("Failed to cache planner appointments locally:", err);
+    }
+  }, [storageKey, user?.id, user?.email, readLocalCachedAppointments]);
 
   // ── Immediate local hydration on mount or user change ────────────────────
   useEffect(() => {
@@ -313,25 +318,28 @@ export default function DailyPlanner() {
           if (cached && cached.length > 0) {
             setEvents(cached);
             // Re-sync locally cached items to server so they persist permanently
-            for (const item of cached) {
-              if (item?.title && item?.start) {
-                const payload = {
-                  title: item.title,
-                  description: item.extendedProps?.description ?? "",
-                  startUtc: new Date(item.start).toISOString(),
-                  endUtc: new Date(item.end || item.start).toISOString(),
-                  reminderMinutesBefore: Number(item.extendedProps?.reminderMinutesBefore ?? 15),
-                  color: item.backgroundColor || item.borderColor || "#3788d8",
-                };
-                apiClient.requestJson("/api/planner", {
-                  method: "POST",
-                  body: JSON.stringify(payload),
-                }).catch(() => {});
+            (async () => {
+              for (const item of cached) {
+                if (item?.title && item?.start) {
+                  const payload = {
+                    title: item.title,
+                    description: item.extendedProps?.description ?? "",
+                    startUtc: new Date(item.start).toISOString(),
+                    endUtc: new Date(item.end || item.start).toISOString(),
+                    reminderMinutesBefore: Number(item.extendedProps?.reminderMinutesBefore ?? 15),
+                    color: item.backgroundColor || item.borderColor || "#3788d8",
+                  };
+                  try {
+                    await apiClient.requestJson("/api/planner", {
+                      method: "POST",
+                      body: JSON.stringify(payload),
+                    });
+                  } catch {}
+                }
               }
-            }
+            })();
           } else {
             setEvents([]);
-            syncLocalAppointments([]);
           }
         }
       }

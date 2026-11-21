@@ -1,4 +1,6 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
@@ -404,9 +406,27 @@ public sealed class SocialOrchestrationController : ControllerBase
         {
             var userStore = _sp.GetService<UserStore>();
             if (userStore is null) return null;
-            return userStore.TryGetById(userId.ToString(), out var user) && user is not null
-                ? user.SocialFeeds
-                : null;
+
+            if (userStore.TryGetById(userId.ToString(), out var user) && user is not null)
+            {
+                return user.SocialFeeds;
+            }
+
+            if (userStore.TryGetById(userId.ToString("N"), out user) && user is not null)
+            {
+                return user.SocialFeeds;
+            }
+
+            var email = User.FindFirstValue(ClaimTypes.Email)
+                ?? User.FindFirstValue(JwtRegisteredClaimNames.Email)
+                ?? User.FindFirstValue("email");
+
+            if (!string.IsNullOrWhiteSpace(email) && userStore.TryGetByEmail(email, out user) && user is not null)
+            {
+                return user.SocialFeeds;
+            }
+
+            return null;
         }
         catch { return null; }
     }
