@@ -3,23 +3,12 @@ using System.IO;
 using System.Linq;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.FileProviders;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
 using Xunit;
 
 namespace Wiseravenshare.Server.Tests;
-
-public class TestWebHostEnvironment : IWebHostEnvironment
-{
-    public string EnvironmentName { get; set; } = "Development";
-    public string ApplicationName { get; set; } = "Wiseravenshare.Tests";
-    public string WebRootPath { get; set; } = Path.GetTempPath();
-    public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
-    public string ContentRootPath { get; set; } = Path.GetTempPath();
-    public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
-}
 
 public class SocialConnectionAndUserStoreTests
 {
