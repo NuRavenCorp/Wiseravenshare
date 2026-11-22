@@ -36,6 +36,29 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
   const videoRef = useRef(null);
   const mediaStreamRef = useRef(null);
 
+  const resolveCurrentAvatar = useCallback(() => {
+    const fromUser =
+      activeAvatar ||
+      user?.avatar ||
+      user?.avatarUrl ||
+      user?.avatar_uri ||
+      "";
+
+    if (fromUser) {
+      return fromUser;
+    }
+
+    try {
+      return (
+        localStorage.getItem("wiseravenshare_active_avatar") ||
+        localStorage.getItem("wiseravenshare_guest_avatar") ||
+        ""
+      );
+    } catch {
+      return "";
+    }
+  }, [activeAvatar, user?.avatar, user?.avatarUrl, user?.avatar_uri]);
+
   // Sync avatar with global auth state
   useEffect(() => {
     if (activeAvatar) {
