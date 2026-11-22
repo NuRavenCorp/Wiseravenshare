@@ -244,9 +244,10 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "Email and password are required." });
         }
 
-        var attemptKey = BuildAttemptKey(request.Email);
+        var loginIdentifier = request.Email?.Trim() ?? string.Empty;
+        var attemptKey = BuildAttemptKey(loginIdentifier);
         AppUserRecord? user;
-        var matchedStoreUser = _userStore.FindByLoginIdentifier(request.Email);
+        var matchedStoreUser = _userStore.FindByLoginIdentifier(loginIdentifier);
         var hasValidStoredCredential = matchedStoreUser is not null && VerifyPasswordCompat(request.Password, matchedStoreUser.PasswordHash);
         var hasValidConfiguredCredential = false;
         var hasValidDomainCredential = false;
@@ -257,14 +258,32 @@ public class AuthController : ControllerBase
             hasValidConfiguredCredential = TryAuthenticateConfiguredCredential(request.Email, request.Password, out configuredUser) && configuredUser is not null;
             if (!hasValidConfiguredCredential)
             {
-                var loginEmail = request.Email.Trim();
-                if (!string.IsNullOrWhiteSpace(loginEmail) && loginEmail.Contains('@'))
+                try
                 {
-                    domainUser = await _userRepository.GetByEmailAsync(loginEmail);
-                    hasValidDomainCredential = domainUser is not null
-                        && domainUser.IsActive
-                        && VerifyPasswordCompat(request.Password, domainUser.PasswordHash);
+                    if (!string.IsNullOrWhiteSpace(loginIdentifier))
+                    {
+                        if (loginIdentifier.Contains('@'))
+                        {
+                            domainUser = await _userRepository.GetByEmailAsync(loginIdentifier);
+                        }
+                        else
+                        {
+                            var username = loginIdentifier.TrimStart('@');
+                            if (!string.IsNullOrWhiteSpace(username))
+                            {
+                                domainUser = await _userRepository.GetByUsernameAsync(username);
+                            }
+                        }
+                    }
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Domain credential lookup failed for login identifier {LoginIdentifier}. Falling back to in-memory/configured auth stores.", loginIdentifier);
+                }
+
+                hasValidDomainCredential = domainUser is not null
+                    && domainUser.IsActive
+                    && VerifyPasswordCompat(request.Password, domainUser.PasswordHash);
             }
         }
 

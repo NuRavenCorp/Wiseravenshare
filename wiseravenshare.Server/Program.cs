@@ -1597,7 +1597,9 @@ CREATE INDEX IF NOT EXISTS ""IX_UserFollows_FollowingId""
 -- Users table: columns added in later migrations
 ALTER TABLE IF EXISTS app_data.""Users""
     ADD COLUMN IF NOT EXISTS ""PasswordResetToken"" TEXT NULL,
-    ADD COLUMN IF NOT EXISTS ""PasswordResetTokenExpiryTime"" TIMESTAMPTZ NULL;
+    ADD COLUMN IF NOT EXISTS ""PasswordResetTokenExpiryTime"" TIMESTAMPTZ NULL,
+    ADD COLUMN IF NOT EXISTS ""RefreshToken"" TEXT NULL,
+    ADD COLUMN IF NOT EXISTS ""RefreshTokenExpiryTime"" TIMESTAMPTZ NULL;
 
 -- Posts table: columns added in later migrations
 ALTER TABLE IF EXISTS app_data.""Posts""

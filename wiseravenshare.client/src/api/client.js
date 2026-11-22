@@ -733,10 +733,15 @@ export const apiClient = {
     clearToken() {
       writeStoredToken(null);
     },
-    async loginViaEmailPassword(email, password) {
+    async loginViaEmailPassword(identifier, password) {
+      const loginIdentifier = String(identifier || "").trim();
       const data = await requestJson("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          email: loginIdentifier,
+          usernameOrEmail: loginIdentifier,
+          password,
+        }),
       });
       const token = data?.token || data?.access_token;
       if (token) {
