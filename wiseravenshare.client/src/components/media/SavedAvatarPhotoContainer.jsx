@@ -197,7 +197,8 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
     setSuccessMsg("");
 
     try {
-      const avatarUrl = await apiClient.users.uploadAvatar(currentUser?.id || "me", file);
+      const uploadRes = await apiClient.users.uploadAvatar(currentUser?.id || "me", file);
+      const avatarUrl = uploadRes?.avatarUrl || uploadRes?.avatar || "";
       if (avatarUrl) {
         const fileName = avatarUrl.split("/").pop();
         const newAvatar = {

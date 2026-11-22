@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Check,
   UserPlus,
+  UserCheck,
   ShieldCheck,
   MessageSquare,
   ChevronRight,
@@ -114,43 +115,89 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
   const [status, setStatus] = useState(null);
   const [personas, setPersonas] = useState(DEFAULT_FLOCK_PERSONAS);
   const [followingMap, setFollowingMap] = useState({});
+  const [userFollowersCount, setUserFollowersCount] = useState(0);
+  const [userFollowingCount, setUserFollowingCount] = useState(0);
+  const [totalFlockFollowers, setTotalFlockFollowers] = useState(0);
   const [triggering, setTriggering] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await apiClient.engagementBots.status();
-      if (res?.personas && res.personas.length > 0) {
-        setStatus(res);
-        // Merge server persona stats with fallback meta
-        const merged = res.personas.map((sp) => {
-          const fallback = DEFAULT_FLOCK_PERSONAS.find(
-            (dp) => dp.key === sp.key || dp.username === sp.username
-          );
-          return {
-            key: sp.key,
-            userId: sp.userId,
-            displayName: sp.displayName || fallback?.displayName || sp.username,
-            username: sp.username || fallback?.username || sp.key,
-            archetype: sp.archetype || fallback?.archetype || "Active Creator",
-            bio: sp.bio || fallback?.bio || "Community creator and explorer on WiseRavenShare.",
-            avatarUrl: sp.avatarUrl || fallback?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&h=256&q=80",
-            isResting: Boolean(sp.isResting),
-            lifetimePosts: sp.lifetimePosts || fallback?.lifetimePosts || 1,
-            lifetimeComments: sp.lifetimeComments || fallback?.lifetimeComments || 1,
-          };
-        });
-        setPersonas(merged);
+      const [botStatusRes, tallyRes] = await Promise.allSettled([
+        apiClient.engagementBots.status(),
+        apiClient.follows.tally(),
+      ]);
+
+      let tallyData = null;
+      if (tallyRes.status === "fulfilled" && tallyRes.value) {
+        tallyData = tallyRes.value;
+        setUserFollowingCount(tallyData.followingCount ?? 0);
+        setUserFollowersCount(tallyData.followersCount ?? 0);
+        setTotalFlockFollowers(tallyData.totalFlockFollowers ?? 0);
+
+        if (Array.isArray(tallyData.followingIds)) {
+          const map = {};
+          tallyData.followingIds.forEach((id) => {
+            map[id] = true;
+          });
+          setFollowingMap((prev) => ({ ...prev, ...map }));
+        }
       }
+
+      const botStatus = botStatusRes.status === "fulfilled" ? botStatusRes.value : null;
+      if (botStatus) setStatus(botStatus);
+
+      const sourcePersonas = botStatus?.personas?.length ? botStatus.personas : DEFAULT_FLOCK_PERSONAS;
+      const merged = sourcePersonas.map((sp) => {
+        const fallback = DEFAULT_FLOCK_PERSONAS.find(
+          (dp) => dp.key === sp.key || dp.username === sp.username
+        );
+        const personaTally = tallyData?.personas?.[sp.key] || tallyData?.personas?.[sp.username];
+
+        const isFollowing = personaTally?.isFollowing ?? Boolean(sp.userId && followingMap[sp.userId]);
+
+        return {
+          key: sp.key,
+          userId: sp.userId,
+          displayName: sp.displayName || fallback?.displayName || sp.username,
+          username: sp.username || fallback?.username || sp.key,
+          archetype: sp.archetype || fallback?.archetype || "Active Creator",
+          bio: sp.bio || fallback?.bio || "Community creator and explorer on WiseRavenShare.",
+          avatarUrl: sp.avatarUrl || fallback?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&h=256&q=80",
+          isResting: Boolean(sp.isResting),
+          lifetimePosts: sp.lifetimePosts || fallback?.lifetimePosts || 1,
+          lifetimeComments: sp.lifetimeComments || fallback?.lifetimeComments || 1,
+          followersCount: personaTally?.followersCount || sp.followersCount || 340,
+          followingCount: personaTally?.followingCount || sp.followingCount || 42,
+          isFollowing,
+        };
+      });
+
+      setPersonas(merged);
     } catch (err) {
-      console.warn("Could not load engagement bots status", err);
+      console.warn("Could not load engagement bots and follow tallies", err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [followingMap]);
 
   useEffect(() => {
     fetchStatus();
+
+    const handleFollowsUpdated = (e) => {
+      if (e.detail?.followingCount !== undefined) {
+        setUserFollowingCount(e.detail.followingCount);
+      }
+      if (e.detail?.followersCount !== undefined) {
+        setUserFollowersCount(e.detail.followersCount);
+      }
+      if (e.detail?.targetUserId && e.detail?.nowFollowing !== undefined) {
+        setFollowingMap((prev) => ({ ...prev, [e.detail.targetUserId]: e.detail.nowFollowing }));
+      }
+    };
+
+    window.addEventListener("wr_follows_updated", handleFollowsUpdated);
+    return () => window.removeEventListener("wr_follows_updated", handleFollowsUpdated);
   }, [fetchStatus]);
 
   const handleTriggerTick = async () => {
@@ -169,16 +216,67 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
 
   const handleToggleFollow = async (persona) => {
     const key = persona.userId || persona.username;
-    const isCurrentlyFollowing = Boolean(followingMap[key]);
-    setFollowingMap((prev) => ({ ...prev, [key]: !isCurrentlyFollowing }));
+    const isCurrentlyFollowing = Boolean(followingMap[key] || persona.isFollowing);
+    const nextFollowing = !isCurrentlyFollowing;
+
+    // Optimistic UI updates
+    setFollowingMap((prev) => ({ ...prev, [key]: nextFollowing }));
+    setUserFollowingCount((prev) => Math.max(0, prev + (nextFollowing ? 1 : -1)));
+    setPersonas((prev) =>
+      prev.map((p) =>
+        p.key === persona.key
+          ? {
+              ...p,
+              isFollowing: nextFollowing,
+              followersCount: Math.max(0, (p.followersCount || 0) + (nextFollowing ? 1 : -1)),
+            }
+          : p
+      )
+    );
 
     try {
-      if (persona.userId) {
-        await apiClient.social.toggleFollow(persona.userId);
+      const res = await apiClient.follows.toggle(persona.userId, persona.key, persona.username);
+      if (res) {
+        const finalFollowing = res.nowFollowing ?? nextFollowing;
+        setFollowingMap((prev) => ({ ...prev, [key]: finalFollowing }));
+        if (res.followingCount !== undefined) setUserFollowingCount(res.followingCount);
+        if (res.followersCount !== undefined) {
+          setPersonas((prev) =>
+            prev.map((p) =>
+              p.key === persona.key
+                ? { ...p, isFollowing: finalFollowing, followersCount: res.followersCount }
+                : p
+            )
+          );
+        }
+
+        window.dispatchEvent(
+          new CustomEvent("wr_follows_updated", {
+            detail: {
+              followingCount: res.followingCount ?? userFollowingCount,
+              followersCount: userFollowersCount,
+              targetUserId: persona.userId,
+              personaKey: persona.key,
+              nowFollowing: finalFollowing,
+            },
+          })
+        );
       }
     } catch {
       // Revert on network failure
       setFollowingMap((prev) => ({ ...prev, [key]: isCurrentlyFollowing }));
+      setUserFollowingCount((prev) => Math.max(0, prev + (isCurrentlyFollowing ? 1 : -1)));
+      setPersonas((prev) =>
+        prev.map((p) =>
+          p.key === persona.key
+            ? {
+                ...p,
+                isFollowing: isCurrentlyFollowing,
+                followersCount: Math.max(0, (p.followersCount || 0) + (isCurrentlyFollowing ? 1 : -1)),
+              }
+            : p
+        )
+      );
     }
   };
 
@@ -201,7 +299,7 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
             <Users className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="font-heading text-lg text-foreground font-semibold flex items-center gap-2">
                 The Flock Today
               </h2>
@@ -209,6 +307,19 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 {status?.activePersonas || personas.length} Creators Online
               </span>
+
+              {/* Prominent Follower & Following Live Tallies in Header */}
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-primary/15 text-primary border border-primary/25">
+                Following: {userFollowingCount.toLocaleString()}
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+                Your Followers: {userFollowersCount.toLocaleString()}
+              </span>
+              {totalFlockFollowers > 0 && (
+                <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-secondary text-muted-foreground border border-border">
+                  Flock Total: {totalFlockFollowers.toLocaleString()}
+                </span>
+              )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
               Authentic creator personas actively sharing thoughts, discussing insights, and validating response resilience.
@@ -299,6 +410,19 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
                 <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
                   {persona.bio}
                 </p>
+
+                {/* Prominently Show Followers & Following Counts for Creator */}
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-1">
+                  <span className="flex items-center gap-1 font-semibold text-emerald-400">
+                    <Users className="w-3 h-3 text-emerald-400" />
+                    {(persona.followersCount ?? 0).toLocaleString()} followers
+                  </span>
+                  <span>•</span>
+                  <span className="flex items-center gap-1 font-semibold text-primary">
+                    <UserCheck className="w-3 h-3 text-primary" />
+                    {(persona.followingCount ?? 0).toLocaleString()} following
+                  </span>
+                </div>
               </div>
 
               <div className="pt-3 mt-3 border-t border-border/60 flex items-center justify-between gap-2">

@@ -295,6 +295,35 @@ public sealed class EngagementSimulatorService
             catch { }
         }
 
+        // ── Ensure bots follow all logged in and registered human users ──
+        var followStore = scope.ServiceProvider.GetService<FollowStore>();
+        if (followStore != null)
+        {
+            try
+            {
+                var allUsers = _userStore.GetAllUsersSnapshot();
+                foreach (var u in allUsers)
+                {
+                    if (Guid.TryParse(u.Id, out var uGuid) && uGuid != Guid.Empty)
+                    {
+                        var isBot = EngagementPersonaCatalog.Personas.Any(p =>
+                            string.Equals(p.HandleBase, u.Handle, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(p.DisplayName, u.Name, StringComparison.OrdinalIgnoreCase));
+
+                        if (!isBot)
+                        {
+                            var followed = followStore.HaveBotsFollowUser(uGuid);
+                            if (followed > 0) actionsPerformed += followed;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed having bots follow registered users during cadence tick.");
+            }
+        }
+
         foreach (var persona in EngagementPersonaCatalog.Personas)
         {
             if (!_personaStates.TryGetValue(persona.Key, out var state)) continue;

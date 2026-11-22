@@ -260,7 +260,8 @@ export default function ProfileSection() {
             } catch {}
           }}
           onUpload={async (file) => {
-            const uploadedUrl = await apiClient.users.uploadAvatar(user?.id || "me", file);
+            const uploadRes = await apiClient.users.uploadAvatar(user?.id || "me", file);
+            const uploadedUrl = uploadRes?.avatarUrl || uploadRes?.avatar || "";
             if (uploadedUrl) {
               setAvatar(uploadedUrl);
               try {

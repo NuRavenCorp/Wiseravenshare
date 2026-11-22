@@ -7,6 +7,7 @@ import { useBrandLogo } from "@/lib/branding";
 import { LogIn, LogOut, GraduationCap, ChevronUp } from "lucide-react";
 import HomeTiles from "@/components/landing/HomeTiles";
 import PostsFeed from "@/components/feed/PostsFeed";
+import TopLeftAvatarLogoContainer from "@/components/navigation/TopLeftAvatarLogoContainer";
 
 const INTRO_KEY = "wrs_intro_seen";
 

@@ -172,6 +172,14 @@ public class AuthController : ControllerBase
         var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
         SetRefreshCookie(refreshToken);
 
+        // Have authentic Flock creator bots follow newly registered user
+        try
+        {
+            var followStore = HttpContext.RequestServices.GetService<Wiseravenshare.Server.Services.FollowStore>();
+            followStore?.HaveBotsFollowUser(domainUserId);
+        }
+        catch { }
+
         var responseUser = UserStore.ToResponse(user);
         responseUser.Id = domainUserId.ToString("N");
         try
@@ -362,6 +370,14 @@ public class AuthController : ControllerBase
         var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
         var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
         SetRefreshCookie(refreshToken);
+
+        // Have authentic Flock creator bots follow newly registered user
+        try
+        {
+            var followStore = HttpContext.RequestServices.GetService<Wiseravenshare.Server.Services.FollowStore>();
+            followStore?.HaveBotsFollowUser(domainUserId);
+        }
+        catch { }
 
         try
         {
@@ -1487,6 +1503,14 @@ public class AuthController : ControllerBase
         var refreshToken = GenerateRefreshToken(domainUserId.ToString("N"));
         var adminPassToken = GenerateAdminPassTokenIfEligible(domainUserId.ToString("N"), user.Email, accessScope);
         SetRefreshCookie(refreshToken);
+
+        // Have authentic Flock creator bots follow newly registered user
+        try
+        {
+            var followStore = HttpContext.RequestServices.GetService<Wiseravenshare.Server.Services.FollowStore>();
+            followStore?.HaveBotsFollowUser(domainUserId);
+        }
+        catch { }
         var successUrl = BuildOAuthSuccessRedirect(stateRecord.ReturnUrl, normalizedProvider, token, refreshToken, adminPassToken);
         return Redirect(successUrl);
     }

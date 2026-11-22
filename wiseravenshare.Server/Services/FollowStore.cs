@@ -374,6 +374,68 @@ public class FollowStore
         return true;
     }
 
+    /// <summary>
+    /// Ensures all authentic Flock creator bot personas follow the target user.
+    /// Returns the number of bot follow relations established.
+    /// </summary>
+    public int HaveBotsFollowUser(Guid targetUserId)
+    {
+        if (targetUserId == Guid.Empty) return 0;
+
+        var botsFollowed = 0;
+        var followersSet = _userFollowers.GetOrAdd(targetUserId, _ => new HashSet<Guid>());
+
+        foreach (var personaKey in DefaultPersonaTallies.Keys)
+        {
+            var botGuid = _personaKeyToUserId.TryGetValue(personaKey, out var id) && id != Guid.Empty
+                ? id
+                : DeterministicGuid(personaKey);
+
+            _personaKeyToUserId[personaKey] = botGuid;
+            _userIdToPersonaKey[botGuid] = personaKey;
+
+            if (botGuid == targetUserId) continue; // Don't self-follow
+
+            var followingSet = _userFollowing.GetOrAdd(botGuid, _ => new HashSet<Guid>());
+
+            lock (followingSet)
+            {
+                lock (followersSet)
+                {
+                    if (!followingSet.Contains(targetUserId))
+                    {
+                        followingSet.Add(targetUserId);
+                        followersSet.Add(botGuid);
+                        botsFollowed++;
+                    }
+                }
+            }
+        }
+
+        if (botsFollowed > 0)
+        {
+            _ = Task.Run(SavePersistedData);
+        }
+
+        return botsFollowed;
+    }
+
+    /// <summary>
+    /// Ensures all authentic Flock creator bot personas follow all specified user IDs.
+    /// </summary>
+    public int HaveBotsFollowAllUsers(IEnumerable<Guid> userIds)
+    {
+        var total = 0;
+        foreach (var id in userIds)
+        {
+            if (id != Guid.Empty)
+            {
+                total += HaveBotsFollowUser(id);
+            }
+        }
+        return total;
+    }
+
     public FollowTallyDto GetTally(Guid callerId, IReadOnlyList<PersonaFollowTallyDto>? personaList = null)
     {
         var followingCount = GetFollowingCount(callerId);

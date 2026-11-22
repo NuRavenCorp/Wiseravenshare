@@ -19,6 +19,7 @@ const EMPTY_BLOCKED_IDS = Object.freeze([]);
 
 export default function PostCard({ post, currentUser, onAuthRequired, onHashtagClick, onBlocked, onBookmarkChange, blockedIds = EMPTY_BLOCKED_IDS }) {
   const [author, setAuthor] = useState(null);
+  const [authorFollowersCount, setAuthorFollowersCount] = useState(post.author?.followersCount || 0);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(post.like_count || 0);
   const [following, setFollowing] = useState(false);
@@ -54,12 +55,37 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
     setShareCount(post.share_count || 0);
     setBookmarked(Boolean(post._bookmarkId));
     setBookmarkId(post._bookmarkId || null);
-    if (currentUser) {
+
+    if (post.created_by_id) {
       apiClient.social.followStatus(post.created_by_id)
-        .then((res) => { if (mounted) setFollowing(Boolean(res.isFollowing)); }).catch(() => {});
+        .then((res) => {
+          if (mounted && res) {
+            setFollowing(Boolean(res.isFollowing));
+            if (res.followersCount !== undefined) {
+              setAuthorFollowersCount(res.followersCount);
+            }
+          }
+        }).catch(() => {});
       setBlocked(blockedIds.includes(String(post.created_by_id)));
     }
-    return () => { mounted = false; };
+
+    const handleFollowsUpdated = (e) => {
+      if (e.detail?.targetUserId && String(e.detail.targetUserId) === String(post.created_by_id)) {
+        if (e.detail.followersCount !== undefined) {
+          setAuthorFollowersCount(e.detail.followersCount);
+        }
+        if (e.detail.nowFollowing !== undefined) {
+          setFollowing(Boolean(e.detail.nowFollowing));
+        }
+      }
+    };
+
+    window.addEventListener("wr_follows_updated", handleFollowsUpdated);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("wr_follows_updated", handleFollowsUpdated);
+    };
   }, [post.id, post._bookmarkId, post.created_by_id, currentUser?.id, blockedIds]);
 
   useEffect(() => {
@@ -82,14 +108,39 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
   };
 
   const handleFollow = async () => {
-    if (!currentUser) return onAuthRequired?.();
     if (busy) return;
     setBusy(true);
+    const nextFollowing = !following;
+    setFollowing(nextFollowing);
+    setAuthorFollowersCount((prev) => Math.max(0, prev + (nextFollowing ? 1 : -1)));
+
     try {
-      const result = await apiClient.social.toggleFollow(post.created_by_id);
-      setFollowing(Boolean(result.nowFollowing));
-      setMenuOpen(false);
-    } catch (e) { toast({ title: "Could not update follow", description: e.message, variant: "destructive" }); } finally { setBusy(false); }
+      const result = await apiClient.follows.toggle(post.created_by_id);
+      if (result) {
+        const finalFollowing = Boolean(result.nowFollowing ?? nextFollowing);
+        setFollowing(finalFollowing);
+        if (result.followersCount !== undefined) {
+          setAuthorFollowersCount(result.followersCount);
+        }
+        setMenuOpen(false);
+        window.dispatchEvent(
+          new CustomEvent("wr_follows_updated", {
+            detail: {
+              targetUserId: post.created_by_id,
+              followingCount: result.followingCount,
+              followersCount: result.followersCount,
+              nowFollowing: finalFollowing,
+            },
+          })
+        );
+      }
+    } catch {
+      // Revert on error
+      setFollowing(!nextFollowing);
+      setAuthorFollowersCount((prev) => Math.max(0, prev + (!nextFollowing ? 1 : -1)));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleBlock = async () => {
@@ -296,12 +347,20 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
           </div>
           <div>
             <p className="text-sm font-medium text-foreground">{authorName}</p>
-            <p className="text-xs text-muted-foreground">{timeAgo}</p>
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+              <span>{timeAgo}</span>
+              {authorFollowersCount > 0 && (
+                <>
+                  <span className="opacity-40">•</span>
+                  <span className="text-emerald-400 font-semibold">{authorFollowersCount.toLocaleString()} followers</span>
+                </>
+              )}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <span className={`text-[10px] px-2 py-0.5 rounded-full border ${truthStyle.class}`}>{truthStyle.label}</span>
-          {!isOwn && currentUser && (
+          {!isOwn && (
             <button
               onClick={handleFollow}
               disabled={busy}

@@ -872,20 +872,46 @@ export const apiClient = {
     async uploadAvatar(id, file) {
       const formData = new FormData();
       formData.append("file", file);
+      const targetId = id || "me";
+      const normalizeUploadResponse = (payload, fallbackUrl = "") => {
+        const avatarUrl = payload?.avatarUrl || payload?.avatar || payload?.filePath || payload?.mediaUrl || fallbackUrl || "";
+        return {
+          avatarUrl,
+          avatar: avatarUrl,
+          fileName: payload?.fileName || (avatarUrl ? avatarUrl.split("/").pop() : ""),
+          saved: Boolean(payload?.saved ?? avatarUrl),
+        };
+      };
+
       try {
-        const targetId = id || "me";
         const res = await requestJson(`/api/users/${encodeURIComponent(targetId)}/avatar`, {
           method: "POST",
           body: formData,
         });
-        return res?.avatarUrl || res?.avatar || res?.filePath || res?.mediaUrl;
+        return normalizeUploadResponse(res);
       } catch (err) {
-        // Fallback to media upload
+        if (!String(targetId).trim().toLowerCase().startsWith("me")) {
+          try {
+            const aliasRes = await requestJson("/api/users/avatar", {
+              method: "POST",
+              body: formData,
+            });
+            return normalizeUploadResponse(aliasRes);
+          } catch {
+            // Continue to auth-aware fallback below.
+          }
+        }
+
+        if (readStoredToken()) {
+          throw err;
+        }
+
+        // Guest fallback (no authenticated user to persist profile avatar against).
         const mediaRes = await uploadViaMediaController(file, {
           title: "avatar",
           destinationFolder: "avatars",
         });
-        return mediaRes?.mediaUrl || mediaRes?.filePath || mediaRes?.file_url;
+        return normalizeUploadResponse(null, mediaRes?.mediaUrl || mediaRes?.filePath || mediaRes?.file_url || "");
       }
     },
     async getSavedAvatars(id = "me") {
@@ -1598,4 +1624,3 @@ export const apiClient = {
     throw lastError;
   },
 };
-

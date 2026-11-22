@@ -168,6 +168,12 @@ public class FollowController : ControllerBase
             callerId = ResolveOrCreateAnonymousId();
         }
 
+        // Ensure all Flock bots follow the logged-in user or active session
+        if (callerId != Guid.Empty)
+        {
+            _followStore.HaveBotsFollowUser(callerId);
+        }
+
         await _simulator.EnsureInitializedAsync(ct);
         var simStatus = _simulator.GetStatus();
 

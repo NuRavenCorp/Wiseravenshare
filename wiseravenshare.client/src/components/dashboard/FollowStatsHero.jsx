@@ -76,16 +76,18 @@ export default function FollowStatsHero() {
   const [loaded, setLoaded] = useState(false);
 
   const fetchStats = useCallback(async () => {
-    if (!user?.id) return;
     try {
-      const [followingRes, followersRes, notifsRes] = await Promise.allSettled([
+      const [followingRes, tallyRes, notifsRes] = await Promise.allSettled([
         apiClient.follows.following(),
-        apiClient.follows.followers(user.id),
-        apiClient.notifications.list(1, 50, ""),
+        apiClient.follows.tally(),
+        user?.id ? apiClient.notifications.list(1, 50, "") : Promise.resolve({ items: [] }),
       ]);
 
       const following = followingRes.status === "fulfilled" ? (followingRes.value?.followingCount ?? 0) : 0;
-      const followers = followersRes.status === "fulfilled" ? (followersRes.value?.followersCount ?? 0) : 0;
+      let followers = 0;
+      if (tallyRes.status === "fulfilled" && tallyRes.value) {
+        followers = tallyRes.value.followersCount ?? 0;
+      }
 
       let newFollowers = 0;
       let newLikes = 0;
@@ -116,10 +118,21 @@ export default function FollowStatsHero() {
   useEffect(() => {
     fetchStats();
     const timer = setInterval(fetchStats, 30_000);
-    return () => clearInterval(timer);
-  }, [fetchStats]);
 
-  if (!user) return null;
+    const handleFollowsUpdated = (e) => {
+      setStats((prev) => ({
+        ...prev,
+        following: e.detail?.followingCount !== undefined ? e.detail.followingCount : prev.following,
+        followers: e.detail?.followersCount !== undefined ? e.detail.followersCount : prev.followers,
+      }));
+    };
+
+    window.addEventListener("wr_follows_updated", handleFollowsUpdated);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("wr_follows_updated", handleFollowsUpdated);
+    };
+  }, [fetchStats]);
 
   return (
     <div className="relative mb-8 rounded-2xl overflow-hidden border border-border/60 bg-card shadow-sm">

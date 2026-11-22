@@ -44,4 +44,43 @@ public sealed class EngagementBotsController : ControllerBase
             status
         });
     }
+
+    /// <summary>
+    /// Ensures all 14 Flock personas follow all logged in and registered users.
+    /// </summary>
+    [HttpPost("follow-users")]
+    [AllowAnonymous]
+    public IActionResult FollowUsers()
+    {
+        var followStore = HttpContext.RequestServices.GetService<Wiseravenshare.Server.Services.FollowStore>();
+        var userStore = HttpContext.RequestServices.GetService<Wiseravenshare.Server.Services.UserStore>();
+
+        var userIds = new List<System.Guid>();
+        if (userStore != null)
+        {
+            foreach (var u in userStore.GetAllUsersSnapshot())
+            {
+                if (System.Guid.TryParse(u.Id, out var g))
+                {
+                    userIds.Add(g);
+                }
+            }
+        }
+
+        var callerId = System.Guid.Empty;
+        var sub = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (System.Guid.TryParse(sub, out var parsedCaller)) callerId = parsedCaller;
+        if (callerId != System.Guid.Empty && !userIds.Contains(callerId))
+        {
+            userIds.Add(callerId);
+        }
+
+        var followedCount = followStore != null ? followStore.HaveBotsFollowAllUsers(userIds) : 0;
+        return Ok(new
+        {
+            success = true,
+            usersTargeted = userIds.Count,
+            followRelationsEstablished = followedCount
+        });
+    }
 }

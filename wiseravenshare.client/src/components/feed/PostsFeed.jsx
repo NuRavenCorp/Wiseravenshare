@@ -51,9 +51,23 @@ export default function PostsFeed() {
   const [view, setView] = useState("feed");
   const [mode, setMode] = useState("following");
   const [tag, setTag] = useState("");
+  const [followingCount, setFollowingCount] = useState(0);
 
   // Track optimistically-added posts so they survive server re-fetches.
   const optimisticPostsRef = React.useRef(new Map());
+
+  // Load and listen to follow count
+  useEffect(() => {
+    apiClient.follows.following().then((res) => {
+      if (res?.followingCount !== undefined) setFollowingCount(res.followingCount);
+    }).catch(() => {});
+
+    const handleFollows = (e) => {
+      if (e.detail?.followingCount !== undefined) setFollowingCount(e.detail.followingCount);
+    };
+    window.addEventListener("wr_follows_updated", handleFollows);
+    return () => window.removeEventListener("wr_follows_updated", handleFollows);
+  }, []);
 
   // Handle URL hash changes (#following, #trending, #feed, #timeline)
   useEffect(() => {
@@ -380,7 +394,9 @@ export default function PostsFeed() {
       )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-1 rounded-lg border border-border bg-card/50 p-1">
-          <button onClick={() => { setTag(""); setMode("following"); }} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs ${mode === "following" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}><Users className="h-3.5 w-3.5" /> Following</button>
+          <button onClick={() => { setTag(""); setMode("following"); }} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs ${mode === "following" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+            <Users className="h-3.5 w-3.5" /> Following{followingCount > 0 ? ` (${followingCount})` : ""}
+          </button>
           <button onClick={() => { setTag(""); setMode("trending"); }} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs ${mode === "trending" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}><TrendingUp className="h-3.5 w-3.5" /> Trending</button>
           <button onClick={() => setView("feed")} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs ${view === "feed" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}><LayoutGrid className="h-3.5 w-3.5" /> Feed</button>
           <button onClick={() => setView("timeline")} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs ${view === "timeline" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}><Clock className="h-3.5 w-3.5" /> Timeline</button>
@@ -433,7 +449,7 @@ export default function PostsFeed() {
               mode === "following" ? "bg-primary/15 text-primary font-medium border border-primary/30" : "hover:text-foreground border border-border"
             }`}
           >
-            <Users className="w-3.5 h-3.5" /> Following
+            <Users className="w-3.5 h-3.5" /> Following{followingCount > 0 ? ` (${followingCount})` : ""}
           </a>
           <a
             href="#trending"
