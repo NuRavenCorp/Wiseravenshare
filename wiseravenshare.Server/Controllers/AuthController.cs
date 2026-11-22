@@ -4836,25 +4836,25 @@ LIMIT 1;";
 
     private IEnumerable<(string Name, string Email, string Password)> ReadConfiguredUsers()
     {
+        var returnedEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         var section = _configuration.GetSection("Authentication:Users");
         var userSections = section.GetChildren().ToList();
-        if (userSections.Count > 0)
+        foreach (var childSection in userSections)
         {
-            foreach (var childSection in userSections)
+            var name = childSection["Name"] ?? childSection["name"] ?? string.Empty;
+            var email = childSection["Email"] ?? childSection["email"] ?? string.Empty;
+            var password = childSection["Password"] ?? childSection["password"] ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(password) && string.IsNullOrWhiteSpace(name))
             {
-                var name = childSection["Name"] ?? childSection["name"] ?? string.Empty;
-                var email = childSection["Email"] ?? childSection["email"] ?? string.Empty;
-                var password = childSection["Password"] ?? childSection["password"] ?? string.Empty;
-
-                if (string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(password) && string.IsNullOrWhiteSpace(name))
-                {
-                    continue;
-                }
-
-                yield return (name, email, password);
+                continue;
             }
 
-            yield break;
+            if (!string.IsNullOrWhiteSpace(email) && returnedEmails.Add(email.Trim()))
+            {
+                yield return (name, email, password);
+            }
         }
 
         var boundUsers = section.Get<List<ConfiguredUser>>() ?? new List<ConfiguredUser>();
@@ -4865,22 +4865,42 @@ LIMIT 1;";
                 continue;
             }
 
-            yield return (user.Name, user.Email, user.Password);
+            if (!string.IsNullOrWhiteSpace(user.Email) && returnedEmails.Add(user.Email.Trim()))
+            {
+                yield return (user.Name, user.Email, user.Password);
+            }
         }
 
-        var index = 0;
-        while (true)
+        for (var i = 0; i <= 15; i++)
         {
-            var email = _configuration[$"Authentication:Users:{index}:Email"] ?? _configuration[$"Authentication:Users:{index}:email"];
-            var password = _configuration[$"Authentication:Users:{index}:Password"] ?? _configuration[$"Authentication:Users:{index}:password"];
-            var name = _configuration[$"Authentication:Users:{index}:Name"] ?? _configuration[$"Authentication:Users:{index}:name"];
-            if (string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(password) && string.IsNullOrWhiteSpace(name))
-            {
-                break;
-            }
+            var email = _configuration[$"Authentication:Users:{i}:Email"]
+                ?? _configuration[$"Authentication:Users:{i}:email"]
+                ?? _configuration[$"AUTHENTICATION:EMAIL:{i}"]
+                ?? _configuration[$"AUTHENTICATION__EMAIL__{i}"]
+                ?? _configuration[$"Authentication:Email:{i}"]
+                ?? _configuration[$"AUTHENTICATION_EMAIL_{i}"];
 
-            yield return (name ?? string.Empty, email ?? string.Empty, password ?? string.Empty);
-            index++;
+            var password = _configuration[$"Authentication:Users:{i}:Password"]
+                ?? _configuration[$"Authentication:Users:{i}:password"]
+                ?? _configuration[$"AUTHENTICATION:PASSWORD:{i}"]
+                ?? _configuration[$"AUTHENTICATION__PASSWORD__{i}"]
+                ?? _configuration[$"Authentication:Password:{i}"]
+                ?? _configuration[$"AUTHENTICATION_PASSWORD_{i}"];
+
+            var name = _configuration[$"Authentication:Users:{i}:Name"]
+                ?? _configuration[$"Authentication:Users:{i}:name"]
+                ?? _configuration[$"AUTHENTICATION:NAME:{i}"]
+                ?? _configuration[$"AUTHENTICATION__NAME__{i}"]
+                ?? _configuration[$"Authentication:Name:{i}"]
+                ?? _configuration[$"AUTHENTICATION_NAME_{i}"];
+
+            if (!string.IsNullOrWhiteSpace(email) && !string.IsNullOrWhiteSpace(password))
+            {
+                if (returnedEmails.Add(email.Trim()))
+                {
+                    yield return (name ?? string.Empty, email.Trim(), password.Trim());
+                }
+            }
         }
     }
 
