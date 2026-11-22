@@ -2693,6 +2693,7 @@ builder.Services.AddScoped<Wiseravenshare.Server.Interfaces.Services.IProjectSer
 builder.Services.AddSingleton<IZernioWebhookStore, ZernioWebhookStore>();
 // AI assistant — select provider via AiProvider config (gradient|deepseek|digitalocean|dochatbot|do-chatbot|llamacpp).
 // DigitalOcean chatbot path is the production default.
+builder.Services.AddSingleton<Wiseravenshare.Server.Services.AiAssistant.IAiLearningMetricsService, Wiseravenshare.Server.Services.AiAssistant.AiLearningMetricsService>();
 var aiProvider = (builder.Configuration["AiProvider"] ?? "digitalocean").Trim().ToLowerInvariant();
 if (aiProvider is "gradient" or "digitalocean" or "dochatbot" or "do-chatbot")
 {
