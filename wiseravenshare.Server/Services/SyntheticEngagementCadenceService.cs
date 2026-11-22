@@ -295,11 +295,13 @@ public sealed class SyntheticEngagementCadenceOptions
     public const string SectionName = "SyntheticEngagement:Cadence";
 
     public bool Enabled { get; set; } = true;
+    public int InitialDelaySeconds { get; set; } = 20;
     public int PollIntervalMinutes { get; set; } = 15;
-    public int PostsPerCycle { get; set; } = 10;
-    public int MinRepliesPerCycle { get; set; } = 5;
+    public int BootstrapBotCount { get; set; } = 14;
+    public int PostsPerCycle { get; set; } = 6;
+    public int MinRepliesPerCycle { get; set; } = 4;
     public int PostSpacingHours { get; set; } = 3;
-    public int ActiveHours { get; set; } = 28;
+    public int ActiveHours { get; set; } = 18;
     public int RestHours { get; set; } = 6;
     public int ActiveStartHourUtc { get; set; } = 0;
     public int AllowedSlotDriftMinutes { get; set; } = 80;
@@ -329,7 +331,11 @@ public sealed class SyntheticEngagementCadenceHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await Task.Delay(TimeSpan.FromSeconds(20), stoppingToken);
+        var initialDelaySeconds = Math.Clamp(_options.Value.InitialDelaySeconds, 0, 300);
+        if (initialDelaySeconds > 0)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(initialDelaySeconds), stoppingToken);
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -341,10 +347,32 @@ public sealed class SyntheticEngagementCadenceHostedService : BackgroundService
                 if (syntheticEnabled && options.Enabled)
                 {
                     await using var scope = _scopeFactory.CreateAsyncScope();
+                    try
+                    {
+                        var bootstrapService = scope.ServiceProvider.GetRequiredService<SyntheticEngagementService>();
+                        await bootstrapService.EnsurePersonasAsync(new SyntheticBootstrapRequest
+                        {
+                            BotCount = Math.Clamp(options.BootstrapBotCount, 1, 250),
+                            Prefix = options.Prefix,
+                            EmailDomain = options.EmailDomain
+                        }, stoppingToken);
+                    }
+                    catch (Exception bootEx) when (bootEx is not OperationCanceledException)
+                    {
+                        _logger.LogDebug(bootEx, "Database synthetic persona bootstrap unavailable; continuing with resilient simulator.");
+                    }
+
                     var simulator = scope.ServiceProvider.GetService<Wiseravenshare.Server.Services.Simulation.EngagementSimulatorService>();
                     if (simulator != null)
                     {
-                        await simulator.RunCadenceTickAsync(stoppingToken);
+                        try
+                        {
+                            await simulator.RunCadenceTickAsync(stoppingToken);
+                        }
+                        catch (Exception simEx) when (simEx is not OperationCanceledException)
+                        {
+                            _logger.LogWarning(simEx, "Engagement simulator tick failed; continuing transparent cadence run.");
+                        }
                     }
 
                     var service = scope.ServiceProvider.GetRequiredService<SyntheticEngagementCadenceService>();

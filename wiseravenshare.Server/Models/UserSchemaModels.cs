@@ -118,6 +118,12 @@ public sealed class UpdateUserProfileRequest
     public SocialFeedSettings? SocialFeeds { get; set; }
 }
 
+public sealed class SelectAvatarRequest
+{
+    public string? AvatarUrl { get; set; }
+    public string? FileName { get; set; }
+}
+
 public sealed class UpdateSocialFeedsRequest
 {
     public SocialFeedConnection? TikTok { get; set; }

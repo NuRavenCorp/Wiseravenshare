@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { apiClient } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -39,6 +39,18 @@ export default function PostComposer({ onPosted, compact }) {
   const MAX_POST_LENGTH = 1000;
 
   const currentType = POST_TYPES.find((t) => t.value === postType);
+
+  useEffect(() => {
+    const handleAttach = (e) => {
+      const url = e.detail?.url;
+      if (url) {
+        setMediaUrls((prev) => (prev.includes(url) ? prev : [...prev, url]));
+        setPostType("photo");
+      }
+    };
+    window.addEventListener("wr_attach_media", handleAttach);
+    return () => window.removeEventListener("wr_attach_media", handleAttach);
+  }, []);
 
   const applyTemplate = (tpl) => {
     setContent(tpl.content);

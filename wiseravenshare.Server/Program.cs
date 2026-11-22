@@ -3952,6 +3952,64 @@ if (requireDatabase && !string.IsNullOrWhiteSpace(defaultConnectionString))
     }
 }
 
+// Bootstrap transparent synthetic personas and kick an initial activity pulse at startup.
+if (requireDatabase && !string.IsNullOrWhiteSpace(defaultConnectionString))
+{
+    try
+    {
+        var syntheticEnabled = app.Configuration.GetValue("SyntheticEngagement:Enabled", false);
+        var cadenceEnabled = app.Configuration.GetValue("SyntheticEngagement:Cadence:Enabled", true);
+        if (syntheticEnabled && cadenceEnabled)
+        {
+            using var syntheticScope = app.Services.CreateScope();
+            var syntheticService = syntheticScope.ServiceProvider.GetRequiredService<SyntheticEngagementService>();
+            var cadenceOptions = syntheticScope.ServiceProvider
+                .GetRequiredService<Microsoft.Extensions.Options.IOptions<SyntheticEngagementCadenceOptions>>()
+                .Value ?? new SyntheticEngagementCadenceOptions();
+
+            var prefix = app.Configuration["SyntheticEngagement:DefaultPrefix"];
+            var emailDomain = app.Configuration["SyntheticEngagement:DefaultEmailDomain"];
+
+            var bootstrapResult = await syntheticService.EnsurePersonasAsync(new SyntheticBootstrapRequest
+            {
+                BotCount = Math.Clamp(cadenceOptions.BootstrapBotCount, 1, 250),
+                Prefix = prefix,
+                EmailDomain = emailDomain
+            }, app.Lifetime.ApplicationStopping);
+
+            var warmupResult = await syntheticService.GenerateActivityAsync(new SyntheticRunRequest
+            {
+                PostsToCreate = Math.Clamp(cadenceOptions.PostsPerCycle, 1, 250),
+                RepliesToCreate = Math.Clamp(cadenceOptions.MinRepliesPerCycle, 0, 250),
+                Prefix = prefix,
+                EmailDomain = emailDomain,
+                Topics = cadenceOptions.Topics
+            }, app.Lifetime.ApplicationStopping);
+
+            app.Logger.LogInformation(
+                "Synthetic engagement startup bootstrap complete. BotsTotal={BotCount} WarmupPosts={Posts} WarmupReplies={Replies}.",
+                bootstrapResult.TotalSyntheticCount,
+                warmupResult.CreatedPosts,
+                warmupResult.CreatedReplies);
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Failed to bootstrap synthetic engagement personas on startup.");
+    }
+}
+
+// Initialize engagement personas and authentic bots on startup so they are immediately active and visible
+try
+{
+    var simulator = app.Services.GetRequiredService<Wiseravenshare.Server.Services.Simulation.EngagementSimulatorService>();
+    await simulator.EnsureInitializedAsync();
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "Failed to initialize engagement simulator personas on startup.");
+}
+
 app.Run();
 
 internal sealed class SystemFeedConfig

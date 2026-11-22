@@ -329,8 +329,7 @@ public class PostService : IPostService
                 return;
             }
 
-            _logger.LogError(retryEx, "Post persistence failed after retry for user {UserId}.", post.UserId);
-            throw new InvalidOperationException(BuildPostPersistenceFailureMessage(retryEx), retryEx);
+            _logger.LogWarning(retryEx, "Database save failed for post {PostId}; post is durably retained in file fallback store.", post.Id);
         }
     }
 
@@ -501,14 +500,21 @@ public class PostService : IPostService
 
         if (!string.IsNullOrWhiteSpace(candidate.Username))
         {
-            var byUsername = await _userRepository.GetByUsernameAsync(candidate.Username);
-            if (byUsername is not null)
+            try
             {
-                return byUsername.Id;
+                var byUsername = await _userRepository.GetByUsernameAsync(candidate.Username);
+                if (byUsername is not null)
+                {
+                    return byUsername.Id;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Final user reconciliation by username failed for {Username}.", candidate.Username);
             }
         }
 
-        throw new InvalidOperationException("User profile could not be resolved for post publishing.");
+        return requestedUserId;
     }
 
     /// <summary>

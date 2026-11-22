@@ -9,6 +9,8 @@ import Navbar from "@/components/landing/Navbar";
 import Footer from "@/components/landing/Footer";
 import TodaysVibe from "@/components/vibe/TodaysVibe";
 import LimitationsNotice from "@/components/social/LimitationsNotice";
+import SavedAvatarPhotoContainer from "@/components/media/SavedAvatarPhotoContainer";
+import TheFlockCreatorsShelf from "@/components/social/TheFlockCreatorsShelf";
 import { Share2, Download, Feather, Link2, CheckCircle2, Circle } from "lucide-react";
 import PostComposer from "@/components/feed/PostComposer";
 import PostsFeed from "@/components/feed/PostsFeed";
@@ -47,6 +49,10 @@ export default function SocialHub() {
         <LimitationsNotice />
         <div className="mb-8">
           <TodaysVibe />
+        </div>
+        {/* Prominently Featured Saved Avatar & Photo Upload Vault */}
+        <div className="mb-8">
+          <SavedAvatarPhotoContainer />
         </div>
         <Tabs defaultValue="feed">
           <TabsList className="grid w-full grid-cols-5 mb-6">

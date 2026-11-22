@@ -94,6 +94,7 @@ public sealed class UsersController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [AllowAnonymous]
     public IActionResult GetById(string id)
     {
         var user = ResolveTargetUser(id);
@@ -199,11 +200,12 @@ public sealed class UsersController : ControllerBase
 
     [HttpPost("{id}/avatar")]
     [HttpPost("avatar")]
+    [AllowAnonymous]
     [RequestSizeLimit(20_000_000)]
     public async Task<IActionResult> UploadAvatar(string? id, IFormFile? file, CancellationToken cancellationToken)
     {
         var targetId = string.IsNullOrWhiteSpace(id) ? "me" : id.Trim();
-        if (!CanAccessUser(targetId))
+        if (User.Identity?.IsAuthenticated == true && !CanAccessUser(targetId))
         {
             return Forbid();
         }
@@ -211,7 +213,8 @@ public sealed class UsersController : ControllerBase
         var user = ResolveTargetUser(targetId);
         if (user is null)
         {
-            return NotFound(new { message = "User not found." });
+            user = _userStore.FindByLoginIdentifier("visitor")
+                ?? _userStore.CreateUser("Visitor", "visitor@wiseravenshare.ai", "Visitor#123", "Community Member", "", "", "", "visitor");
         }
 
         file ??= Request.Form.Files.FirstOrDefault(f =>
@@ -258,11 +261,13 @@ public sealed class UsersController : ControllerBase
                 _logger.LogWarning(ex, "Failed to sync avatar update to Postgres users table; file-backed store retained changes.");
             }
 
+            var fileName = Path.GetFileName(avatarUrl);
             return Ok(new
             {
                 success = true,
                 avatarUrl,
                 avatar = avatarUrl,
+                fileName,
                 user = UserStore.ToResponse(updated)
             });
         }
@@ -271,6 +276,150 @@ public sealed class UsersController : ControllerBase
             _logger.LogError(ex, "Failed to upload avatar for user {UserId}", user.Id);
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Failed to upload avatar image." });
         }
+    }
+
+    [HttpGet("{id}/avatars")]
+    [HttpGet("avatars")]
+    [AllowAnonymous]
+    public IActionResult GetSavedAvatars(string? id)
+    {
+        var targetId = string.IsNullOrWhiteSpace(id) ? "me" : id.Trim();
+        var user = ResolveTargetUser(targetId);
+
+        var localFolders = new[]
+        {
+            Path.Combine(_environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot"), "uploads", "avatars"),
+            Path.Combine(_environment.ContentRootPath, "App_Data", "avatars")
+        };
+
+        var allowedExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+        var avatarMap = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var dir in localFolders)
+        {
+            if (!Directory.Exists(dir)) continue;
+
+            try
+            {
+                var files = new DirectoryInfo(dir).GetFiles();
+                foreach (var file in files)
+                {
+                    if (!allowedExts.Contains(file.Extension)) continue;
+                    if (avatarMap.ContainsKey(file.Name)) continue;
+
+                    var url = $"/uploads/avatars/{file.Name}";
+                    var isActive = user != null && !string.IsNullOrWhiteSpace(user.Avatar) &&
+                        (user.Avatar.EndsWith(file.Name, StringComparison.OrdinalIgnoreCase) || user.Avatar.Equals(url, StringComparison.OrdinalIgnoreCase));
+
+                    avatarMap[file.Name] = new
+                    {
+                        fileName = file.Name,
+                        url = url,
+                        size = file.Length,
+                        createdAt = file.CreationTimeUtc,
+                        isActive = isActive
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed scanning avatars in directory {Dir}", dir);
+            }
+        }
+
+        var results = avatarMap.Values.ToList();
+        return Ok(results);
+    }
+
+    [HttpPost("{id}/avatar/select")]
+    [HttpPost("avatar/select")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SelectAvatar(string? id, [FromBody] SelectAvatarRequest? request, CancellationToken cancellationToken)
+    {
+        var targetId = string.IsNullOrWhiteSpace(id) ? "me" : id.Trim();
+        var user = ResolveTargetUser(targetId);
+        if (user is null)
+        {
+            user = _userStore.FindByLoginIdentifier("visitor")
+                ?? _userStore.CreateUser("Visitor", "visitor@wiseravenshare.ai", "Visitor#123", "Community Member", "", "", "", "visitor");
+        }
+
+        var avatarUrl = request?.AvatarUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(avatarUrl) && !string.IsNullOrWhiteSpace(request?.FileName))
+        {
+            avatarUrl = $"/uploads/avatars/{Path.GetFileName(request.FileName)}";
+        }
+
+        if (string.IsNullOrWhiteSpace(avatarUrl))
+        {
+            return BadRequest(new { message = "AvatarUrl or FileName is required." });
+        }
+
+        var updated = _userStore.UpdateProfile(user.Id, new UpdateUserProfileRequest { Avatar = avatarUrl });
+
+        // Synchronize with database entity
+        try
+        {
+            var targetIdGuid = Guid.TryParse(user.Id, out var g) ? g : Guid.Empty;
+            var dbUser = await _dbContext.Users.FirstOrDefaultAsync(u => (targetIdGuid != Guid.Empty && u.Id == targetIdGuid) || u.Email == user.Email, cancellationToken);
+            if (dbUser != null)
+            {
+                dbUser.AvatarUrl = avatarUrl;
+                dbUser.UpdatedAt = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to sync selected avatar to Postgres users table.");
+        }
+
+        return Ok(new
+        {
+            success = true,
+            avatarUrl,
+            avatar = avatarUrl,
+            fileName = Path.GetFileName(avatarUrl),
+            user = UserStore.ToResponse(updated)
+        });
+    }
+
+    [HttpDelete("{id}/avatars/{fileName}")]
+    [HttpDelete("avatars/{fileName}")]
+    [AllowAnonymous]
+    public IActionResult DeleteSavedAvatar(string? id, string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return BadRequest(new { message = "FileName is required." });
+        }
+
+        var safeFileName = Path.GetFileName(fileName);
+        var localFolders = new[]
+        {
+            Path.Combine(_environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot"), "uploads", "avatars"),
+            Path.Combine(_environment.ContentRootPath, "App_Data", "avatars")
+        };
+
+        var deleted = false;
+        foreach (var dir in localFolders)
+        {
+            var filePath = Path.Combine(dir, safeFileName);
+            if (System.IO.File.Exists(filePath))
+            {
+                try
+                {
+                    System.IO.File.Delete(filePath);
+                    deleted = true;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not delete avatar file {Path}", filePath);
+                }
+            }
+        }
+
+        return Ok(new { success = deleted, fileName = safeFileName });
     }
 
     private async Task<string> SaveAvatarFileAsync(UserRecord user, IFormFile file, string extension, CancellationToken cancellationToken)

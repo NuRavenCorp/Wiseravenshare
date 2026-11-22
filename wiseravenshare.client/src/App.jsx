@@ -87,8 +87,8 @@ const AuthenticatedApp = () => {
       <Route path="/terms" element={<Terms />} />
       <Route path="/cookies" element={<CookiePolicy />} />
       <Route path="/join-feed" element={<JoinFeed />} />
+      <Route path="/social" element={<SocialHub />} />
       <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
-        <Route path="/social" element={<SocialHub />} />
         <Route path="/ai-news" element={<AiNews />} />
         <Route path="/messages" element={<Messages />} />
         <Route path="/dashboard" element={<Dashboard />} />

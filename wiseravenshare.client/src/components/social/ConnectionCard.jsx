@@ -247,18 +247,19 @@ export default function ConnectionCard({ platform, onStatusChange }) {
   const fetchStatus = useCallback(async () => {
     setStatusError("");
     try {
-      const me = await apiClient.auth.me();
-      if (!me) {
-        setStatusError("Could not identify your account.");
-        return;
+      let me = null;
+      try { me = await apiClient.auth.me(); } catch { /* unauthenticated */ }
+      if (me?.id) {
+        setUserId(me.id);
+        const data = await apiClient.social.getStatus(platform);
+        setStatus(data);
+        if (data?.connected) applyDetails(data.details);
+      } else {
+        setUserId(null);
+        setStatus({ connected: false, details: {} });
       }
-      setUserId(me.id);
-      const data = await apiClient.social.getStatus(platform);
-      setStatus(data);
-      if (data?.connected) applyDetails(data.details);
     } catch (e) {
-      setStatus(null);
-      setStatusError(e?.message || "Could not check connection. Try again.");
+      setStatus({ connected: false, details: {} });
     } finally {
       setLoading(false);
     }
@@ -363,7 +364,6 @@ export default function ConnectionCard({ platform, onStatusChange }) {
   };
 
   const handleSave = async () => {
-    if (!userId) return;
     if (!consentChecked) {
       setError("Please check the authorization box to authorize sharing of information/content.");
       return;
@@ -407,7 +407,13 @@ export default function ConnectionCard({ platform, onStatusChange }) {
         if (cleanPassword) payload.app_password = cleanPassword;
       }
 
-      await apiClient.social.saveDetails(platform, userId, payload);
+      const res = await apiClient.social.saveDetails(platform, userId || "", payload);
+      if (res?.token) {
+        apiClient.auth.setToken(res.token);
+      }
+      if (res?.user?.id) {
+        setUserId(res.user.id);
+      }
       setSaved(true);
       setPassword("");
       setBskyAppPassword("");
@@ -422,11 +428,12 @@ export default function ConnectionCard({ platform, onStatusChange }) {
   };
 
   const handleDisconnect = async () => {
-    if (!userId) return;
     setDisconnecting(true);
     setError("");
     try {
-      await apiClient.social.disconnect(platform, userId);
+      if (userId) {
+        await apiClient.social.disconnect(platform, userId);
+      }
       setStatus({ connected: false, details: {} });
       setUsername("");
       setPassword("");

@@ -34,19 +34,45 @@ const getAgeHours = (createdDate) => {
 };
 
 export default function PostsFeed() {
-  const [posts, setPosts] = useState([]);
+  const [posts, setPosts] = useState(() => {
+    try {
+      const cached = localStorage.getItem("wiseravenshare_cached_posts");
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
   const [bookmarkMap, setBookmarkMap] = useState({});
   const [blockedIds, setBlockedIds] = useState([]);
   const [blockedUsers, setBlockedUsers] = useState([]);
-  const [showComposer, setShowComposer] = useState(false);
+  const [showComposer, setShowComposer] = useState(true);
   const [view, setView] = useState("feed");
   const [mode, setMode] = useState("following");
   const [tag, setTag] = useState("");
 
   // Track optimistically-added posts so they survive server re-fetches.
   const optimisticPostsRef = React.useRef(new Map());
+
+  // Handle URL hash changes (#following, #trending, #feed, #timeline)
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.toLowerCase();
+      if (hash === "#trending") {
+        setMode("trending");
+      } else if (hash === "#following") {
+        setMode("following");
+      } else if (hash === "#timeline") {
+        setView("timeline");
+      } else if (hash === "#feed") {
+        setView("feed");
+      }
+    };
+    handleHash();
+    window.addEventListener("hashchange", handleHash);
+    return () => window.removeEventListener("hashchange", handleHash);
+  }, []);
 
   const applyRankedOrder = useCallback((feedItems, rankedPayload) => {
     const items = Array.isArray(feedItems) ? [...feedItems] : [];
@@ -159,19 +185,43 @@ export default function PostsFeed() {
       const survivingOptimistic = Array.from(optimisticPostsRef.current.values())
         .filter((p) => !optimisticIds.has(String(p.id)));
       const merged = [...survivingOptimistic, ...normalized];
-      setPosts((current) => (preserveExistingOnEmpty && merged.length === 0 && current.length > 0 ? current : merged));
-      setShowComposer(Boolean(user));
+      setPosts((current) => {
+        const next = (preserveExistingOnEmpty && merged.length === 0 && current.length > 0)
+          ? current
+          : (merged.length > 0 ? merged : current);
+        if (next.length > 0) {
+          try {
+            localStorage.setItem("wiseravenshare_cached_posts", JSON.stringify(next.slice(0, 50)));
+          } catch {}
+        }
+        return next;
+      });
+      setShowComposer(true);
       return merged;
     } catch (error) {
       console.error("Could not load social feed", error);
-      setPosts([]);
+      // Retain existing posts from state or cache
+      setPosts((current) => {
+        if (current.length > 0) return current;
+        try {
+          const cached = localStorage.getItem("wiseravenshare_cached_posts");
+          return cached ? JSON.parse(cached) : [];
+        } catch {
+          return [];
+        }
+      });
       return [];
     } finally {
       setLoading(false);
     }
   }, [applyRankedOrder, mode]);
 
-  useEffect(() => { fetchPosts(); }, [fetchPosts]);
+  useEffect(() => {
+    fetchPosts();
+    const handleRefresh = () => fetchPosts();
+    window.addEventListener("wr_refresh_feed", handleRefresh);
+    return () => window.removeEventListener("wr_refresh_feed", handleRefresh);
+  }, [fetchPosts]);
 
   const handleAuthRequired = () => apiClient.auth.redirectToLogin(window.location.pathname + window.location.hash);
   const visiblePosts = posts.filter((post) => !blockedIds.includes(String(post.created_by_id))).filter((post) => !tag || (tag.startsWith("%")
@@ -287,7 +337,13 @@ export default function PostsFeed() {
       const normalizedCreatedPost = normalizePost(createdPost);
       // Register in optimistic store so it survives server re-fetches.
       optimisticPostsRef.current.set(String(normalizedCreatedPost.id), normalizedCreatedPost);
-      setPosts((current) => [normalizedCreatedPost, ...current.filter((post) => post.id !== normalizedCreatedPost.id)]);
+      setPosts((current) => {
+        const next = [normalizedCreatedPost, ...current.filter((post) => post.id !== normalizedCreatedPost.id)];
+        try {
+          localStorage.setItem("wiseravenshare_cached_posts", JSON.stringify(next.slice(0, 50)));
+        } catch {}
+        return next;
+      });
       setView("feed");
       // Only switch mode if not already in "following" — avoids rebuilding fetchPosts and
       // firing the useEffect a second time while the explicit fetch below is in flight.
@@ -298,7 +354,7 @@ export default function PostsFeed() {
     await fetchPosts();
   };
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
+  if (loading && posts.length === 0) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
 
   return (
     <div className="space-y-5">
@@ -359,6 +415,84 @@ export default function PostsFeed() {
           ))}
         </div>
       )}
+
+      {/* Bottom Feed Navigation & Namesake Links */}
+      <div className="mt-8 pt-6 border-t border-border/60 flex flex-wrap items-center justify-between gap-4 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-foreground uppercase tracking-wider text-[11px]">Feed Views:</span>
+          <a
+            href="#following"
+            onClick={(e) => {
+              e.preventDefault();
+              setTag("");
+              setMode("following");
+              window.location.hash = "following";
+              window.scrollTo({ top: 300, behavior: "smooth" });
+            }}
+            className={`px-3 py-1.5 rounded-md transition-colors flex items-center gap-1.5 ${
+              mode === "following" ? "bg-primary/15 text-primary font-medium border border-primary/30" : "hover:text-foreground border border-border"
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" /> Following
+          </a>
+          <a
+            href="#trending"
+            onClick={(e) => {
+              e.preventDefault();
+              setTag("");
+              setMode("trending");
+              window.location.hash = "trending";
+              window.scrollTo({ top: 300, behavior: "smooth" });
+            }}
+            className={`px-3 py-1.5 rounded-md transition-colors flex items-center gap-1.5 ${
+              mode === "trending" ? "bg-primary/15 text-primary font-medium border border-primary/30" : "hover:text-foreground border border-border"
+            }`}
+          >
+            <TrendingUp className="w-3.5 h-3.5" /> Trending
+          </a>
+          <a
+            href="#feed"
+            onClick={(e) => {
+              e.preventDefault();
+              setView("feed");
+              window.location.hash = "feed";
+              window.scrollTo({ top: 300, behavior: "smooth" });
+            }}
+            className={`px-3 py-1.5 rounded-md transition-colors flex items-center gap-1.5 ${
+              view === "feed" ? "bg-primary/15 text-primary font-medium border border-primary/30" : "hover:text-foreground border border-border"
+            }`}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" /> Feed
+          </a>
+          <a
+            href="#timeline"
+            onClick={(e) => {
+              e.preventDefault();
+              setView("timeline");
+              window.location.hash = "timeline";
+              window.scrollTo({ top: 300, behavior: "smooth" });
+            }}
+            className={`px-3 py-1.5 rounded-md transition-colors flex items-center gap-1.5 ${
+              view === "timeline" ? "bg-primary/15 text-primary font-medium border border-primary/30" : "hover:text-foreground border border-border"
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" /> Timeline
+          </a>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <a
+            href="#top"
+            onClick={(e) => {
+              e.preventDefault();
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            className="hover:text-primary transition-colors flex items-center gap-1 font-medium"
+          >
+            ↑ Back to Top
+          </a>
+        </div>
+      </div>
     </div>
   );
 }

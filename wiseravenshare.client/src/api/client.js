@@ -888,6 +888,24 @@ export const apiClient = {
         return mediaRes?.mediaUrl || mediaRes?.filePath || mediaRes?.file_url;
       }
     },
+    async getSavedAvatars(id = "me") {
+      try {
+        return await requestJson(`/api/users/${encodeURIComponent(id)}/avatars`, { method: "GET" });
+      } catch {
+        return [];
+      }
+    },
+    async selectAvatar(id = "me", payload = {}) {
+      return requestJson(`/api/users/${encodeURIComponent(id)}/avatar/select`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+    async deleteAvatar(id = "me", fileName) {
+      return requestJson(`/api/users/${encodeURIComponent(id)}/avatars/${encodeURIComponent(fileName)}`, {
+        method: "DELETE",
+      });
+    },
   },
   app: {
     async getPublicSettings() {

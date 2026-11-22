@@ -3,9 +3,34 @@ import { Link } from "react-router-dom";
 import { Feather } from "lucide-react";
 
 const cols = [
-  { title: "Platform", links: ["The Feed", "Ravensight", "Music & Jams", "Karaoke", "Journalism"] },
-  { title: "Creators", links: ["Your Library", "Jam Sessions", "Truth Score", "Partials (%)"] },
-  { title: "Company", links: ["Our Mission", "Integrity Pledge", "Community", "Contact"] },
+  {
+    title: "Platform",
+    links: [
+      { label: "The Feed", to: "/social" },
+      { label: "Ravensight", to: "/ravensight" },
+      { label: "Music & Jams", to: "/media" },
+      { label: "Karaoke", to: "/karaoke" },
+      { label: "Journalism", to: "/journalism" },
+    ],
+  },
+  {
+    title: "Creators",
+    links: [
+      { label: "Your Library", to: "/library" },
+      { label: "Jam Sessions", to: "/go-live" },
+      { label: "Truth Score", to: "/truthseeker" },
+      { label: "Partials (%)", to: "/social?tag=%25" },
+    ],
+  },
+  {
+    title: "Company",
+    links: [
+      { label: "Our Mission", to: "/#mission" },
+      { label: "Integrity Pledge", to: "/terms" },
+      { label: "Community", to: "/social" },
+      { label: "Contact", to: "mailto:support@wiseravenshare.com", isExternal: true },
+    ],
+  },
 ];
 
 const legalLinks = [
@@ -35,10 +60,22 @@ export default function Footer() {
               <h4 className="text-xs tracking-[0.2em] uppercase text-accent/80 font-medium mb-4">{c.title}</h4>
               <ul className="space-y-2.5">
                 {c.links.map((l) => (
-                  <li key={l}>
-                    <a href="#top" className="text-sm text-muted-foreground hover:text-foreground transition-colors font-light">
-                      {l}
-                    </a>
+                  <li key={l.label}>
+                    {l.isExternal || l.to.startsWith("mailto:") || l.to.startsWith("http") || l.to.startsWith("/#") ? (
+                      <a
+                        href={l.to}
+                        className="text-sm text-muted-foreground hover:text-foreground transition-colors font-light"
+                      >
+                        {l.label}
+                      </a>
+                    ) : (
+                      <Link
+                        to={l.to}
+                        className="text-sm text-muted-foreground hover:text-foreground transition-colors font-light"
+                      >
+                        {l.label}
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>
