@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useAuth } from "@/lib/AuthContext";
 import { apiClient, resolveMediaUrl } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -21,14 +22,22 @@ import {
 } from "lucide-react";
 
 export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachToPost, className = "" }) {
+  const { user, activeAvatar: globalActiveAvatar, updateActiveAvatar } = useAuth();
   const [avatars, setAvatars] = useState([]);
-  const [activeAvatar, setActiveAvatar] = useState("");
-  const [currentUser, setCurrentUser] = useState(null);
+  const [activeAvatar, setActiveAvatar] = useState(globalActiveAvatar || "");
+  const [currentUser, setCurrentUser] = useState(user || null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [selecting, setSelecting] = useState(null);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+
+  // Sync with global auth avatar
+  useEffect(() => {
+    if (globalActiveAvatar) {
+      setActiveAvatar(globalActiveAvatar);
+    }
+  }, [globalActiveAvatar]);
 
   // Camera state
   const [cameraActive, setCameraActive] = useState(false);
@@ -226,9 +235,7 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
         };
 
         setActiveAvatar(avatarUrl);
-        try {
-          localStorage.setItem("wiseravenshare_guest_avatar", avatarUrl);
-        } catch {}
+        updateActiveAvatar(avatarUrl);
 
         setAvatars((prev) => [
           newAvatar,
@@ -265,9 +272,7 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
 
       const resolved = resolveMediaUrl(avatar.url);
       setActiveAvatar(resolved);
-      try {
-        localStorage.setItem("wiseravenshare_guest_avatar", resolved);
-      } catch {}
+      updateActiveAvatar(resolved);
 
       setAvatars((prev) =>
         prev.map((a) => ({

@@ -37,10 +37,8 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="flex items-center justify-between px-6 h-20 border-b border-border/40">
-        <div className="flex items-center gap-2.5">
-          <Image src={logoUrl} alt="WiseRavenShare" className="w-9 h-9 rounded-full" fittingType="fill" />
-          <span className="font-display text-sm tracking-[0.2em] text-foreground">WRS</span>
-        </div>
+        {/* Top Left Hand Side Logo & Photo Avatar Upload Container */}
+        <TopLeftAvatarLogoContainer />
         <div className="flex items-center gap-3">
           {isAuthenticated ? (
             <>

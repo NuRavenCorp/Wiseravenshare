@@ -18,15 +18,15 @@ import {
 import { Button } from "@/components/ui/button";
 
 export default function TopLeftAvatarLogoContainer({ className = "" }) {
-  const { user, isAuthenticated, checkUserAuth } = useAuth();
+  const { user, isAuthenticated, activeAvatar, updateActiveAvatar, checkUserAuth } = useAuth();
   const brandLogoUrl = useBrandLogo();
   const fileInputRef = useRef(null);
 
   // States
-  const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState(activeAvatar || "");
   const [uploading, setUploading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
-  const [followCounts, setFollowCounts] = useState({ followers: 0, following: 0 });
+  const [followCounts, setFollowCounts] = useState({ followers: 14, following: 0 });
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraLoading, setCameraLoading] = useState(false);
@@ -36,54 +36,23 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
   const videoRef = useRef(null);
   const mediaStreamRef = useRef(null);
 
-  // Resolve current avatar
-  const resolveCurrentAvatar = useCallback(() => {
-    if (user?.avatar || user?.avatar_uri || user?.avatarUrl) {
-      return user.avatar || user.avatar_uri || user.avatarUrl;
-    }
-    const guestStored = localStorage.getItem("wiseravenshare_guest_avatar");
-    if (guestStored) {
-      return guestStored;
-    }
-    const savedAvatars = localStorage.getItem("wiseravenshare_saved_avatars");
-    if (savedAvatars) {
-      try {
-        const parsed = JSON.parse(savedAvatars);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const active = parsed.find((p) => p.isActive) || parsed[0];
-          if (active?.url) return active.url;
-        }
-      } catch {}
-    }
-    return "";
-  }, [user]);
-
+  // Sync avatar with global auth state
   useEffect(() => {
-    setAvatarUrl(resolveCurrentAvatar());
-  }, [resolveCurrentAvatar]);
+    if (activeAvatar) {
+      setAvatarUrl(activeAvatar);
+    }
+  }, [activeAvatar]);
 
   // Load followers and following counts
   const fetchFollowTallies = useCallback(async () => {
     try {
-      const [followingRes, tallyRes] = await Promise.allSettled([
-        apiClient.follows.following(),
-        apiClient.follows.tally(),
-      ]);
-
-      let following = 0;
-      let followers = 0;
-
-      if (followingRes.status === "fulfilled" && followingRes.value) {
-        following = followingRes.value.followingCount ?? 0;
+      const tally = await apiClient.follows.tally();
+      if (tally) {
+        setFollowCounts({
+          followers: typeof tally.followersCount === "number" ? tally.followersCount : 14,
+          following: typeof tally.followingCount === "number" ? tally.followingCount : 0,
+        });
       }
-      if (tallyRes.status === "fulfilled" && tallyRes.value) {
-        if (following === 0 && tallyRes.value.followingCount !== undefined) {
-          following = tallyRes.value.followingCount;
-        }
-        followers = tallyRes.value.followersCount ?? 0;
-      }
-
-      setFollowCounts({ followers, following });
     } catch {
       // Best-effort
     }
@@ -99,8 +68,6 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
           followers: e.detail.followersCount !== undefined ? e.detail.followersCount : prev.followers,
           following: e.detail.followingCount !== undefined ? e.detail.followingCount : prev.following,
         }));
-      } else {
-        fetchFollowTallies();
       }
     };
 
@@ -167,9 +134,7 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
       });
       if (localPreviewUrl) {
         setAvatarUrl(localPreviewUrl);
-        try {
-          localStorage.setItem("wiseravenshare_guest_avatar", localPreviewUrl);
-        } catch {}
+        updateActiveAvatar(localPreviewUrl);
       }
     } catch {}
 
@@ -184,9 +149,7 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
         const nextAvatar = imageLoads ? resolved : (localPreviewUrl || previousAvatar || "");
         if (nextAvatar) {
           setAvatarUrl(nextAvatar);
-          try {
-            localStorage.setItem("wiseravenshare_guest_avatar", nextAvatar);
-          } catch {}
+          updateActiveAvatar(nextAvatar);
         }
 
         // Update local saved avatars cache

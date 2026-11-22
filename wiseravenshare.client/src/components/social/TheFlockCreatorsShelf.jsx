@@ -115,11 +115,16 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
   const [status, setStatus] = useState(null);
   const [personas, setPersonas] = useState(DEFAULT_FLOCK_PERSONAS);
   const [followingMap, setFollowingMap] = useState({});
+  const followingMapRef = useRef({});
   const [userFollowersCount, setUserFollowersCount] = useState(0);
   const [userFollowingCount, setUserFollowingCount] = useState(0);
   const [totalFlockFollowers, setTotalFlockFollowers] = useState(0);
   const [triggering, setTriggering] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    followingMapRef.current = followingMap;
+  }, [followingMap]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -131,16 +136,17 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
       let tallyData = null;
       if (tallyRes.status === "fulfilled" && tallyRes.value) {
         tallyData = tallyRes.value;
-        setUserFollowingCount(tallyData.followingCount ?? 0);
-        setUserFollowersCount(tallyData.followersCount ?? 0);
-        setTotalFlockFollowers(tallyData.totalFlockFollowers ?? 0);
+        if (typeof tallyData.followingCount === "number") setUserFollowingCount(tallyData.followingCount);
+        if (typeof tallyData.followersCount === "number") setUserFollowersCount(tallyData.followersCount);
+        if (typeof tallyData.totalFlockFollowers === "number") setTotalFlockFollowers(tallyData.totalFlockFollowers);
 
         if (Array.isArray(tallyData.followingIds)) {
           const map = {};
           tallyData.followingIds.forEach((id) => {
             map[id] = true;
           });
-          setFollowingMap((prev) => ({ ...prev, ...map }));
+          setFollowingMap(map);
+          followingMapRef.current = map;
         }
       }
 
@@ -154,7 +160,7 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
         );
         const personaTally = tallyData?.personas?.[sp.key] || tallyData?.personas?.[sp.username];
 
-        const isFollowing = personaTally?.isFollowing ?? Boolean(sp.userId && followingMap[sp.userId]);
+        const isFollowing = personaTally?.isFollowing ?? Boolean(sp.userId && followingMapRef.current[sp.userId]);
 
         return {
           key: sp.key,
@@ -167,8 +173,8 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
           isResting: Boolean(sp.isResting),
           lifetimePosts: sp.lifetimePosts || fallback?.lifetimePosts || 1,
           lifetimeComments: sp.lifetimeComments || fallback?.lifetimeComments || 1,
-          followersCount: personaTally?.followersCount || sp.followersCount || 340,
-          followingCount: personaTally?.followingCount || sp.followingCount || 42,
+          followersCount: personaTally?.followersCount || sp.followersCount || fallback?.followersCount || 342,
+          followingCount: personaTally?.followingCount || sp.followingCount || fallback?.followingCount || 42,
           isFollowing,
         };
       });
@@ -179,7 +185,7 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
     } finally {
       setLoading(false);
     }
-  }, [followingMap]);
+  }, []);
 
   useEffect(() => {
     fetchStatus();
@@ -376,7 +382,17 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
             >
               <div className="space-y-2.5">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="relative">
+                  <div
+                    className="relative cursor-pointer group/avatar"
+                    onClick={() => {
+                      const targetName = persona.username || persona.displayName;
+                      window.dispatchEvent(new CustomEvent("wr_filter_author", { detail: { author: targetName } }));
+                      if (!window.location.pathname.includes("/social") && window.location.pathname !== "/") {
+                        window.location.href = `/social?author=${encodeURIComponent(targetName)}`;
+                      }
+                    }}
+                    title={`View ${persona.displayName}'s feed`}
+                  >
                     <img
                       src={persona.avatarUrl}
                       alt={persona.displayName}
@@ -398,8 +414,18 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
                   </span>
                 </div>
 
-                <div>
-                  <h3 className="font-heading text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">
+                <div
+                  className="cursor-pointer group/title"
+                  onClick={() => {
+                    const targetName = persona.username || persona.displayName;
+                    window.dispatchEvent(new CustomEvent("wr_filter_author", { detail: { author: targetName } }));
+                    if (!window.location.pathname.includes("/social") && window.location.pathname !== "/") {
+                      window.location.href = `/social?author=${encodeURIComponent(targetName)}`;
+                    }
+                  }}
+                  title={`View ${persona.displayName}'s feed`}
+                >
+                  <h3 className="font-heading text-sm font-semibold text-foreground truncate group-hover/title:text-primary transition-colors">
                     {persona.displayName}
                   </h3>
                   <p className="text-[11px] text-muted-foreground truncate">

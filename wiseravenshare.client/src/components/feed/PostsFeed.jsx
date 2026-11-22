@@ -53,8 +53,46 @@ export default function PostsFeed() {
   const [view, setView] = useState("feed");
   const [mode, setMode] = useState("following");
   const [tag, setTag] = useState("");
+  const [authorFilter, setAuthorFilter] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("author") || "";
+    } catch {
+      return "";
+    }
+  });
   const [followingCount, setFollowingCount] = useState(0);
   const [notificationTarget, setNotificationTarget] = useState({ postId: "", commentId: "" });
+
+  // Sync author filter with URL params
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const authorParam = params.get("author");
+    if (authorParam !== null && authorParam !== authorFilter) {
+      setAuthorFilter(authorParam);
+    }
+  }, [location.search, authorFilter]);
+
+  // Listen for global author filter requests from PostCard or Flock Creators
+  useEffect(() => {
+    const handleAuthorFilterEvent = (e) => {
+      const target = e.detail?.author || "";
+      if (target) {
+        setAuthorFilter(target);
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set("author", target.replace(/^@/, ""));
+          window.history.pushState(null, "", url.toString());
+        } catch {}
+        const anchor = document.getElementById("posts-feed-anchor");
+        if (anchor) {
+          anchor.scrollIntoView({ behavior: "smooth" });
+        }
+      }
+    };
+    window.addEventListener("wr_filter_author", handleAuthorFilterEvent);
+    return () => window.removeEventListener("wr_filter_author", handleAuthorFilterEvent);
+  }, []);
 
   // Track optimistically-added posts so they survive server re-fetches.
   const optimisticPostsRef = React.useRef(new Map());
@@ -241,9 +279,65 @@ export default function PostsFeed() {
   }, [fetchPosts]);
 
   const handleAuthRequired = () => apiClient.auth.redirectToLogin(window.location.pathname + window.location.hash);
-  const visiblePosts = posts.filter((post) => !blockedIds.includes(String(post.created_by_id))).filter((post) => !tag || (tag.startsWith("%")
-    ? post.partials?.some((value) => `%${String(value).toLowerCase()}` === tag.toLowerCase())
-    : post.hashtags?.some((value) => String(value).replace(/^#/, "").toLowerCase() === tag.toLowerCase())));
+
+  const matchesAuthor = (post, filter) => {
+    if (!filter) return true;
+    const f = String(filter).trim().toLowerCase().replace(/^@/, "");
+    const author = post.author || post.user || {};
+    const postUserId = String(post.created_by_id || post.userId || "").toLowerCase();
+    const authorId = String(author.id || author.userId || "").toLowerCase();
+    const username = String(author.username || author.handle || "").toLowerCase().replace(/^@/, "");
+    const name = String(author.name || author.display_name || author.displayName || "").toLowerCase();
+    return (
+      postUserId === f ||
+      authorId === f ||
+      username === f ||
+      name === f ||
+      (f.length >= 2 && (name.includes(f) || username.includes(f)))
+    );
+  };
+
+  const handleAuthorClick = async (authorTarget) => {
+    const targetName = authorTarget?.username || authorTarget?.name || authorTarget?.displayName || authorTarget?.display_name || authorTarget?.id || "";
+    if (!targetName) return;
+    setAuthorFilter(targetName);
+
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("author", targetName.replace(/^@/, ""));
+      window.history.pushState(null, "", url.toString());
+    } catch {}
+
+    const anchor = document.getElementById("posts-feed-anchor");
+    if (anchor) {
+      anchor.scrollIntoView({ behavior: "smooth" });
+    } else {
+      window.scrollTo({ top: 350, behavior: "smooth" });
+    }
+
+    const userId = authorTarget?.id || authorTarget?.userId;
+    if (userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+      try {
+        const res = await apiClient.posts.userPosts(userId, 1, 50);
+        const userItems = Array.isArray(res) ? res : (res?.items || []);
+        if (userItems.length > 0) {
+          const normalizedUserPosts = userItems.map(normalizePost);
+          setPosts((prev) => {
+            const existingIds = new Set(prev.map((p) => String(p.id)));
+            const newPosts = normalizedUserPosts.filter((p) => !existingIds.has(String(p.id)));
+            return [...newPosts, ...prev];
+          });
+        }
+      } catch {}
+    }
+  };
+
+  const visiblePosts = posts
+    .filter((post) => !blockedIds.includes(String(post.created_by_id)))
+    .filter((post) => matchesAuthor(post, authorFilter))
+    .filter((post) => !tag || (tag.startsWith("%")
+      ? post.partials?.some((value) => `%${String(value).toLowerCase()}` === tag.toLowerCase())
+      : post.hashtags?.some((value) => String(value).replace(/^#/, "").toLowerCase() === tag.toLowerCase())));
   const { trendingTopics, trendingItems, rankedPosts } = useMemo(() => {
     const counts = {};
     visiblePosts.forEach((post) => {
@@ -378,6 +472,36 @@ export default function PostsFeed() {
 
   return (
     <div className="space-y-5">
+      <div id="posts-feed-anchor" className="scroll-mt-24" />
+      {authorFilter && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/10 p-3.5 backdrop-blur-sm shadow-xs animate-in fade-in duration-300">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center font-bold text-primary text-sm shrink-0">
+              {authorFilter.replace(/^@/, "").charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Filtered User Feed</p>
+              <p className="text-sm font-semibold text-foreground">
+                Viewing posts by <span className="text-primary font-bold">@{authorFilter.replace(/^@/, "")}</span>
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setAuthorFilter("");
+              try {
+                const params = new URLSearchParams(window.location.search);
+                params.delete("author");
+                const newUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}${window.location.hash}`;
+                window.history.pushState(null, "", newUrl);
+              } catch {}
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-background/80 hover:bg-background border border-border text-foreground transition-all shadow-xs cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" /> Show all posts
+          </button>
+        </div>
+      )}
       {showComposer && <PostComposer compact onPosted={handlePosted} />}
       {currentUser && blockedUsers.length > 0 && <details className="rounded-lg border border-border bg-card/50 p-3"><summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground"><ShieldBan className="h-4 w-4" /> Blocked accounts ({blockedUsers.length})</summary><div className="mt-3 space-y-2">{blockedUsers.map((user) => <div key={user.id} className="flex items-center justify-between gap-3 rounded-md bg-background/60 px-3 py-2"><span className="truncate text-sm">{user.name || user.handle || user.id}</span><button onClick={() => unblockUser(user.id)} className="flex items-center gap-1 text-xs text-primary hover:underline"><ShieldCheck className="h-3.5 w-3.5" /> Unblock</button></div>)}</div></details>}
       {trendingTopics.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card/40 px-3 py-2"><span className="mr-1 text-xs font-medium text-muted-foreground">Trending topics</span>{trendingTopics.map(([topic, count]) => <button key={topic} onClick={() => openTag(topic.startsWith("#") ? topic.slice(1) : topic)} className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary hover:bg-primary/10">{topic}<span className="ml-1 opacity-60">{count}</span></button>)}</div>}
@@ -410,7 +534,32 @@ export default function PostsFeed() {
         {tag && <button onClick={() => setTag("")} className="flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs text-primary">{tag.startsWith("%") ? tag : `#${tag}`}<X className="h-3 w-3" /></button>}
       </div>
       {displayedPosts.length === 0 ? (
-        <div className="py-12 text-center"><Feather className="mx-auto mb-3 h-8 w-8 text-muted-foreground" /><p className="text-sm text-muted-foreground">{tag ? `No posts found for ${tag.startsWith("%") ? tag : `#${tag}`}.` : "No posts in this feed yet. Be the first to share."}</p></div>
+        <div className="py-12 text-center">
+          <Feather className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            {authorFilter
+              ? `No posts found from @${authorFilter.replace(/^@/, "")} yet.`
+              : tag
+              ? `No posts found for ${tag.startsWith("%") ? tag : `#${tag}`}.`
+              : "No posts in this feed yet. Be the first to share."}
+          </p>
+          {authorFilter && (
+            <button
+              onClick={() => {
+                setAuthorFilter("");
+                try {
+                  const params = new URLSearchParams(window.location.search);
+                  params.delete("author");
+                  const newUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}${window.location.hash}`;
+                  window.history.pushState(null, "", newUrl);
+                } catch {}
+              }}
+              className="mt-3 text-xs text-primary hover:underline font-medium cursor-pointer"
+            >
+              Clear filter and view all posts
+            </button>
+          )}
+        </div>
       ) : view === "timeline" ? (
         <PostTimeline
           posts={displayedPostsWithBookmarks}
@@ -420,6 +569,7 @@ export default function PostsFeed() {
           onBlocked={removeBlockedUser}
           onBookmarkChange={handleBookmarkChange}
           onAuthRequired={handleAuthRequired}
+          onAuthorClick={handleAuthorClick}
         />
       ) : (
         <div className="grid gap-5 md:grid-cols-2">
@@ -435,6 +585,7 @@ export default function PostsFeed() {
               onBlocked={removeBlockedUser}
               onAuthRequired={handleAuthRequired}
               onBookmarkChange={handleBookmarkChange}
+              onAuthorClick={handleAuthorClick}
             />
           ))}
         </div>

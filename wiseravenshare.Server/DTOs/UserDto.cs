@@ -12,6 +12,10 @@ namespace Wiseravenshare.Server.DTOs.User
         public string DisplayName { get; set; } = string.Empty;
         public string? Bio { get; set; }
         public string? AvatarUrl { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("avatar")]
+        public string? Avatar => AvatarUrl;
+        [System.Text.Json.Serialization.JsonPropertyName("avatar_uri")]
+        public string? AvatarUri => AvatarUrl;
         public string? CoverPhotoUrl { get; set; }
         public string? Location { get; set; }
         public string? Website { get; set; }
@@ -47,6 +51,10 @@ namespace Wiseravenshare.Server.DTOs.User
 
         [MaxLength(2000000)]
         public string? AvatarUrl { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("avatar")]
+        public string? Avatar => AvatarUrl;
+        [System.Text.Json.Serialization.JsonPropertyName("avatar_uri")]
+        public string? AvatarUri => AvatarUrl;
 
         [MaxLength(2000000)]
         public string? CoverPhotoUrl { get; set; }

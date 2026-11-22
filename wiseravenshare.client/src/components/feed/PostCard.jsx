@@ -24,6 +24,7 @@ export default function PostCard({
   onHashtagClick,
   onBlocked,
   onBookmarkChange,
+  onAuthorClick,
   blockedIds = EMPTY_BLOCKED_IDS,
   autoOpenComments = false,
   targetCommentId = "",
@@ -350,19 +351,51 @@ export default function PostCard({
     return null;
   }
 
+  const authorAvatar = author?.avatar || author?.avatar_uri || author?.avatarUrl || post.author?.avatar || post.author?.avatarUrl;
+
+  const handleAuthorFeedClick = (e) => {
+    e.stopPropagation();
+    const authorTarget = author || post.author || {
+      id: post.created_by_id,
+      name: authorName,
+      username: authorName,
+    };
+    if (typeof onAuthorClick === "function") {
+      onAuthorClick(authorTarget);
+    } else {
+      const targetUser = authorTarget.username || authorTarget.handle || authorTarget.name || post.created_by_id;
+      window.dispatchEvent(new CustomEvent("wr_filter_author", { detail: { author: targetUser } }));
+      if (!window.location.pathname.includes("/social") && window.location.pathname !== "/") {
+        window.location.href = `/social?author=${encodeURIComponent(targetUser)}`;
+      }
+    }
+  };
+
   return (
     <article id={`post-${post.id}`} className="rounded-2xl border border-border bg-background/60 backdrop-blur-sm overflow-hidden scroll-mt-24 transition-all duration-500">
       <div className="flex items-center justify-between p-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center overflow-hidden shrink-0">
-            {(author?.avatar_uri || author?.avatarUrl) ? (
-              <Image src={author.avatar_uri || author.avatarUrl} alt={authorName} fittingType="fill" className="w-full h-full" />
+        <button
+          type="button"
+          onClick={handleAuthorFeedClick}
+          className="flex items-center gap-3 text-left group hover:opacity-90 transition-opacity focus:outline-none cursor-pointer"
+          title={`View ${authorName}'s feed`}
+        >
+          <div className="w-10 h-10 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center overflow-hidden shrink-0 group-hover:ring-2 group-hover:ring-primary transition-all">
+            {authorAvatar ? (
+              <Image src={authorAvatar} alt={authorName} fittingType="fill" className="w-full h-full object-cover" />
             ) : (
               <span className="font-heading text-lg text-primary">{authorName.charAt(0).toUpperCase()}</span>
             )}
           </div>
           <div>
-            <p className="text-sm font-medium text-foreground">{authorName}</p>
+            <p className="text-sm font-medium text-foreground group-hover:text-primary transition-colors flex items-center gap-1.5">
+              <span>{authorName}</span>
+              {author?.username && (
+                <span className="text-xs text-muted-foreground font-normal">
+                  @{author.username.replace(/^@/, '')}
+                </span>
+              )}
+            </p>
             <p className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
               <span>{timeAgo}</span>
               {authorFollowersCount > 0 && (
@@ -373,7 +406,7 @@ export default function PostCard({
               )}
             </p>
           </div>
-        </div>
+        </button>
         <div className="flex items-center gap-2">
           <span className={`text-[10px] px-2 py-0.5 rounded-full border ${truthStyle.class}`}>{truthStyle.label}</span>
           {!isOwn && (

@@ -1,5 +1,6 @@
 import * as React from "react"
 import { ResponsiveImage } from "./responsive-image"
+import { resolveMediaUrl } from "@/api/client"
 import {
   getOriginalImageUrl,
   IMAGE_LOAD_MODE,
@@ -13,6 +14,9 @@ const DEAD_IMAGE_HOSTS = new Set(["media.apiclient.com"])
 
 const normalizeLegacyImageSource = (source) => {
   if (!source) return source
+  if (typeof source === "string" && (source.startsWith("/uploads/") || source.startsWith("/api/"))) {
+    return resolveMediaUrl(source)
+  }
   try {
     const parsed = new URL(source)
     if (DEAD_IMAGE_HOSTS.has(parsed.hostname.toLowerCase())) {

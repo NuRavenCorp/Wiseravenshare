@@ -102,6 +102,10 @@ public sealed class UserResponse
     public string Website { get; set; } = string.Empty;
     public string Avatar { get; set; } = string.Empty;
     public string AvatarUrl => Avatar;
+    [System.Text.Json.Serialization.JsonPropertyName("avatar_uri")]
+    public string Avatar_Uri => Avatar;
+    [System.Text.Json.Serialization.JsonPropertyName("avatarUrl")]
+    public string AvatarUrlAlias => Avatar;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public SocialFeedSettings SocialFeeds { get; set; } = new();

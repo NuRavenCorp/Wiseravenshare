@@ -4885,6 +4885,17 @@ LIMIT 1;";
             var existingById = await _userRepository.GetByIdAsync(parsedId);
             if (existingById is not null)
             {
+                if (string.IsNullOrWhiteSpace(authUser.Avatar) && !string.IsNullOrWhiteSpace(existingById.AvatarUrl))
+                {
+                    authUser.Avatar = existingById.AvatarUrl;
+                    _userStore.UpdateProfile(authUser.Id, new UpdateUserProfileRequest { Avatar = existingById.AvatarUrl });
+                }
+                else if (!string.IsNullOrWhiteSpace(authUser.Avatar) && existingById.AvatarUrl != authUser.Avatar)
+                {
+                    existingById.AvatarUrl = authUser.Avatar;
+                    await _userRepository.UpdateAsync(existingById);
+                }
+
                 _userStore.TryAlignUserId(authUser.Email, existingById.Id.ToString("N"));
                 return existingById.Id;
             }
@@ -4895,8 +4906,19 @@ LIMIT 1;";
                 if (!existingByEmail.IsActive)
                 {
                     existingByEmail.IsActive = true;
-                    await _userRepository.UpdateAsync(existingByEmail);
                 }
+
+                if (string.IsNullOrWhiteSpace(authUser.Avatar) && !string.IsNullOrWhiteSpace(existingByEmail.AvatarUrl))
+                {
+                    authUser.Avatar = existingByEmail.AvatarUrl;
+                    _userStore.UpdateProfile(authUser.Id, new UpdateUserProfileRequest { Avatar = existingByEmail.AvatarUrl });
+                }
+                else if (!string.IsNullOrWhiteSpace(authUser.Avatar) && existingByEmail.AvatarUrl != authUser.Avatar)
+                {
+                    existingByEmail.AvatarUrl = authUser.Avatar;
+                }
+
+                await _userRepository.UpdateAsync(existingByEmail);
 
                 _userStore.TryAlignUserId(authUser.Email, existingByEmail.Id.ToString("N"));
                 return existingByEmail.Id;

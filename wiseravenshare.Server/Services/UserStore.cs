@@ -334,7 +334,8 @@ public sealed class UserStore
     public UserRecord UpsertFromExternalIdentity(string id, string email, string name, string avatar)
     {
         var normalizedEmail = email.Trim();
-        if (_usersByEmail.TryGetValue(normalizedEmail, out var existing))
+        if (_usersByEmail.TryGetValue(normalizedEmail, out var existing) ||
+            (!string.IsNullOrWhiteSpace(id) && TryGetById(id, out existing) && existing is not null))
         {
             var shouldPersist = false;
             var safeName = string.IsNullOrWhiteSpace(name) ? normalizedEmail.Split('@')[0] : name.Trim();
@@ -1046,39 +1047,46 @@ public sealed class UserStore
 
     private void LoadPersistedUsersUnsafe()
     {
-        if (TryLoadUsersFromDatabase())
-        {
-            return;
-        }
+        var dbLoaded = TryLoadUsersFromDatabase();
 
+        // Always also merge with durable local users.json file to preserve any offline/recently uploaded avatars
         var path = GetUsersFilePath();
-        if (!System.IO.File.Exists(path))
+        if (System.IO.File.Exists(path))
         {
-            return;
-        }
-
-        try
-        {
-            var json = System.IO.File.ReadAllText(path);
-            var persistedUsers = JsonSerializer.Deserialize<List<UserRecord>>(json) ?? [];
-            foreach (var persistedUser in persistedUsers)
+            try
             {
-                if (string.IsNullOrWhiteSpace(persistedUser.Email) || string.IsNullOrWhiteSpace(persistedUser.PasswordHash))
+                var json = System.IO.File.ReadAllText(path);
+                var persistedUsers = JsonSerializer.Deserialize<List<UserRecord>>(json) ?? [];
+                foreach (var persistedUser in persistedUsers)
                 {
-                    continue;
+                    if (string.IsNullOrWhiteSpace(persistedUser.Email))
+                    {
+                        continue;
+                    }
+
+                    persistedUser.SocialFeeds ??= new SocialFeedSettings();
+                    persistedUser.AiConnector ??= new UserAiConnectorSettings();
+                    persistedUser.CreatedAtUtc = persistedUser.CreatedAtUtc == default ? DateTime.UtcNow : persistedUser.CreatedAtUtc;
+                    persistedUser.UpdatedAtUtc = persistedUser.UpdatedAtUtc == default ? DateTime.UtcNow : persistedUser.UpdatedAtUtc;
+
+                    if (_usersByEmail.TryGetValue(persistedUser.Email, out var existing))
+                    {
+                        // Preserve any existing avatar from file if DB record had empty avatar
+                        if (string.IsNullOrWhiteSpace(existing.Avatar) && !string.IsNullOrWhiteSpace(persistedUser.Avatar))
+                        {
+                            existing.Avatar = persistedUser.Avatar;
+                        }
+                    }
+                    else
+                    {
+                        _usersByEmail.TryAdd(persistedUser.Email, persistedUser);
+                    }
                 }
-
-                persistedUser.SocialFeeds ??= new SocialFeedSettings();
-                persistedUser.AiConnector ??= new UserAiConnectorSettings();
-                persistedUser.CreatedAtUtc = persistedUser.CreatedAtUtc == default ? DateTime.UtcNow : persistedUser.CreatedAtUtc;
-                persistedUser.UpdatedAtUtc = persistedUser.UpdatedAtUtc == default ? DateTime.UtcNow : persistedUser.UpdatedAtUtc;
-
-                _usersByEmail.TryAdd(persistedUser.Email, persistedUser);
             }
-        }
-        catch
-        {
-            // Keep auth available even if persistence file is malformed.
+            catch
+            {
+                // Keep auth available even if persistence file is malformed.
+            }
         }
     }
 

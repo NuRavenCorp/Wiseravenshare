@@ -34,11 +34,22 @@ export default function PostComposer({ onPosted, compact }) {
   const [mediaUrls, setMediaUrls] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [crossPostToPlatforms, setCrossPostToPlatforms] = useState(false);
+  const [connectedCount, setConnectedCount] = useState(0);
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
   const MAX_POST_LENGTH = 1000;
 
   const currentType = POST_TYPES.find((t) => t.value === postType);
+
+  useEffect(() => {
+    apiClient.social?.getAllPlatformStatuses?.().then((res) => {
+      if (res) {
+        const count = Object.values(res).filter((s) => s?.connected).length;
+        setConnectedCount(count);
+      }
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const handleAttach = (e) => {
@@ -112,6 +123,14 @@ export default function PostComposer({ onPosted, compact }) {
         mediaUrls: mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null,
         hashtags: tags,
       });
+
+      if (crossPostToPlatforms) {
+        apiClient.functions?.invoke?.("SocialCrossPosts", {
+          content: taggedContent,
+          queue: true,
+        }).catch((err) => console.warn("Background cross-post failed:", err));
+      }
+
       setContent("");
       setHashtags("");
       setPartials("");
@@ -235,6 +254,18 @@ export default function PostComposer({ onPosted, compact }) {
           aria-label="Partials"
         />
       </div>
+
+      {connectedCount > 0 && (
+        <label className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer select-none py-1">
+          <input
+            type="checkbox"
+            checked={crossPostToPlatforms}
+            onChange={(e) => setCrossPostToPlatforms(e.target.checked)}
+            className="rounded border-border text-primary focus:ring-primary w-3.5 h-3.5 cursor-pointer"
+          />
+          <span>Also cross-post to all {connectedCount} connected platform{connectedCount !== 1 ? "s" : ""}</span>
+        </label>
+      )}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

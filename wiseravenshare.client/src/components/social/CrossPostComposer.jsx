@@ -323,9 +323,30 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
       <CardContent className="space-y-6">
         {/* Connected platforms selector chips */}
         <div className="space-y-2">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Target Destinations
-          </Label>
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Target Destinations
+            </Label>
+            <button
+              type="button"
+              onClick={() => {
+                const totalConnected = [fbConnected, igConnected, tiktokConnected, youtubeConnected, twitterConnected, blueskyConnected, linkedinConnected].filter(Boolean).length;
+                const shouldSelectAll = selectedTargetsCount < totalConnected;
+                if (fbConnected) setPostToFacebook(shouldSelectAll);
+                if (igConnected) setPostToInstagram(shouldSelectAll);
+                if (tiktokConnected) setPostToTikTok(shouldSelectAll);
+                if (youtubeConnected) setPostToYouTube(shouldSelectAll);
+                if (twitterConnected) setPostToTwitter(shouldSelectAll);
+                if (blueskyConnected) setPostToBluesky(shouldSelectAll);
+                if (linkedinConnected) setPostToLinkedIn(shouldSelectAll);
+              }}
+              className="text-xs font-semibold text-primary hover:underline cursor-pointer"
+            >
+              {selectedTargetsCount < [fbConnected, igConnected, tiktokConnected, youtubeConnected, twitterConnected, blueskyConnected, linkedinConnected].filter(Boolean).length
+                ? "Select All Connected Platforms"
+                : "Deselect All"}
+            </button>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
             {fbConnected && (
               <button

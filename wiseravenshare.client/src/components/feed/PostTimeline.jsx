@@ -12,7 +12,16 @@ const formatDateGroup = (dateStr) => {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 };
 
-export default function PostTimeline({ posts, currentUser, onAuthRequired, onHashtagClick, onBlocked, onBookmarkChange, blockedIds }) {
+export default function PostTimeline({
+  posts,
+  currentUser,
+  onAuthRequired,
+  onHashtagClick,
+  onBlocked,
+  onBookmarkChange,
+  onAuthorClick,
+  blockedIds,
+}) {
   if (!posts || posts.length === 0) return null;
 
   const groups = {};
@@ -49,6 +58,7 @@ export default function PostTimeline({ posts, currentUser, onAuthRequired, onHas
                     onBlocked={onBlocked}
                     onBookmarkChange={onBookmarkChange}
                     onAuthRequired={onAuthRequired}
+                    onAuthorClick={onAuthorClick}
                   />
                 </div>
               ))}

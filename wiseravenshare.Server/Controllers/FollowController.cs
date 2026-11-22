@@ -246,6 +246,16 @@ public class FollowController : ControllerBase
             return id;
         }
 
+        var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            var userStore = HttpContext.RequestServices.GetService<UserStore>();
+            if (userStore != null && userStore.TryGetByEmail(email, out var user) && user != null && Guid.TryParse(user.Id, out var storeGuid))
+            {
+                return storeGuid;
+            }
+        }
+
         return Guid.Empty;
     }
 
@@ -254,10 +264,20 @@ public class FollowController : ControllerBase
         var anonHeader = Request.Headers["X-Anonymous-User"].FirstOrDefault();
         if (Guid.TryParse(anonHeader, out var parsed) && parsed != Guid.Empty)
         {
+            try
+            {
+                Response.Cookies.Append("wr_anon_id", parsed.ToString(), new Microsoft.AspNetCore.Http.CookieOptions
+                {
+                    Expires = DateTimeOffset.UtcNow.AddYears(1),
+                    HttpOnly = false,
+                    SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax
+                });
+            }
+            catch { }
             return parsed;
         }
 
-        if (Request.Cookies.TryGetValue("wr_anon_id", out var cookieVal) && Guid.TryParse(cookieVal, out var cookieGuid))
+        if (Request.Cookies.TryGetValue("wr_anon_id", out var cookieVal) && Guid.TryParse(cookieVal, out var cookieGuid) && cookieGuid != Guid.Empty)
         {
             return cookieGuid;
         }

@@ -542,7 +542,18 @@ public sealed class EngagementSimulatorService
 
     public EngagementSimulatorStatus GetStatus()
     {
+        var followStore = _serviceProvider.GetService<FollowStore>();
         var personas = _personaStates.Values.OrderBy(p => p.Username).ToList();
+
+        if (followStore != null)
+        {
+            foreach (var p in personas)
+            {
+                p.FollowersCount = followStore.GetFollowersCount(p.UserId, p.Key);
+                p.FollowingCount = followStore.GetFollowingCount(p.UserId, p.Key);
+            }
+        }
+
         return new EngagementSimulatorStatus
         {
             IsActive = true,

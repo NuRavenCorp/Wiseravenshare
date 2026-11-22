@@ -77,16 +77,16 @@ export default function FollowStatsHero() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const [followingRes, tallyRes, notifsRes] = await Promise.allSettled([
-        apiClient.follows.following(),
+      const [tallyRes, notifsRes] = await Promise.allSettled([
         apiClient.follows.tally(),
         user?.id ? apiClient.notifications.list(1, 50, "") : Promise.resolve({ items: [] }),
       ]);
 
-      const following = followingRes.status === "fulfilled" ? (followingRes.value?.followingCount ?? 0) : 0;
+      let following = 0;
       let followers = 0;
       if (tallyRes.status === "fulfilled" && tallyRes.value) {
         followers = tallyRes.value.followersCount ?? 0;
+        following = tallyRes.value.followingCount ?? 0;
       }
 
       let newFollowers = 0;

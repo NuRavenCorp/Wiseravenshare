@@ -35,11 +35,65 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [userRoles, setUserRoles] = useState([]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [activeAvatar, setActiveAvatar] = useState(() => {
+    if (typeof window === "undefined" || !window.localStorage) return "";
+    return window.localStorage.getItem("wiseravenshare_active_avatar") ||
+           window.localStorage.getItem("wiseravenshare_guest_avatar") || "";
+  });
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingPublicSettings, setIsLoadingPublicSettings] = useState(true);
   const [authError, setAuthError] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [appPublicSettings, setAppPublicSettings] = useState(null); // Contains only { id, public_settings }
+
+  const updateActiveAvatar = React.useCallback((newAvatarUrl) => {
+    if (!newAvatarUrl) return;
+    setActiveAvatar(newAvatarUrl);
+    try {
+      window.localStorage.setItem("wiseravenshare_active_avatar", newAvatarUrl);
+      window.localStorage.setItem("wiseravenshare_guest_avatar", newAvatarUrl);
+    } catch {}
+
+    setUser((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        avatar: newAvatarUrl,
+        avatarUrl: newAvatarUrl,
+        avatar_uri: newAvatarUrl,
+      };
+    });
+
+    window.dispatchEvent(
+      new CustomEvent("wr_avatar_updated", { detail: { avatarUrl: newAvatarUrl } })
+    );
+  }, []);
+
+  useEffect(() => {
+    const handleAvatarUpdated = (e) => {
+      const url = e.detail?.avatarUrl;
+      if (url && url !== activeAvatar) {
+        setActiveAvatar(url);
+        try {
+          window.localStorage.setItem("wiseravenshare_active_avatar", url);
+          window.localStorage.setItem("wiseravenshare_guest_avatar", url);
+        } catch {}
+      }
+    };
+    window.addEventListener("wr_avatar_updated", handleAvatarUpdated);
+    return () => window.removeEventListener("wr_avatar_updated", handleAvatarUpdated);
+  }, [activeAvatar]);
+
+  useEffect(() => {
+    if (user?.avatar || user?.avatarUrl || user?.avatar_uri) {
+      const resolved = user.avatar || user.avatarUrl || user.avatar_uri;
+      setActiveAvatar(resolved);
+      try {
+        window.localStorage.setItem("wiseravenshare_active_avatar", resolved);
+        window.localStorage.setItem("wiseravenshare_guest_avatar", resolved);
+      } catch {}
+    }
+  }, [user]);
 
   useEffect(() => {
     checkAppState();
@@ -191,6 +245,8 @@ export const AuthProvider = ({ children }) => {
     <AuthContext.Provider value={{ 
       user, 
       userRoles,
+      activeAvatar,
+      updateActiveAvatar,
       isAuthenticated, 
       isLoadingAuth,
       isLoadingPublicSettings,

@@ -52,6 +52,10 @@ public sealed class UsersController : ControllerBase
         var email = User.FindFirstValue(ClaimTypes.Email)
             ?? User.FindFirstValue("email")
             ?? (User.Identity?.Name?.Contains('@') == true ? User.Identity.Name : null);
+        var sub = User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub")
+            ?? User.FindFirstValue("id")
+            ?? User.FindFirstValue("userId");
 
         if (string.Equals(id, "me", StringComparison.OrdinalIgnoreCase))
         {
@@ -60,11 +64,38 @@ public sealed class UsersController : ControllerBase
                 return userByEmail;
             }
 
-            var sub = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
             if (!string.IsNullOrWhiteSpace(sub) && _userStore.TryGetById(sub, out var userBySub) && userBySub != null)
             {
                 return userBySub;
             }
+
+            // Check EF DbContext for authenticated user
+            if (Guid.TryParse(sub, out var gSub))
+            {
+                var dbUser = _dbContext.Users.FirstOrDefault(u => u.Id == gSub);
+                if (dbUser != null)
+                {
+                    return SyncDbUserToStore(dbUser);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(email))
+            {
+                var dbUser = _dbContext.Users.FirstOrDefault(u => u.Email == email);
+                if (dbUser != null)
+                {
+                    return SyncDbUserToStore(dbUser);
+                }
+            }
+
+            if (User.Identity?.IsAuthenticated == true && !string.IsNullOrWhiteSpace(email))
+            {
+                var name = User.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0];
+                return _userStore.UpsertFromToken(sub ?? Guid.NewGuid().ToString("N"), email, name);
+            }
+
+            // Anonymous visitor resolution
+            return _userStore.FindByLoginIdentifier("visitor");
         }
 
         if (_userStore.TryGetById(id, out var user) && user != null)
@@ -78,11 +109,26 @@ public sealed class UsersController : ControllerBase
             var withoutDashes = parsedGuid.ToString("N");
             if (_userStore.TryGetById(withDashes, out user) && user != null) return user;
             if (_userStore.TryGetById(withoutDashes, out user) && user != null) return user;
+
+            var dbUser = _dbContext.Users.FirstOrDefault(u => u.Id == parsedGuid);
+            if (dbUser != null)
+            {
+                return SyncDbUserToStore(dbUser);
+            }
         }
 
-        if (id.Contains('@') && _userStore.TryGetByEmail(id, out user) && user != null)
+        if (id.Contains('@'))
         {
-            return user;
+            if (_userStore.TryGetByEmail(id, out user) && user != null)
+            {
+                return user;
+            }
+
+            var dbUser = _dbContext.Users.FirstOrDefault(u => u.Email == id);
+            if (dbUser != null)
+            {
+                return SyncDbUserToStore(dbUser);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(email) && _userStore.TryGetByEmail(email, out user) && user != null)
@@ -90,7 +136,37 @@ public sealed class UsersController : ControllerBase
             return user;
         }
 
-        return null;
+        if (User.Identity?.IsAuthenticated == true && !string.IsNullOrWhiteSpace(email))
+        {
+            var name = User.FindFirstValue(ClaimTypes.Name) ?? email.Split('@')[0];
+            return _userStore.UpsertFromToken(sub ?? Guid.NewGuid().ToString("N"), email, name);
+        }
+
+        return _userStore.FindByLoginIdentifier(id);
+    }
+
+    private UserRecord SyncDbUserToStore(Wiseravenshare.Server.Entities.User dbUser)
+    {
+        var existing = _userStore.FindByLoginIdentifier(dbUser.Email);
+        if (existing != null)
+        {
+            if (string.IsNullOrWhiteSpace(existing.Avatar) && !string.IsNullOrWhiteSpace(dbUser.AvatarUrl))
+            {
+                existing.Avatar = dbUser.AvatarUrl;
+                _userStore.UpdateProfile(existing.Id, new UpdateUserProfileRequest { Avatar = dbUser.AvatarUrl });
+            }
+            return existing;
+        }
+
+        return _userStore.CreateUser(
+            dbUser.DisplayName ?? dbUser.Username,
+            dbUser.Email,
+            "Temp#123",
+            dbUser.Bio ?? "",
+            dbUser.Location ?? "",
+            dbUser.Website ?? "",
+            dbUser.AvatarUrl ?? "",
+            dbUser.Username);
     }
 
     [HttpGet("{id}")]
@@ -213,8 +289,18 @@ public sealed class UsersController : ControllerBase
         var user = ResolveTargetUser(targetId);
         if (user is null)
         {
-            user = _userStore.FindByLoginIdentifier("visitor")
-                ?? _userStore.CreateUser("Visitor", "visitor@wiseravenshare.ai", "Visitor#123", "Community Member", "", "", "", "visitor");
+            if (User.Identity?.IsAuthenticated == true)
+            {
+                var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+                var sub = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub") ?? Guid.NewGuid().ToString("N");
+                var name = User.FindFirstValue(ClaimTypes.Name) ?? email?.Split('@')[0] ?? "User";
+                user = _userStore.UpsertFromToken(sub, email ?? "user@wiseravenshare.ai", name);
+            }
+            else
+            {
+                user = _userStore.FindByLoginIdentifier("visitor")
+                    ?? _userStore.CreateUser("Visitor", "visitor@wiseravenshare.ai", "Visitor#123", "Community Member", "", "", "", "visitor");
+            }
         }
 
         file ??= Request.Form.Files.FirstOrDefault(f =>
@@ -340,8 +426,18 @@ public sealed class UsersController : ControllerBase
         var user = ResolveTargetUser(targetId);
         if (user is null)
         {
-            user = _userStore.FindByLoginIdentifier("visitor")
-                ?? _userStore.CreateUser("Visitor", "visitor@wiseravenshare.ai", "Visitor#123", "Community Member", "", "", "", "visitor");
+            if (User.Identity?.IsAuthenticated == true)
+            {
+                var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email");
+                var sub = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub") ?? Guid.NewGuid().ToString("N");
+                var name = User.FindFirstValue(ClaimTypes.Name) ?? email?.Split('@')[0] ?? "User";
+                user = _userStore.UpsertFromToken(sub, email ?? "user@wiseravenshare.ai", name);
+            }
+            else
+            {
+                user = _userStore.FindByLoginIdentifier("visitor")
+                    ?? _userStore.CreateUser("Visitor", "visitor@wiseravenshare.ai", "Visitor#123", "Community Member", "", "", "", "visitor");
+            }
         }
 
         var avatarUrl = request?.AvatarUrl?.Trim();

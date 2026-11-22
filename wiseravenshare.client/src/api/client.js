@@ -205,11 +205,31 @@ const requestJson = async (path, options = {}) => {
   return data;
 };
 
+const ANON_CLIENT_ID_KEY = "wiseravenshare_anon_client_id";
+
+export const getOrCreateClientAnonId = () => {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return "00000000-0000-0000-0000-000000000001";
+  }
+  let id = window.localStorage.getItem(ANON_CLIENT_ID_KEY);
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    id = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : "10000000-1000-4000-8000-100000000001";
+    try {
+      window.localStorage.setItem(ANON_CLIENT_ID_KEY, id);
+    } catch {}
+  }
+  return id;
+};
+
 const request = async (path, options = {}) => {
   const { omitAuth = false, __retryAuth = false, ...fetchOptions } = options;
   const token = readStoredToken();
   const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
+  const anonId = getOrCreateClientAnonId();
   const headers = {
+    "X-Anonymous-User": anonId,
     ...(isFormData ? {} : {}),
     ...(fetchOptions.headers || {}),
   };
