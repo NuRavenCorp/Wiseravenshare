@@ -81,6 +81,14 @@ const writeStoredToken = (token) => {
 };
 
 export const resolveApiUrl = (path) => `${API_BASE_URL}${path}`;
+export const resolveMediaUrl = (url) => {
+  if (!url) return "";
+  if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+  const cleanPath = url.startsWith("/") ? url : `/${url}`;
+  return `${API_BASE_URL}${cleanPath}`;
+};
 const buildUrl = resolveApiUrl;
 
 const parseResponseBody = async (response) => {

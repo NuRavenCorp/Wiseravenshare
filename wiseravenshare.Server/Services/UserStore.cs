@@ -1084,12 +1084,6 @@ public sealed class UserStore
 
     private void PersistUsers(UserRecord? changedUser = null)
     {
-        var dbSuccess = TryPersistUsersToDatabase(changedUser);
-        if (!dbSuccess && _requireDatabasePersistence)
-        {
-            throw new InvalidOperationException("User changes were not saved because the production database is unavailable. No connection was retained.");
-        }
-
         // Always sync users to local file storage backup so user state is retained across restarts
         try
         {
@@ -1099,7 +1093,13 @@ public sealed class UserStore
                     .OrderBy(u => u.Email, StringComparer.OrdinalIgnoreCase)
                     .ToList();
                 var json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
-                System.IO.File.WriteAllText(GetUsersFilePath(), json);
+                var path = GetUsersFilePath();
+                var dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                System.IO.File.WriteAllText(path, json);
             }
         }
         catch (Exception ex)
@@ -1107,9 +1107,10 @@ public sealed class UserStore
             Console.WriteLine($"PersistUsers file sync failed: {ex.Message}");
         }
 
+        var dbSuccess = TryPersistUsersToDatabase(changedUser);
         if (!dbSuccess)
         {
-            Console.WriteLine("Database persistence unavailable for UserStore; keeping user state in file-backed fallback.");
+            Console.WriteLine("Database persistence unavailable for UserStore; keeping user state in durable file-backed fallback.");
         }
     }
 

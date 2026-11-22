@@ -102,6 +102,40 @@ public class FollowTallyAndCrossPostTests : IDisposable
     }
 
     [Fact]
+    public void FollowStore_HaveBotsFollowUser_EnsuresAllBotsFollowUser()
+    {
+        var services = new ServiceCollection().BuildServiceProvider();
+        var store = new FollowStore(_env, services, NullLogger<FollowStore>.Instance);
+
+        var userId = Guid.NewGuid();
+        Assert.Equal(0, store.GetFollowersCount(userId));
+
+        var followed = store.HaveBotsFollowUser(userId);
+
+        Assert.Equal(14, followed);
+        Assert.Equal(14, store.GetFollowersCount(userId));
+
+        var tally = store.GetTally(userId);
+        Assert.Equal(14, tally.FollowersCount);
+    }
+
+    [Fact]
+    public void FollowStore_HaveBotsFollowAllUsers_ProcessesMultipleUsers()
+    {
+        var services = new ServiceCollection().BuildServiceProvider();
+        var store = new FollowStore(_env, services, NullLogger<FollowStore>.Instance);
+
+        var user1 = Guid.NewGuid();
+        var user2 = Guid.NewGuid();
+
+        var total = store.HaveBotsFollowAllUsers(new[] { user1, user2 });
+
+        Assert.Equal(28, total);
+        Assert.Equal(14, store.GetFollowersCount(user1));
+        Assert.Equal(14, store.GetFollowersCount(user2));
+    }
+
+    [Fact]
     public async System.Threading.Tasks.Task CrossPlatformPublishService_DispatchesToAllRequestedPlatforms()
     {
         var repo = new StubCrossPostRepo();

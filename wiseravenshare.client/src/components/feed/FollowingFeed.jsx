@@ -102,7 +102,20 @@ export default function FollowingFeed({ onPostLiked }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [followingCount, setFollowingCount] = useState(0);
   const PAGE_SIZE = 10;
+
+  useEffect(() => {
+    apiClient.follows.following().then((res) => {
+      if (res?.followingCount !== undefined) setFollowingCount(res.followingCount);
+    }).catch(() => {});
+
+    const handleFollows = (e) => {
+      if (e.detail?.followingCount !== undefined) setFollowingCount(e.detail.followingCount);
+    };
+    window.addEventListener("wr_follows_updated", handleFollows);
+    return () => window.removeEventListener("wr_follows_updated", handleFollows);
+  }, []);
 
   const load = useCallback(async (p = 1, append = false) => {
     setLoading(true);
@@ -164,7 +177,9 @@ export default function FollowingFeed({ onPostLiked }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Users className="w-4 h-4 text-primary" />
-          <h2 className="font-heading text-sm text-foreground tracking-wide">Your Network's Latest</h2>
+          <h2 className="font-heading text-sm text-foreground tracking-wide">
+            Your Network's Latest {followingCount > 0 && <span className="text-primary font-semibold">({followingCount} following)</span>}
+          </h2>
         </div>
         <button
           type="button"

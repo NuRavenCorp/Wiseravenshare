@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { apiClient } from "@/api/client";
+import { apiClient, resolveMediaUrl } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import {
@@ -67,7 +67,7 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
       const serverList = await apiClient.users.getSavedAvatars(me?.id || "me");
       const normalizedServerList = (Array.isArray(serverList) ? serverList : []).map((item) => ({
         fileName: item.fileName || item.fileName || item.url?.split("/").pop(),
-        url: item.url || item.avatarUrl || `/uploads/avatars/${item.fileName}`,
+        url: resolveMediaUrl(item.url || item.avatarUrl || `/uploads/avatars/${item.fileName}`),
         createdAt: item.createdAt || new Date().toISOString(),
         isActive: Boolean(item.isActive),
       }));
@@ -82,6 +82,7 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
         seen.add(key);
         combined.push({
           ...item,
+          url: resolveMediaUrl(item.url),
           isActive: Boolean(
             item.isActive ||
             (me?.avatar && (me.avatar === item.url || me.avatar.endsWith(item.fileName)))
@@ -196,10 +197,26 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
     setError("");
     setSuccessMsg("");
 
+    // Read into local data URL for instantaneous local display and persistence
+    try {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const localDataUrl = e.target?.result;
+        if (localDataUrl) {
+          setActiveAvatar(localDataUrl);
+          try {
+            localStorage.setItem("wiseravenshare_guest_avatar", localDataUrl);
+          } catch {}
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch {}
+
     try {
       const uploadRes = await apiClient.users.uploadAvatar(currentUser?.id || "me", file);
-      const avatarUrl = uploadRes?.avatarUrl || uploadRes?.avatar || "";
-      if (avatarUrl) {
+      const rawUrl = uploadRes?.avatarUrl || uploadRes?.avatar || "";
+      if (rawUrl) {
+        const avatarUrl = resolveMediaUrl(rawUrl);
         const fileName = avatarUrl.split("/").pop();
         const newAvatar = {
           fileName,
@@ -209,6 +226,10 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
         };
 
         setActiveAvatar(avatarUrl);
+        try {
+          localStorage.setItem("wiseravenshare_guest_avatar", avatarUrl);
+        } catch {}
+
         setAvatars((prev) => [
           newAvatar,
           ...prev.map((a) => ({ ...a, isActive: false })).filter((a) => a.url !== avatarUrl),
@@ -242,7 +263,12 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
         fileName: avatar.fileName,
       });
 
-      setActiveAvatar(avatar.url);
+      const resolved = resolveMediaUrl(avatar.url);
+      setActiveAvatar(resolved);
+      try {
+        localStorage.setItem("wiseravenshare_guest_avatar", resolved);
+      } catch {}
+
       setAvatars((prev) =>
         prev.map((a) => ({
           ...a,
@@ -253,8 +279,8 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
       setSuccessMsg("Profile avatar updated!");
       setTimeout(() => setSuccessMsg(""), 3000);
 
-      window.dispatchEvent(new CustomEvent("wr_avatar_updated", { detail: { avatarUrl: avatar.url } }));
-      onAvatarSelected?.(avatar.url);
+      window.dispatchEvent(new CustomEvent("wr_avatar_updated", { detail: { avatarUrl: resolved } }));
+      onAvatarSelected?.(resolved);
     } catch (err) {
       setError(err?.message || "Could not set avatar.");
     } finally {
@@ -449,7 +475,7 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
                 >
                   <div className="aspect-square w-full overflow-hidden bg-muted/40 relative">
                     <img
-                      src={avatar.url}
+                      src={resolveMediaUrl(avatar.url || avatar.dataUrl)}
                       alt={avatar.fileName || `Saved Photo ${idx + 1}`}
                       className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                       loading="lazy"

@@ -474,6 +474,42 @@ public sealed class UsersController : ControllerBase
         return $"/uploads/avatars/{uniqueFileName}";
     }
 
+    [HttpGet("/uploads/avatars/{fileName}")]
+    [HttpGet("avatar/file/{fileName}")]
+    [AllowAnonymous]
+    public IActionResult GetAvatarFile(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return NotFound();
+        var safeFileName = Path.GetFileName(fileName);
+
+        var searchFolders = new[]
+        {
+            Path.Combine(_environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot"), "uploads", "avatars"),
+            Path.Combine(_environment.ContentRootPath, "wwwroot", "uploads", "avatars"),
+            Path.Combine(_environment.ContentRootPath, "App_Data", "avatars"),
+            Path.Combine(_environment.ContentRootPath, "MediaStorage")
+        };
+
+        foreach (var folder in searchFolders)
+        {
+            var filePath = Path.Combine(folder, safeFileName);
+            if (System.IO.File.Exists(filePath))
+            {
+                var ext = Path.GetExtension(filePath).ToLowerInvariant();
+                var contentType = ext switch
+                {
+                    ".png" => "image/png",
+                    ".webp" => "image/webp",
+                    ".gif" => "image/gif",
+                    _ => "image/jpeg"
+                };
+                return PhysicalFile(filePath, contentType, enableRangeProcessing: true);
+            }
+        }
+
+        return NotFound();
+    }
+
     [HttpGet("{id}/feeds")]
     public IActionResult GetSocialFeeds(string id)
     {

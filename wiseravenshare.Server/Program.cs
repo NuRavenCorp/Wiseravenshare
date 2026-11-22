@@ -3714,6 +3714,38 @@ if (frontendDistExists)
     });
 }
 
+// ── Persistent Uploads & Avatar Static File Hosting ──
+try
+{
+    var uploadsRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "uploads");
+    Directory.CreateDirectory(Path.Combine(uploadsRoot, "avatars"));
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(uploadsRoot),
+        RequestPath = "/uploads",
+        OnPrepareResponse = ctx =>
+        {
+            ctx.Context.Response.Headers["Cache-Control"] = "public,max-age=86400";
+        }
+    });
+
+    var appDataAvatars = Path.Combine(app.Environment.ContentRootPath, "App_Data", "avatars");
+    Directory.CreateDirectory(appDataAvatars);
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(appDataAvatars),
+        RequestPath = "/uploads/avatars",
+        OnPrepareResponse = ctx =>
+        {
+            ctx.Context.Response.Headers["Cache-Control"] = "public,max-age=86400";
+        }
+    });
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "Failed configuring static uploads file provider.");
+}
+
 app.MapControllers();
 
 // Map built-in Identity minimal-API endpoints under /api/identity/

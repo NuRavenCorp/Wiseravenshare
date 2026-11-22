@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/AuthContext";
 import { useBrandLogo } from "@/lib/branding";
-import { apiClient } from "@/api/client";
+import { apiClient, resolveMediaUrl } from "@/api/client";
 import {
   Camera,
   Upload,
@@ -139,14 +139,32 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
     setUploading(true);
     setUploadSuccess(false);
 
+    // Read immediately into dataUrl for instantaneous visual display
+    try {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const localDataUrl = e.target?.result;
+        if (localDataUrl) {
+          setAvatarUrl(localDataUrl);
+          try {
+            localStorage.setItem("wiseravenshare_guest_avatar", localDataUrl);
+          } catch {}
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch {}
+
     try {
       const userId = user?.id || "me";
       const res = await apiClient.users.uploadAvatar(userId, file);
       const newUrl = res?.avatarUrl || res?.avatar || "";
 
       if (newUrl) {
-        setAvatarUrl(newUrl);
-        localStorage.setItem("wiseravenshare_guest_avatar", newUrl);
+        const resolved = resolveMediaUrl(newUrl);
+        setAvatarUrl(resolved);
+        try {
+          localStorage.setItem("wiseravenshare_guest_avatar", resolved);
+        } catch {}
 
         // Update local saved avatars cache
         try {
@@ -155,7 +173,7 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
           const updatedList = [
             {
               fileName: res.fileName || file.name,
-              url: newUrl,
+              url: resolved,
               createdAt: new Date().toISOString(),
               isActive: true,
             },
@@ -167,7 +185,7 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
         // Emit global event
         window.dispatchEvent(
           new CustomEvent("wr_avatar_updated", {
-            detail: { avatarUrl: newUrl, fileName: res?.fileName },
+            detail: { avatarUrl: resolved, fileName: res?.fileName },
           })
         );
       }
@@ -268,13 +286,13 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
         >
           {avatarUrl ? (
             <img
-              src={avatarUrl}
+              src={resolveMediaUrl(avatarUrl)}
               alt="Photo Avatar"
               className="w-full h-full object-cover rounded-full"
             />
           ) : brandLogoUrl ? (
             <img
-              src={brandLogoUrl}
+              src={resolveMediaUrl(brandLogoUrl)}
               alt="WiseRavenShare Logo"
               className="w-full h-full object-cover rounded-full"
             />
@@ -373,9 +391,9 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
             <div className="flex items-center gap-4 p-3.5 rounded-xl bg-muted/40 border border-border/60">
               <div className="w-16 h-16 rounded-full border-2 border-primary/40 overflow-hidden shrink-0 bg-background flex items-center justify-center">
                 {avatarUrl ? (
-                  <img src={avatarUrl} alt="Current Avatar" className="w-full h-full object-cover" />
+                  <img src={resolveMediaUrl(avatarUrl)} alt="Current Avatar" className="w-full h-full object-cover" />
                 ) : brandLogoUrl ? (
-                  <img src={brandLogoUrl} alt="Default Logo" className="w-full h-full object-cover" />
+                  <img src={resolveMediaUrl(brandLogoUrl)} alt="Default Logo" className="w-full h-full object-cover" />
                 ) : (
                   <User className="w-8 h-8 text-muted-foreground" />
                 )}

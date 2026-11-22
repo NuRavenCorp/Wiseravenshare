@@ -7,6 +7,19 @@ export default defineConfig({
   plugins: [
     react(),
   ],
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5242',
+        changeOrigin: true,
+      },
+      '/uploads': {
+        target: 'http://localhost:5242',
+        changeOrigin: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
