@@ -32,6 +32,7 @@ public sealed class PersonaFollowTallyDto
     public string Archetype { get; set; } = string.Empty;
     public string AvatarUrl { get; set; } = string.Empty;
     public int FollowersCount { get; set; }
+    public int FollowingCount { get; set; }
     public bool IsFollowing { get; set; }
 }
 
@@ -39,6 +40,7 @@ public sealed class FollowPersistedData
 {
     public List<FollowRecord> Records { get; set; } = new();
     public Dictionary<string, int> PersonaBaseTallies { get; set; } = new();
+    public Dictionary<string, int> PersonaBaseFollowing { get; set; } = new();
 }
 
 public class FollowStore
@@ -50,6 +52,7 @@ public class FollowStore
     private readonly ConcurrentDictionary<Guid, HashSet<Guid>> _userFollowing = new();
     private readonly ConcurrentDictionary<Guid, HashSet<Guid>> _userFollowers = new();
     private readonly ConcurrentDictionary<string, int> _personaBaseFollowers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _personaBaseFollowing = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Guid> _personaKeyToUserId = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<Guid, string> _userIdToPersonaKey = new();
     private readonly object _fileLock = new();
@@ -72,6 +75,25 @@ public class FollowStore
         ["kai_zen"] = 290,
         ["sora_writer"] = 375,
         ["orion_deepsea"] = 240
+    };
+
+    // Authentic initial baseline following counts for all 14 personas
+    private static readonly Dictionary<string, int> DefaultPersonaFollowing = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["marcus_vance"] = 42,
+        ["novapulse"] = 68,
+        ["seraphinabloom"] = 35,
+        ["cipher_chen"] = 54,
+        ["elena_investigates"] = 89,
+        ["tariq_quantum"] = 28,
+        ["kitsune_draws"] = 95,
+        ["devante_civic"] = 47,
+        ["maya_astronomy"] = 61,
+        ["zane_solarpunk"] = 39,
+        ["aurelia_sound"] = 73,
+        ["kai_zen"] = 31,
+        ["sora_writer"] = 52,
+        ["orion_deepsea"] = 33
     };
 
     public FollowStore(
@@ -102,6 +124,10 @@ public class FollowStore
             foreach (var kvp in DefaultPersonaTallies)
             {
                 _personaBaseFollowers[kvp.Key] = kvp.Value;
+            }
+            foreach (var kvp in DefaultPersonaFollowing)
+            {
+                _personaBaseFollowing[kvp.Key] = kvp.Value;
             }
 
             LoadPersistedData();
@@ -185,19 +211,40 @@ public class FollowStore
         return Math.Max(0, baseTally + realFollowers);
     }
 
-    public int GetFollowingCount(Guid followerId)
+    public int GetFollowingCount(Guid followerId, string? personaKeyOrUsername = null)
     {
-        if (followerId == Guid.Empty) return 0;
+        var targetId = followerId;
+        string? personaKey = null;
 
-        if (_userFollowing.TryGetValue(followerId, out var set))
+        if (!string.IsNullOrWhiteSpace(personaKeyOrUsername))
+        {
+            personaKey = personaKeyOrUsername;
+            if (targetId == Guid.Empty && _personaKeyToUserId.TryGetValue(personaKeyOrUsername, out var pid))
+            {
+                targetId = pid;
+            }
+        }
+        else if (targetId != Guid.Empty && _userIdToPersonaKey.TryGetValue(targetId, out var pk))
+        {
+            personaKey = pk;
+        }
+
+        var baseTally = 0;
+        if (!string.IsNullOrWhiteSpace(personaKey) && _personaBaseFollowing.TryGetValue(personaKey, out var b))
+        {
+            baseTally = b;
+        }
+
+        var realFollowing = 0;
+        if (targetId != Guid.Empty && _userFollowing.TryGetValue(targetId, out var set))
         {
             lock (set)
             {
-                return set.Count;
+                realFollowing = set.Count;
             }
         }
 
-        return 0;
+        return Math.Max(0, baseTally + realFollowing);
     }
 
     public IReadOnlyList<Guid> GetFollowingIds(Guid followerId)
@@ -341,6 +388,7 @@ public class FollowStore
             foreach (var p in personaList)
             {
                 var tally = GetFollowersCount(p.UserId, p.Key);
+                var following = GetFollowingCount(p.UserId, p.Key);
                 var isFollowing = IsFollowing(callerId, p.UserId, p.Key);
                 totalFlockFollowers += tally;
 
@@ -353,6 +401,7 @@ public class FollowStore
                     Archetype = p.Archetype,
                     AvatarUrl = p.AvatarUrl,
                     FollowersCount = tally,
+                    FollowingCount = following,
                     IsFollowing = isFollowing
                 };
             }
@@ -363,6 +412,7 @@ public class FollowStore
             {
                 var targetId = _personaKeyToUserId.TryGetValue(kvp.Key, out var id) ? id : Guid.Empty;
                 var count = GetFollowersCount(targetId, kvp.Key);
+                var following = GetFollowingCount(targetId, kvp.Key);
                 totalFlockFollowers += count;
                 personasMap[kvp.Key] = new PersonaFollowTallyDto
                 {
@@ -370,6 +420,7 @@ public class FollowStore
                     UserId = targetId,
                     Username = kvp.Key,
                     FollowersCount = count,
+                    FollowingCount = following,
                     IsFollowing = IsFollowing(callerId, targetId, kvp.Key)
                 };
             }
@@ -402,6 +453,14 @@ public class FollowStore
                         foreach (var kvp in data.PersonaBaseTallies)
                         {
                             _personaBaseFollowers[kvp.Key] = kvp.Value;
+                        }
+                    }
+
+                    if (data.PersonaBaseFollowing != null)
+                    {
+                        foreach (var kvp in data.PersonaBaseFollowing)
+                        {
+                            _personaBaseFollowing[kvp.Key] = kvp.Value;
                         }
                     }
 
@@ -465,7 +524,8 @@ public class FollowStore
                 var data = new FollowPersistedData
                 {
                     Records = records,
-                    PersonaBaseTallies = new Dictionary<string, int>(_personaBaseFollowers)
+                    PersonaBaseTallies = new Dictionary<string, int>(_personaBaseFollowers),
+                    PersonaBaseFollowing = new Dictionary<string, int>(_personaBaseFollowing)
                 };
 
                 var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
