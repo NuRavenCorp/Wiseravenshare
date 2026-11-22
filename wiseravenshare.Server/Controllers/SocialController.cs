@@ -102,7 +102,10 @@ public class SocialController : ControllerBase
             && !request.PublishToInstagram
             && !request.PublishToTikTok
             && !request.PublishToYouTube
-            && !request.PublishToWiseRavenStream)
+            && !request.PublishToWiseRavenStream
+            && !request.PublishToTwitter
+            && !request.PublishToBluesky
+            && !request.PublishToLinkedIn)
         {
             return BadRequest(new ErrorResponse
             {

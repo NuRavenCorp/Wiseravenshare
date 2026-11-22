@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Menu, X, MessageCircle, LogOut, Bot, CalendarDays } from "lucide-react";
+import { Menu, X, MessageCircle, LogOut, Bot, CalendarDays, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Image } from "@/components/ui/image";
 import { useAuth } from "@/lib/AuthContext";
-import { useBrandLogo } from "@/lib/branding";
 import NotificationBell from "@/components/NotificationBell";
 import RavenChirpToast from "@/components/RavenChirpToast";
 import VibePill from "@/components/vibe/VibePill";
@@ -19,8 +18,9 @@ const links = [
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  const { isAuthenticated, logout } = useAuth();
-  const logoUrl = useBrandLogo();
+  const { user, isAuthenticated, logout } = useAuth();
+  const avatarUrl = user?.avatar || user?.avatar_uri || user?.avatarUrl || "";
+  const avatarLabel = user?.displayName || user?.name || user?.handle || user?.username || "Account";
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -37,10 +37,21 @@ export default function Navbar() {
       }`}
     >
       <nav className="mx-auto max-w-7xl px-6 h-20 flex items-center justify-between">
-        <a href="#top" className="flex items-center gap-2.5 group shrink-0">
-          <Image src={logoUrl} alt="WiseRavenShare" className="w-10 h-10 rounded-full group-hover:scale-110 transition-transform duration-500" fittingType="fill" />
+        <Link
+          to={isAuthenticated ? "/dashboard" : "/login"}
+          className="flex items-center gap-2.5 group shrink-0"
+          aria-label="User avatar container"
+          title={avatarLabel}
+        >
+          <div className="w-10 h-10 rounded-full overflow-hidden border border-border bg-secondary/40 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
+            {avatarUrl ? (
+              <Image src={avatarUrl} alt={avatarLabel} className="w-10 h-10 object-cover" fittingType="fill" />
+            ) : (
+              <User className="w-5 h-5 text-muted-foreground" />
+            )}
+          </div>
           <span className="font-display text-lg tracking-[0.2em] text-foreground">WRS</span>
-        </a>
+        </Link>
 
         <div className="hidden lg:flex items-center gap-9">
           {links.map((l) => {

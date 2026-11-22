@@ -104,6 +104,9 @@ public sealed class SocialOrchestrationController : ControllerBase
             PublishToInstagram = targetPlatforms.Contains("instagram"),
             PublishToTikTok = targetPlatforms.Contains("tiktok"),
             PublishToYouTube = targetPlatforms.Contains("youtube"),
+            PublishToTwitter = targetPlatforms.Contains("twitter"),
+            PublishToBluesky = targetPlatforms.Contains("bluesky"),
+            PublishToLinkedIn = targetPlatforms.Contains("linkedin"),
             FacebookPageId = fbPageId,
             FacebookPageAccessToken = fbPageToken,
             TikTokUsername = ttUsername,
@@ -172,7 +175,8 @@ public sealed class SocialOrchestrationController : ControllerBase
             tiktok = ConnectionStatus(feeds?.TikTok),
             youtube = ConnectionStatus(feeds?.YouTube),
             twitter = ConnectionStatus(feeds?.Twitter),
-            bluesky = ConnectionStatus(feeds?.Bluesky)
+            bluesky = ConnectionStatus(feeds?.Bluesky),
+            linkedin = ConnectionStatus(feeds?.LinkedIn)
         });
     }
 
@@ -446,6 +450,12 @@ public sealed class SocialOrchestrationController : ControllerBase
             auto.Add("tiktok");
         if (feeds?.YouTube?.Enabled == true && !string.IsNullOrWhiteSpace(feeds.YouTube.DestinationId))
             auto.Add("youtube");
+        if (feeds?.Twitter?.Enabled == true)
+            auto.Add("twitter");
+        if (feeds?.Bluesky?.Enabled == true)
+            auto.Add("bluesky");
+        if (feeds?.LinkedIn?.Enabled == true)
+            auto.Add("linkedin");
 
         return auto;
     }

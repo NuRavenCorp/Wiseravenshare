@@ -19,12 +19,14 @@ public class FacebookPublisher : ICrossPlatformPublisher
     protected readonly HttpClient _httpClient;
     protected readonly IConfiguration _configuration;
     protected readonly ILogger _logger;
+    protected readonly UserStore? _userStore;
 
-    public FacebookPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<FacebookPublisher> logger)
+    public FacebookPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<FacebookPublisher> logger, IServiceProvider serviceProvider)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
+        _userStore = serviceProvider.GetService<UserStore>();
     }
 
     public virtual string Platform => SocialPlatforms.Facebook;
@@ -55,6 +57,20 @@ public class FacebookPublisher : ICrossPlatformPublisher
         return nativeConfigured;
     }
 
+    public virtual bool IsConfigured(Guid userId)
+    {
+        if (IsConfigured()) return true;
+        if (userId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(userId.ToString(), out var user) || _userStore.TryGetById(userId.ToString("N"), out user)) &&
+                user?.SocialFeeds?.Facebook?.Enabled == true)
+            {
+                return !string.IsNullOrWhiteSpace(user.SocialFeeds.Facebook.DestinationId) || !string.IsNullOrWhiteSpace(user.SocialFeeds.Facebook.AccessToken);
+            }
+        }
+        return false;
+    }
+
     public virtual async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
         if (UseZernio())
@@ -62,7 +78,21 @@ public class FacebookPublisher : ICrossPlatformPublisher
             return await PublishViaZernioAsync(request);
         }
 
-        if (!IsConfigured())
+        var pageId = !string.IsNullOrWhiteSpace(request.FacebookPageId) ? request.FacebookPageId : PageId;
+        var token = !string.IsNullOrWhiteSpace(request.FacebookPageAccessToken) ? request.FacebookPageAccessToken : AccessToken;
+        if (request.UserId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(request.UserId.ToString(), out var user) || _userStore.TryGetById(request.UserId.ToString("N"), out user)) &&
+                user?.SocialFeeds?.Facebook is not null)
+            {
+                var fb = user.SocialFeeds.Facebook;
+                if (!string.IsNullOrWhiteSpace(fb.DestinationId)) pageId = fb.DestinationId;
+                if (!string.IsNullOrWhiteSpace(fb.DestinationToken)) token = fb.DestinationToken;
+                else if (!string.IsNullOrWhiteSpace(fb.AccessToken)) token = fb.AccessToken;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(pageId) || string.IsNullOrWhiteSpace(token))
         {
             return CrossPlatformErrors.NotConfigured(Platform, $"{IdKey} and {TokenKey}");
         }
@@ -72,23 +102,23 @@ public class FacebookPublisher : ICrossPlatformPublisher
             var nativeResult = request.MediaType switch
             {
                 SocialMediaType.Video when !string.IsNullOrWhiteSpace(request.MediaUrl)
-                    => await PostFormAsync($"{GraphBase}/{PageId}/videos", new Dictionary<string, string>
+                    => await PostFormAsync($"{GraphBase}/{pageId}/videos", new Dictionary<string, string>
                     {
                         ["description"] = request.Message,
                         ["file_url"] = request.MediaUrl,
-                        ["access_token"] = AccessToken
+                        ["access_token"] = token
                     }),
                 SocialMediaType.Photo when !string.IsNullOrWhiteSpace(request.MediaUrl)
-                    => await PostFormAsync($"{GraphBase}/{PageId}/photos", new Dictionary<string, string>
+                    => await PostFormAsync($"{GraphBase}/{pageId}/photos", new Dictionary<string, string>
                     {
                         ["caption"] = request.Message,
                         ["url"] = request.MediaUrl,
-                        ["access_token"] = AccessToken
+                        ["access_token"] = token
                     }),
-                _ => await PostFormAsync($"{GraphBase}/{PageId}/feed", WithLink(new Dictionary<string, string>
+                _ => await PostFormAsync($"{GraphBase}/{pageId}/feed", WithLink(new Dictionary<string, string>
                     {
                         ["message"] = request.Message,
-                        ["access_token"] = AccessToken
+                        ["access_token"] = token
                     }, request.MediaUrl))
             };
 
@@ -311,8 +341,8 @@ public class FacebookPublisher : ICrossPlatformPublisher
 /// </summary>
 public class InstagramPublisher : FacebookPublisher
 {
-    public InstagramPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<InstagramPublisher> logger)
-        : base(httpClient, configuration, logger)
+    public InstagramPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<InstagramPublisher> logger, IServiceProvider serviceProvider)
+        : base(httpClient, configuration, logger, serviceProvider)
     {
     }
 
@@ -326,6 +356,20 @@ public class InstagramPublisher : FacebookPublisher
     protected override string IdKey => "Social:Instagram:BusinessAccountId";
     protected override string TokenKey => "Social:Instagram:AccessToken";
 
+    public override bool IsConfigured(Guid userId)
+    {
+        if (IsConfigured()) return true;
+        if (userId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(userId.ToString(), out var user) || _userStore.TryGetById(userId.ToString("N"), out user)) &&
+                user?.SocialFeeds?.Instagram?.Enabled == true)
+            {
+                return !string.IsNullOrWhiteSpace(user.SocialFeeds.Instagram.DestinationId) || !string.IsNullOrWhiteSpace(user.SocialFeeds.Instagram.AccessToken);
+            }
+        }
+        return false;
+    }
+
     public override async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
         if (UseZernio())
@@ -333,7 +377,21 @@ public class InstagramPublisher : FacebookPublisher
             return await PublishViaZernioAsync(request);
         }
 
-        if (!IsConfigured())
+        var pageId = PageId;
+        var token = AccessToken;
+        if (request.UserId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(request.UserId.ToString(), out var user) || _userStore.TryGetById(request.UserId.ToString("N"), out user)) &&
+                user?.SocialFeeds?.Instagram is not null)
+            {
+                var ig = user.SocialFeeds.Instagram;
+                if (!string.IsNullOrWhiteSpace(ig.DestinationId)) pageId = ig.DestinationId;
+                if (!string.IsNullOrWhiteSpace(ig.DestinationToken)) token = ig.DestinationToken;
+                else if (!string.IsNullOrWhiteSpace(ig.AccessToken)) token = ig.AccessToken;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(pageId) || string.IsNullOrWhiteSpace(token))
         {
             return CrossPlatformErrors.NotConfigured(Platform, $"{IdKey} and {TokenKey}");
         }
@@ -358,7 +416,7 @@ public class InstagramPublisher : FacebookPublisher
             var isVideo = request.MediaType == SocialMediaType.Video;
             var containerForm = new Dictionary<string, string>
             {
-                ["access_token"] = AccessToken,
+                ["access_token"] = token,
                 [isVideo ? "video_url" : "image_url"] = request.MediaUrl!,
                 [isVideo ? "media_type" : "caption"] = isVideo ? "REELS" : request.Message.Truncate(2200)
             };
@@ -370,7 +428,7 @@ public class InstagramPublisher : FacebookPublisher
             // Step 1: create the media container.
             using var containerContent = new FormUrlEncodedContent(containerForm);
             using var containerResponse = await _httpClient.PostAsync(
-                $"{GraphBase}/{PageId}/media", containerContent);
+                $"{GraphBase}/{pageId}/media", containerContent);
             var containerBody = await containerResponse.Content.ReadAsStringAsync();
 
             if (!containerResponse.IsSuccessStatusCode)
@@ -421,10 +479,10 @@ public class InstagramPublisher : FacebookPublisher
             using var publishContent = new FormUrlEncodedContent(new Dictionary<string, string>
             {
                 ["creation_id"] = creationId,
-                ["access_token"] = AccessToken
+                ["access_token"] = token
             });
             using var publishResponse = await _httpClient.PostAsync(
-                $"{GraphBase}/{PageId}/media_publish", publishContent);
+                $"{GraphBase}/{pageId}/media_publish", publishContent);
             var publishBody = await publishResponse.Content.ReadAsStringAsync();
 
             if (!publishResponse.IsSuccessStatusCode)

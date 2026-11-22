@@ -48,6 +48,20 @@ public class TwitterPublisher : ICrossPlatformPublisher
         return nativeConfigured;
     }
 
+    public bool IsConfigured(Guid userId)
+    {
+        if (IsConfigured()) return true;
+        if (userId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(userId.ToString(), out var user) || _userStore.TryGetById(userId.ToString("N"), out user)) &&
+                user?.SocialFeeds?.Twitter?.Enabled == true)
+            {
+                return !string.IsNullOrWhiteSpace(user.SocialFeeds.Twitter.AccessToken) || !string.IsNullOrWhiteSpace(user.SocialFeeds.Twitter.Username);
+            }
+        }
+        return false;
+    }
+
     public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
         // 280 chars hard limit; leave room for an appended link.
@@ -65,7 +79,7 @@ public class TwitterPublisher : ICrossPlatformPublisher
         var accessToken = _configuration["Social:Twitter:AccessToken"];
         if (request.UserId != Guid.Empty && _userStore != null)
         {
-            if (_userStore.TryGetById(request.UserId.ToString("N"), out var user) &&
+            if ((_userStore.TryGetById(request.UserId.ToString(), out var user) || _userStore.TryGetById(request.UserId.ToString("N"), out user)) &&
                 !string.IsNullOrWhiteSpace(user?.SocialFeeds?.Twitter?.AccessToken))
             {
                 accessToken = user.SocialFeeds.Twitter.AccessToken;
@@ -267,12 +281,14 @@ public class LinkedInPublisher : ICrossPlatformPublisher
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<LinkedInPublisher> _logger;
+    private readonly UserStore? _userStore;
 
-    public LinkedInPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<LinkedInPublisher> logger)
+    public LinkedInPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<LinkedInPublisher> logger, IServiceProvider serviceProvider)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
+        _userStore = serviceProvider.GetService<UserStore>();
     }
 
     public string Platform => SocialPlatforms.LinkedIn;
@@ -293,6 +309,20 @@ public class LinkedInPublisher : ICrossPlatformPublisher
         return nativeConfigured;
     }
 
+    public bool IsConfigured(Guid userId)
+    {
+        if (IsConfigured()) return true;
+        if (userId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(userId.ToString(), out var user) || _userStore.TryGetById(userId.ToString("N"), out user)) &&
+                user?.SocialFeeds?.LinkedIn?.Enabled == true)
+            {
+                return !string.IsNullOrWhiteSpace(user.SocialFeeds.LinkedIn.AccessToken) || !string.IsNullOrWhiteSpace(user.SocialFeeds.LinkedIn.Username);
+            }
+        }
+        return false;
+    }
+
     public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
         if (UseZernio())
@@ -301,6 +331,14 @@ public class LinkedInPublisher : ICrossPlatformPublisher
         }
 
         var accessToken = _configuration["Social:LinkedIn:AccessToken"];
+        if (request.UserId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(request.UserId.ToString(), out var user) || _userStore.TryGetById(request.UserId.ToString("N"), out user)) &&
+                !string.IsNullOrWhiteSpace(user?.SocialFeeds?.LinkedIn?.AccessToken))
+            {
+                accessToken = user.SocialFeeds.LinkedIn.AccessToken;
+            }
+        }
         if (string.IsNullOrWhiteSpace(accessToken))
         {
             if (UseZernioFallback() && !string.IsNullOrWhiteSpace(_configuration["Social:Zernio:ApiKey"]))
@@ -591,6 +629,20 @@ public class BlueskyPublisher : ICrossPlatformPublisher
             || !string.IsNullOrWhiteSpace(_configuration["Social:Bluesky:AccessToken"]);
     }
 
+    public bool IsConfigured(Guid userId)
+    {
+        if (IsConfigured()) return true;
+        if (userId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(userId.ToString(), out var user) || _userStore.TryGetById(userId.ToString("N"), out user)) &&
+                user?.SocialFeeds?.Bluesky?.Enabled == true)
+            {
+                return !string.IsNullOrWhiteSpace(user.SocialFeeds.Bluesky.AccessToken) || !string.IsNullOrWhiteSpace(user.SocialFeeds.Bluesky.Username);
+            }
+        }
+        return false;
+    }
+
     public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
     {
         // 300 grapheme limit for Bluesky posts
@@ -607,7 +659,7 @@ public class BlueskyPublisher : ICrossPlatformPublisher
 
         if (request.UserId != Guid.Empty && _userStore != null)
         {
-            if (_userStore.TryGetById(request.UserId.ToString("N"), out var user) && user?.SocialFeeds?.Bluesky is not null)
+            if ((_userStore.TryGetById(request.UserId.ToString(), out var user) || _userStore.TryGetById(request.UserId.ToString("N"), out user)) && user?.SocialFeeds?.Bluesky is not null)
             {
                 var bsky = user.SocialFeeds.Bluesky;
                 if (!string.IsNullOrWhiteSpace(bsky.AccessToken)) accessJwt = bsky.AccessToken;

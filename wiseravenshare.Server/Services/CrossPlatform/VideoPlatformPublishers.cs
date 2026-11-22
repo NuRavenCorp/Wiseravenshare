@@ -20,12 +20,14 @@ public class TikTokPublisher : ICrossPlatformPublisher
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TikTokPublisher> _logger;
+    private readonly UserStore? _userStore;
 
-    public TikTokPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<TikTokPublisher> logger)
+    public TikTokPublisher(HttpClient httpClient, IConfiguration configuration, ILogger<TikTokPublisher> logger, IServiceProvider serviceProvider)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
+        _userStore = serviceProvider.GetService<UserStore>();
     }
 
     public string Platform => SocialPlatforms.TikTok;
@@ -45,6 +47,20 @@ public class TikTokPublisher : ICrossPlatformPublisher
         }
 
         return nativeConfigured;
+    }
+
+    public bool IsConfigured(Guid userId)
+    {
+        if (IsConfigured()) return true;
+        if (userId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(userId.ToString(), out var user) || _userStore.TryGetById(userId.ToString("N"), out user)) &&
+                user?.SocialFeeds?.TikTok?.Enabled == true)
+            {
+                return !string.IsNullOrWhiteSpace(user.SocialFeeds.TikTok.AccessToken) || !string.IsNullOrWhiteSpace(user.SocialFeeds.TikTok.Username) || !string.IsNullOrWhiteSpace(user.SocialFeeds.TikTok.DestinationId);
+            }
+        }
+        return false;
     }
 
     public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
@@ -70,6 +86,14 @@ public class TikTokPublisher : ICrossPlatformPublisher
         }
 
         var accessToken = _configuration["Social:TikTok:AccessToken"];
+        if (request.UserId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(request.UserId.ToString(), out var user) || _userStore.TryGetById(request.UserId.ToString("N"), out user)) &&
+                !string.IsNullOrWhiteSpace(user?.SocialFeeds?.TikTok?.AccessToken))
+            {
+                accessToken = user.SocialFeeds.TikTok.AccessToken;
+            }
+        }
         if (string.IsNullOrWhiteSpace(accessToken))
         {
             if (UseZernioFallback() && !string.IsNullOrWhiteSpace(GetZernioApiKey()))

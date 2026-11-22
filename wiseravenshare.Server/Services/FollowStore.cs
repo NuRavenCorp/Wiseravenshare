@@ -283,6 +283,7 @@ public class FollowStore
         }
 
         followersCount = GetFollowersCount(targetId, personaKey);
+        var isNowFollowing = nowFollowing;
 
         // Async save to disk
         _ = Task.Run(SavePersistedData);
@@ -299,7 +300,7 @@ public class FollowStore
                     var existing = await db.UserFollows.FirstOrDefaultAsync(
                         f => f.FollowerId == followerId && f.FollowingId == targetId && !f.IsDeleted);
 
-                    if (nowFollowing && existing == null)
+                    if (isNowFollowing && existing == null)
                     {
                         db.UserFollows.Add(new Follow
                         {
@@ -310,7 +311,7 @@ public class FollowStore
                         });
                         await db.SaveChangesAsync();
                     }
-                    else if (!nowFollowing && existing != null)
+                    else if (!isNowFollowing && existing != null)
                     {
                         db.UserFollows.Remove(existing);
                         await db.SaveChangesAsync();

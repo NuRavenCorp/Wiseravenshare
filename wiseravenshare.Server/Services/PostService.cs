@@ -633,6 +633,52 @@ public class PostService : IPostService
             {
                 _logger.LogWarning(ex, "Social publish dispatch task failed for post {PostId}.", post.Id);
             }
+
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var userStore = scope.ServiceProvider.GetService<UserStore>();
+                if (userStore != null && post.UserId != Guid.Empty &&
+                    (userStore.TryGetById(post.UserId.ToString(), out var userRecord) || userStore.TryGetById(post.UserId.ToString("N"), out userRecord)) &&
+                    userRecord?.SocialFeeds != null)
+                {
+                    var feeds = userRecord.SocialFeeds;
+                    var platforms = new List<string>();
+                    if (feeds.Facebook?.Enabled == true && feeds.Facebook.AllowCrossPosting) platforms.Add(SocialPlatforms.Facebook);
+                    if (feeds.Instagram?.Enabled == true && feeds.Instagram.AllowCrossPosting) platforms.Add(SocialPlatforms.Instagram);
+                    if (feeds.TikTok?.Enabled == true && feeds.TikTok.AllowCrossPosting) platforms.Add(SocialPlatforms.TikTok);
+                    if (feeds.YouTube?.Enabled == true && feeds.YouTube.AllowCrossPosting) platforms.Add(SocialPlatforms.YouTube);
+                    if (feeds.Twitter?.Enabled == true && feeds.Twitter.AllowCrossPosting) platforms.Add(SocialPlatforms.Twitter);
+                    if (feeds.Bluesky?.Enabled == true && feeds.Bluesky.AllowCrossPosting) platforms.Add(SocialPlatforms.Bluesky);
+                    if (feeds.LinkedIn?.Enabled == true && feeds.LinkedIn.AllowCrossPosting) platforms.Add(SocialPlatforms.LinkedIn);
+
+                    if (platforms.Count > 0)
+                    {
+                        var crossPlatformService = scope.ServiceProvider.GetService<Wiseravenshare.Server.Services.CrossPlatform.ICrossPlatformPublishService>();
+                        if (crossPlatformService != null)
+                        {
+                            await crossPlatformService.PublishAsync(post.UserId, new Wiseravenshare.Server.DTOs.Social.CrossPlatformPublishRequest
+                            {
+                                PostId = post.Id,
+                                UserId = post.UserId,
+                                Message = post.Content ?? string.Empty,
+                                MediaUrl = mediaUrl,
+                                MediaType = mediaType,
+                                Platforms = platforms,
+                                FacebookPageId = feeds.Facebook?.DestinationId,
+                                FacebookPageAccessToken = !string.IsNullOrWhiteSpace(feeds.Facebook?.DestinationToken) ? feeds.Facebook.DestinationToken : feeds.Facebook?.AccessToken,
+                                TikTokUsername = feeds.TikTok?.DestinationId ?? feeds.TikTok?.Username,
+                                YouTubeChannelId = feeds.YouTube?.DestinationId ?? feeds.YouTube?.Username
+                            });
+                            _logger.LogInformation("Dispatched post {PostId} to {Count} connected platforms.", post.Id, platforms.Count);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cross-post to connected platforms for post {PostId}.", post.Id);
+            }
         });
     }
 

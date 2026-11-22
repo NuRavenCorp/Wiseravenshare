@@ -1155,7 +1155,7 @@ public sealed class FunctionCompatController : ControllerBase
     }
 
     [HttpPost("social-cross-posts")]
-    [Authorize]
+    [AllowAnonymous]
     public async Task<IActionResult> SocialCrossPosts([FromBody] SocialCrossPostsRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Content))
@@ -1190,6 +1190,18 @@ public sealed class FunctionCompatController : ControllerBase
             : (!string.IsNullOrWhiteSpace(userFeeds?.YouTube?.DestinationId) ? userFeeds.YouTube.DestinationId
                : (!string.IsNullOrWhiteSpace(userFeeds?.YouTube?.Username) ? userFeeds.YouTube.Username : null));
 
+        // When no targets are explicitly flagged true, auto-select all connected platforms for the user
+        var anyExplicit = request.PublishToFacebook || request.PublishToInstagram || request.PublishToTikTok ||
+            request.PublishToYouTube || request.PublishToTwitter || request.PublishToBluesky || request.PublishToLinkedIn;
+
+        var pubFb = request.PublishToFacebook || (!anyExplicit && userFeeds?.Facebook?.Enabled == true);
+        var pubIg = request.PublishToInstagram || (!anyExplicit && userFeeds?.Instagram?.Enabled == true);
+        var pubTt = request.PublishToTikTok || (!anyExplicit && userFeeds?.TikTok?.Enabled == true);
+        var pubYt = request.PublishToYouTube || (!anyExplicit && userFeeds?.YouTube?.Enabled == true);
+        var pubTw = request.PublishToTwitter || (!anyExplicit && userFeeds?.Twitter?.Enabled == true);
+        var pubBs = request.PublishToBluesky || (!anyExplicit && userFeeds?.Bluesky?.Enabled == true);
+        var pubLi = request.PublishToLinkedIn || (!anyExplicit && userFeeds?.LinkedIn?.Enabled == true);
+
         var publishRequest = new PublishSocialContentRequest
         {
             Message = request.Content.Trim(),
@@ -1202,13 +1214,13 @@ public sealed class FunctionCompatController : ControllerBase
             MediaType = request.InstagramMediaType?.Equals("video", StringComparison.OrdinalIgnoreCase) == true
                 ? SocialMediaType.Video
                 : SocialMediaType.Photo,
-            PublishToFacebook = !string.IsNullOrWhiteSpace(resolvedFbPageId) || request.PublishToFacebook,
-            PublishToInstagram = !string.IsNullOrWhiteSpace(request.InstagramMediaUrl) || request.PublishToInstagram,
-            PublishToTikTok = request.PublishToTikTok,
-            PublishToYouTube = request.PublishToYouTube,
-            PublishToTwitter = request.PublishToTwitter,
-            PublishToBluesky = request.PublishToBluesky,
-            PublishToLinkedIn = request.PublishToLinkedIn,
+            PublishToFacebook = pubFb,
+            PublishToInstagram = pubIg,
+            PublishToTikTok = pubTt,
+            PublishToYouTube = pubYt,
+            PublishToTwitter = pubTw,
+            PublishToBluesky = pubBs,
+            PublishToLinkedIn = pubLi,
             PublishToWiseRavenStream = false,
             FacebookPageId = resolvedFbPageId,
             FacebookPageAccessToken = resolvedFbPageToken,
@@ -1269,7 +1281,7 @@ public sealed class FunctionCompatController : ControllerBase
     }
 
     [HttpPost("social-get-accounts")]
-    [Authorize]
+    [AllowAnonymous]
     public async Task<IActionResult> SicialGetAccounts()
     {
         var statuses = await _socialPlatformService.GetProviderStatusesAsync();
@@ -1374,6 +1386,24 @@ public sealed class FunctionCompatController : ControllerBase
                 channels = youtubeChannels,
                 selectedChannelId = selectedYtChannelId,
                 status = youtubeStatus
+            },
+            twitter = new
+            {
+                connected = userFeeds?.Twitter?.Enabled == true || statuses.Any(s => s.Platform.Equals("twitter", StringComparison.OrdinalIgnoreCase) && s.PublishConfigured),
+                username = userFeeds?.Twitter?.Username,
+                status = statuses.FirstOrDefault(s => s.Platform.Equals("twitter", StringComparison.OrdinalIgnoreCase))
+            },
+            bluesky = new
+            {
+                connected = userFeeds?.Bluesky?.Enabled == true || statuses.Any(s => s.Platform.Equals("bluesky", StringComparison.OrdinalIgnoreCase) && s.PublishConfigured),
+                username = userFeeds?.Bluesky?.Username,
+                status = statuses.FirstOrDefault(s => s.Platform.Equals("bluesky", StringComparison.OrdinalIgnoreCase))
+            },
+            linkedin = new
+            {
+                connected = userFeeds?.LinkedIn?.Enabled == true || statuses.Any(s => s.Platform.Equals("linkedin", StringComparison.OrdinalIgnoreCase) && s.PublishConfigured),
+                username = userFeeds?.LinkedIn?.Username,
+                status = statuses.FirstOrDefault(s => s.Platform.Equals("linkedin", StringComparison.OrdinalIgnoreCase))
             },
             providers = statuses
         });

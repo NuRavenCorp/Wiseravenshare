@@ -37,6 +37,8 @@ public sealed class EngagementPersonaState
     public int LifetimePosts { get; set; }
     public int LifetimeComments { get; set; }
     public int LifetimeFollows { get; set; }
+    public int FollowersCount { get; set; }
+    public int FollowingCount { get; set; }
 }
 
 public sealed class EngagementSimulatorStatus
@@ -47,6 +49,7 @@ public sealed class EngagementSimulatorStatus
     public int RestingPersonas { get; set; }
     public int TotalLifetimePosts { get; set; }
     public int TotalLifetimeComments { get; set; }
+    public int TotalFollowers { get; set; }
     public List<EngagementPersonaState> Personas { get; set; } = new();
 }
 
@@ -519,6 +522,7 @@ public sealed class EngagementSimulatorService
             RestingPersonas = personas.Count(p => p.IsResting),
             TotalLifetimePosts = personas.Sum(p => p.LifetimePosts),
             TotalLifetimeComments = personas.Sum(p => p.LifetimeComments),
+            TotalFollowers = personas.Sum(p => p.FollowersCount),
             Personas = personas
         };
     }
