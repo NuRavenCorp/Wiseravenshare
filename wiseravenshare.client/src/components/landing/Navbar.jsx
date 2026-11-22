@@ -16,6 +16,37 @@ const links = [
   { label: "Music", to: "/media" },
 ];
 
+class NavAvatarBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error) {
+    console.error("Navbar avatar container failed to render:", error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Link
+          to="/"
+          className="w-12 h-12 rounded-full border border-primary/40 bg-secondary/40 flex items-center justify-center text-primary shrink-0"
+          aria-label="WiseRavenShare home"
+          title="WiseRavenShare"
+        >
+          <User className="w-5 h-5" />
+        </Link>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
@@ -37,7 +68,9 @@ export default function Navbar() {
     >
       <nav className="mx-auto max-w-7xl px-6 h-20 flex items-center justify-between">
         {/* Top Left Hand Side Logo & Photo Avatar Upload Container */}
-        <TopLeftAvatarLogoContainer />
+        <NavAvatarBoundary>
+          <TopLeftAvatarLogoContainer />
+        </NavAvatarBoundary>
 
         <div className="hidden lg:flex items-center gap-9">
           {links.map((l) => {
