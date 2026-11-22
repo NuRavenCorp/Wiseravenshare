@@ -106,7 +106,7 @@ public class SubscriptionService : ISubscriptionService
         _configuration = configuration;
         _featureAccessPolicyService = featureAccessPolicyService;
 
-        _secretKey = ResolveConfig(configuration, "Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
+        _secretKey = ResolveStripeSecretKey(configuration);
         _webhookSecret = ResolveConfig(configuration, "Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
     }
 
@@ -182,17 +182,92 @@ public class SubscriptionService : ISubscriptionService
         };
     }
 
+    private static readonly Dictionary<string, string> ProductToPriceMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Karaoke Pro
+        ["prod_VWin1RWqgVlXXd"] = "price_1UVfLyGSLShTSiwXkWRUJpm5", // $5/mo
+        ["prod_VWioT1PzGyhiAO"] = "price_1UVfMUGSLShTSiwX4GZCXjdw", // $50/yr
+        // Creator Pro
+        ["prod_V4CLuYeudzyJV1"] = "price_1UPy4eGSLShTSiwXpkB1JBUi", // $4.50/mo
+        ["prod_V4CKZZpThDA4cB"] = "price_1U43vNGSLShTSiwXgMywEtio", // $190/mo or yr
+        // Growth Suite
+        ["prod_V4CNJzlMepvypm"] = "price_1UPy4dGSLShTSiwXlamLOJzu", // $7.50/mo
+        ["prod_V4COMByGkueqGu"] = "price_1UPy4dGSLShTSiwXV26xiuVa", // $490/yr
+        // Studio Plus
+        ["prod_V4CSnjl77oVtpT"] = "price_1UPy4dGSLShTSiwXjwmeDpzh", // $12.50/mo
+        ["prod_V4CUqVPN8669Ea"] = "price_1UPy4dGSLShTSiwXr8uDNCxQ", // $124.50/yr
+        // Podcast Pro
+        ["prod_VLNc3o4vvvYsZF"] = "price_1UKgrHGSLShTSiwXUne9ghm5", // $149/mo
+        ["prod_VLNdlbmhWUuNqh"] = "price_1UKgseGSLShTSiwXg6aUMLpE", // $1490/yr
+        // Copyright / Copy Pro & Standard
+        ["prod_VWisBm8k2Q9lIo"] = "price_1UVfQeGSLShTSiwXrO8wakMm", // $5/mo
+        ["prod_VWisFnDaBRp2RP"] = "price_1UVfR2GSLShTSiwX6Is48tdb", // $50/mo
+        // Rights / IP protection
+        ["prod_VC3xoP4UjLvOF2"] = "price_1UPy4dGSLShTSiwXSLHijbTm", // $1.49/mo
+        ["prod_VC3zXy445DbV0w"] = "price_1UVfWMGSLShTSiwX1OubCyKw", // $20/mo
+        ["prod_VWlG1rqcb3iAn1"] = "price_1UVhjyGSLShTSiwXf9gZWp5x", // $190/yr
+        ["prod_VWlHnRed3oWlt3"] = "price_1UVhkzGSLShTSiwXKgZDGra5", // $19/mo
+        ["prod_VC3yeDSQcWcgqG"] = "price_1UPy4dGSLShTSiwXCNS7nFDe", // $200/yr
+    };
+
+    private static readonly Dictionary<string, (string monthly, string annual)> DefaultPlanPrices = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["karaoke_pro"]     = ("price_1UVfLyGSLShTSiwXkWRUJpm5", "price_1UVfMUGSLShTSiwX4GZCXjdw"),
+        ["creator_pro"]     = ("price_1UPy4eGSLShTSiwXpkB1JBUi", "price_1U43vNGSLShTSiwXgMywEtio"),
+        ["growth_suite"]    = ("price_1UPy4dGSLShTSiwXlamLOJzu", "price_1UPy4dGSLShTSiwXV26xiuVa"),
+        ["studio_plus"]     = ("price_1UPy4dGSLShTSiwXjwmeDpzh", "price_1UPy4dGSLShTSiwXr8uDNCxQ"),
+        ["podcast_pro"]     = ("price_1UKgrHGSLShTSiwXUne9ghm5", "price_1UKgseGSLShTSiwXg6aUMLpE"),
+        ["copy_pro"]        = ("price_1UVfQeGSLShTSiwXrO8wakMm", "price_1UVfR2GSLShTSiwX6Is48tdb"),
+        ["copy_standard"]   = ("price_1UVfQeGSLShTSiwXrO8wakMm", "price_1UVfR2GSLShTSiwX6Is48tdb"),
+        ["rights_basic"]    = ("price_1UPy4dGSLShTSiwXSLHijbTm", "price_1UVhjyGSLShTSiwXf9gZWp5x"),
+        ["rights_standard"] = ("price_1UVfWMGSLShTSiwX1OubCyKw", "price_1UPy4dGSLShTSiwXCNS7nFDe"),
+        ["rights_pro"]      = ("price_1UVhkzGSLShTSiwXKgZDGra5", "price_1UPy4dGSLShTSiwXCNS7nFDe"),
+    };
+
+    private static string ResolveStripeSecretKey(IConfiguration configuration)
+    {
+        var candidates = new[]
+        {
+            configuration["Stripe:SecretKey"],
+            configuration["STRIPE_RESTRICTED_KEY"],
+            configuration["STRIPE__RESTRICTED__KEY"],
+            configuration["Stripe:RestrictedKey"],
+            configuration["STRIPE_RESTRICTED_API"],
+            configuration["STRIPE_SECRET_KEY"],
+            configuration["STRIPE__SECRET__KEY"],
+            configuration["STRIPE_SECRET_API"]
+        };
+
+        foreach (var c in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(c))
+            {
+                var trimmed = c.Trim();
+                if (trimmed.StartsWith("sk_", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("rk_", StringComparison.OrdinalIgnoreCase))
+                {
+                    return trimmed;
+                }
+            }
+        }
+
+        return string.Empty;
+    }
+
     private string ResolveCheckoutPriceId(string? requestedPriceId, string normalizedPlan, string normalizedBillingCycle)
     {
         if (!string.IsNullOrWhiteSpace(requestedPriceId))
         {
             var candidate = requestedPriceId.Trim();
-            if (!candidate.StartsWith("price_", StringComparison.OrdinalIgnoreCase))
+            if (candidate.StartsWith("price_", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Stripe price IDs must start with price_.");
+                return candidate;
             }
-
-            return candidate;
+            if (candidate.StartsWith("prod_", StringComparison.OrdinalIgnoreCase) &&
+                ProductToPriceMap.TryGetValue(candidate, out var mappedPrice))
+            {
+                return mappedPrice;
+            }
         }
 
         return ResolveConfiguredPriceId(normalizedPlan, normalizedBillingCycle);
@@ -244,9 +319,26 @@ public class SubscriptionService : ISubscriptionService
         var envKey = normalizedBillingCycle == "annual" ? envKeys.annual : envKeys.monthly;
 
         var resolved = ResolveConfig(_configuration, configKey, envKey);
-        return resolved.StartsWith("price_", StringComparison.OrdinalIgnoreCase)
-            ? resolved
-            : string.Empty;
+        if (!string.IsNullOrWhiteSpace(resolved))
+        {
+            var trimmed = resolved.Trim();
+            if (trimmed.StartsWith("price_", StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed;
+            }
+            if (trimmed.StartsWith("prod_", StringComparison.OrdinalIgnoreCase) &&
+                ProductToPriceMap.TryGetValue(trimmed, out var mappedPrice))
+            {
+                return mappedPrice;
+            }
+        }
+
+        if (DefaultPlanPrices.TryGetValue(normalizedPlan, out var planPrices))
+        {
+            return normalizedBillingCycle == "annual" ? planPrices.annual : planPrices.monthly;
+        }
+
+        return string.Empty;
     }
 
     private static string ResolvePlanSectionToken(string plan) => NormalizePlan(plan) switch
@@ -735,6 +827,16 @@ public class SubscriptionService : ISubscriptionService
             return string.Empty;
 
         var p = priceId.Trim();
+
+        // Check against live Stripe price IDs
+        foreach (var (planKey, prices) in DefaultPlanPrices)
+        {
+            if (string.Equals(prices.monthly, p, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(prices.annual, p, StringComparison.OrdinalIgnoreCase))
+            {
+                return planKey;
+            }
+        }
 
         // Check against all env-configured real Stripe price IDs (highest priority)
         foreach (var (planKey, envKeys) in PlanPriceEnvMap)

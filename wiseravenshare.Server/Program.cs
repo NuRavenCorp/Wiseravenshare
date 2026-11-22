@@ -3183,7 +3183,7 @@ using (var seedScope = app.Services.CreateScope())
 string ResolveStripeConfig(string sectionKey, params string[] envKeys)
 {
     var value = app.Configuration[sectionKey];
-    if (!string.IsNullOrWhiteSpace(value))
+    if (!string.IsNullOrWhiteSpace(value) && !value.Trim().StartsWith("mk_", StringComparison.OrdinalIgnoreCase))
     {
         return value.Trim();
     }
@@ -3191,7 +3191,7 @@ string ResolveStripeConfig(string sectionKey, params string[] envKeys)
     foreach (var envKey in envKeys)
     {
         value = app.Configuration[envKey];
-        if (!string.IsNullOrWhiteSpace(value))
+        if (!string.IsNullOrWhiteSpace(value) && !value.Trim().StartsWith("mk_", StringComparison.OrdinalIgnoreCase))
         {
             return value.Trim();
         }
@@ -3201,11 +3201,13 @@ string ResolveStripeConfig(string sectionKey, params string[] envKeys)
 }
 
 bool IsStripePriceId(string? value) =>
-    !string.IsNullOrWhiteSpace(value) && value.Trim().StartsWith("price_", StringComparison.OrdinalIgnoreCase);
+    !string.IsNullOrWhiteSpace(value) &&
+    (value.Trim().StartsWith("price_", StringComparison.OrdinalIgnoreCase) ||
+     value.Trim().StartsWith("prod_", StringComparison.OrdinalIgnoreCase));
 
-var stripePublishableKey = ResolveStripeConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY");
-var stripeSecretKey = ResolveStripeConfig("Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
-var stripeWebhookSecret = ResolveStripeConfig("Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
+var stripePublishableKey = ResolveStripeConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY", "STRIPE__PUBLISHABLE__KEY");
+var stripeSecretKey = ResolveStripeConfig("Stripe:SecretKey", "STRIPE_RESTRICTED_KEY", "STRIPE__RESTRICTED__KEY", "Stripe:RestrictedKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY", "STRIPE__SECRET__KEY");
+var stripeWebhookSecret = ResolveStripeConfig("Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET", "STRIPE__WEBHOOK__SECTRET");
 
 if (string.IsNullOrWhiteSpace(stripePublishableKey))
 {
