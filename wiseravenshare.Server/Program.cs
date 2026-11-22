@@ -1601,6 +1601,7 @@ ALTER TABLE IF EXISTS app_data.""Users""
 
 -- Posts table: columns added in later migrations
 ALTER TABLE IF EXISTS app_data.""Posts""
+    ADD COLUMN IF NOT EXISTS ""TruthStatus"" TEXT NULL,
     ADD COLUMN IF NOT EXISTS ""IsTruthDispatch"" BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS ""IsSensitive"" BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS ""TruthDeclarationAccepted"" BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1968,6 +1969,9 @@ static async Task SeedSystemRssFeedsAsync(
 
     if (feedConfigs is null || feedConfigs.Length == 0) return;
 
+    var systemUserId = await db.Users.Select(u => u.Id).FirstOrDefaultAsync(ct);
+    if (systemUserId == Guid.Empty) return;
+
     foreach (var cfg in feedConfigs)
     {
         if (string.IsNullOrWhiteSpace(cfg.FeedUrl)) continue;
@@ -1980,7 +1984,7 @@ static async Task SeedSystemRssFeedsAsync(
         db.RssFeedSubscriptions.Add(new Wiseravenshare.Server.Entities.RssFeedSubscription
         {
             Id = Guid.NewGuid(),
-            UserId = Guid.Empty,       // No user owner — system feed
+            UserId = systemUserId,
             FeedUrl = cfg.FeedUrl.Trim(),
             DisplayName = (cfg.DisplayName ?? GetDomainFromUrl(cfg.FeedUrl))[..Math.Min((cfg.DisplayName ?? cfg.FeedUrl).Length, 200)],
             Platform = string.IsNullOrWhiteSpace(cfg.Platform) ? "rss" : cfg.Platform.Trim().ToLowerInvariant(),
@@ -2032,8 +2036,22 @@ CREATE TABLE IF NOT EXISTS app_data.performance_turns (
     end_milliseconds BIGINT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_performance_turns_unique_order
-    ON app_data.performance_turns (performance_id, turn_order);
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema='app_data' AND table_name='performance_turns' AND column_name='PerformanceId'
+    ) THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_performance_turns_unique_order
+            ON app_data.performance_turns (""PerformanceId"", ""TurnOrder"");
+    ELSIF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema='app_data' AND table_name='performance_turns' AND column_name='performance_id'
+    ) THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_performance_turns_unique_order
+            ON app_data.performance_turns (performance_id, turn_order);
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_performances_user_started_at
     ON app_data.performances (user_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_performances_song_score
