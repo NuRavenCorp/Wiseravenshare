@@ -4,6 +4,7 @@ import Navbar from "@/components/landing/Navbar";
 import { apiClient } from "@/api/client";
 import { useAuth } from "@/lib/AuthContext";
 import { playChirp } from "@/lib/ravenChirp";
+import FollowStatsHero from "@/components/dashboard/FollowStatsHero";
 import { 
   Bell, Check, MessageSquare, Heart, UserPlus, Repeat2, 
   Flame, Radio, ShieldCheck, Sparkles, RefreshCw, ExternalLink, Bot 
@@ -143,6 +144,9 @@ export default function NotificationsPage() {
       <Navbar />
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-8">
+        {/* Prominent follow stats banner */}
+        <FollowStatsHero />
+
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b border-border">
           <div>

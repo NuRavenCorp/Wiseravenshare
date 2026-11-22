@@ -17,6 +17,7 @@ import PostComposer from "@/components/feed/PostComposer";
 import FollowingFeed from "@/components/feed/FollowingFeed";
 import ThreadsWidget from "@/components/dashboard/ThreadsWidget";
 import ActivityHub from "@/components/dashboard/ActivityHub";
+import FollowStatsHero from "@/components/dashboard/FollowStatsHero";
 
 const sections = [
   { id: "hub", label: "Activity Hub", icon: LayoutDashboard },
@@ -71,6 +72,7 @@ export default function Dashboard() {
             </nav>
           </aside>
           <div>
+            <FollowStatsHero />
             <h1 className="font-heading text-2xl text-foreground mb-6 text-glow">{current.label}</h1>
             {active === "hub" && <ActivityHub />}
             {active === "create" && (

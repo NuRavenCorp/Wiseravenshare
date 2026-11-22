@@ -1484,6 +1484,24 @@ export const apiClient = {
       });
     },
   },
+  // Follow counts, tally, and toggles
+  follows: {
+    tally() {
+      return requestJson("/api/follow/tally", { method: "GET" });
+    },
+    following() {
+      return requestJson("/api/follow/following", { method: "GET" });
+    },
+    followers(userId) {
+      return requestJson(`/api/follow/followers/${encodeURIComponent(userId)}`, { method: "GET" });
+    },
+    status(userId) {
+      return requestJson(`/api/follow/status/${encodeURIComponent(userId)}`, { method: "GET" });
+    },
+    toggle(userId) {
+      return requestJson("/api/follow/toggle", { method: "POST", body: JSON.stringify({ targetUserId: userId }) });
+    },
+  },
   // Social platform connect/disconnect via server OAuth flow
   social: {
     followStatus(userId) {

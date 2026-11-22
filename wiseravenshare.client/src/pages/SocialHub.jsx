@@ -11,6 +11,7 @@ import TodaysVibe from "@/components/vibe/TodaysVibe";
 import LimitationsNotice from "@/components/social/LimitationsNotice";
 import SavedAvatarPhotoContainer from "@/components/media/SavedAvatarPhotoContainer";
 import TheFlockCreatorsShelf from "@/components/social/TheFlockCreatorsShelf";
+import FollowStatsHero from "@/components/dashboard/FollowStatsHero";
 import { Share2, Download, Feather, Link2, CheckCircle2, Circle } from "lucide-react";
 import PostComposer from "@/components/feed/PostComposer";
 import PostsFeed from "@/components/feed/PostsFeed";
@@ -47,6 +48,7 @@ export default function SocialHub() {
           <p className="text-muted-foreground">Follow creators, share posts, explore what is trending, and connect your other social accounts.</p>
         </div>
         <TheFlockCreatorsShelf />
+        <FollowStatsHero />
         <LimitationsNotice />
         <div className="mb-8">
           <TodaysVibe />

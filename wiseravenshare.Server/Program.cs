@@ -2727,6 +2727,7 @@ builder.Services.AddHostedService(sp => (AiJobQueueService)sp.GetRequiredService
 builder.Services.AddSingleton<ISocialPublishQueue, SocialPublishQueueService>();
 builder.Services.AddHostedService(sp => (SocialPublishQueueService)sp.GetRequiredService<ISocialPublishQueue>());
 builder.Services.AddSingleton<UserStore>();
+builder.Services.AddSingleton<FollowStore>();
 builder.Services.AddSingleton<GrowthService>();
 builder.Services.AddSingleton<TeamAccessService>();
 builder.Services.AddSingleton<TeamStore>();

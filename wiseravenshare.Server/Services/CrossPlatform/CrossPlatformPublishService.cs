@@ -64,7 +64,8 @@ public class CrossPlatformPublishService : ICrossPlatformPublishService
                 continue;
             }
 
-            if (!publisher.IsConfigured())
+            var isConfigured = publisher.IsConfigured() || (userId != Guid.Empty && publisher.IsConfigured(userId));
+            if (!isConfigured)
             {
                 response.Results.Add(new CrossPlatformPublishResultDto
                 {

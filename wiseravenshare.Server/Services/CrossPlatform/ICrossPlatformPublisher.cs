@@ -15,6 +15,9 @@ public interface ICrossPlatformPublisher
     /// <summary>True when the required credentials/configuration are present.</summary>
     bool IsConfigured();
 
+    /// <summary>True when the required credentials/configuration are present for the given user.</summary>
+    bool IsConfigured(Guid userId) => IsConfigured();
+
     Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request);
 }
 

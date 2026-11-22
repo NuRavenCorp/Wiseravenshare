@@ -59,6 +59,11 @@ public class CrossPlatformPublishRequest
     public bool? DisableDuet { get; set; }
     public bool? DisableStitch { get; set; }
 
+    public string? FacebookPageId { get; set; }
+    public string? FacebookPageAccessToken { get; set; }
+    public string? TikTokUsername { get; set; }
+    public string? YouTubeChannelId { get; set; }
+
     /// <summary>Platforms to publish to. Empty/omitted means all configured platforms.</summary>
     public List<string>? Platforms { get; set; }
 }

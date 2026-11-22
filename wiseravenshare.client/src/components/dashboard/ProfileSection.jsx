@@ -17,6 +17,8 @@ import {
   Trash2,
   Link as LinkIcon,
   User as UserIcon,
+  Users,
+  UserPlus,
 } from "lucide-react";
 
 function FieldGroup({ id, label, children }) {
@@ -69,6 +71,7 @@ export default function ProfileSection() {
   const [loading, setLoading] = useState(!initial);
   const [saving, setSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState(null); // { text, variant }
+  const [followStats, setFollowStats] = useState({ followers: 0, following: 0 });
 
   // ── Password change ─────────────────────────────────────────────
   const [currentPassword, setCurrentPassword] = useState("");
@@ -107,6 +110,18 @@ export default function ProfileSection() {
             })
           );
         } catch {}
+
+        // Fetch follow stats in parallel (best-effort)
+        try {
+          const [followingRes, followersRes] = await Promise.all([
+            apiClient.follows.following().catch(() => null),
+            user?.id ? apiClient.follows.followers(user.id).catch(() => null) : Promise.resolve(null),
+          ]);
+          setFollowStats({
+            following: followingRes?.followingCount ?? 0,
+            followers: followersRes?.followersCount ?? 0,
+          });
+        } catch { /* non-critical */ }
       } catch {
         // Fall back to auth context values
         const fallbackName = user.displayName ?? user.name ?? user.full_name ?? user.email?.split("@")[0] ?? "";
@@ -332,6 +347,32 @@ export default function ProfileSection() {
         <div className="space-y-1">
           <Label className="text-muted-foreground text-xs">Username / Handle</Label>
           <p className="text-sm text-foreground">{user?.handle ?? user?.username ?? "—"}</p>
+        </div>
+
+        {/* ── Follower / Following counts ── */}
+        <div className="pt-3 border-t border-border flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center">
+              <Users className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-lg font-heading font-semibold text-foreground leading-none">
+                {followStats.followers.toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground">followers</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+              <UserPlus className="w-4 h-4 text-primary" />
+            </div>
+            <div>
+              <p className="text-lg font-heading font-semibold text-foreground leading-none">
+                {followStats.following.toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground">following</p>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiClient } from "@/api/client";
 import { Link } from "react-router-dom";
-import { Bell, CalendarClock, Activity, CheckCircle2, Circle, Heart, MessageCircle, Repeat2, Share2, Music, Users, ArrowRight, TrendingUp } from "lucide-react";
+import { Bell, CalendarClock, Activity, CheckCircle2, Circle, Heart, MessageCircle, Repeat2, Share2, Music, Users, UserPlus, ArrowRight, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -25,6 +25,7 @@ export default function ActivityHub() {
   const [notifications, setNotifications] = useState([]);
   const [recentPosts, setRecentPosts] = useState([]);
   const [likeTally, setLikeTally] = useState({ total: 0, unread: 0 });
+  const [followTally, setFollowTally] = useState({ followers: 0, following: 0, newFollowers: 0 });
   const [markingRead, setMarkingRead] = useState(false);
   const { toast } = useToast();
 
@@ -39,6 +40,14 @@ export default function ActivityHub() {
       });
       const unreadLikes = likeNotifs.filter((n) => !(n.IsRead ?? n.isRead)).length;
       setLikeTally((prev) => ({ total: prev.total, unread: unreadLikes }));
+
+      // Count unread follow notifications
+      const followNotifs = items.filter((n) => {
+        const t = n.type || n.Type || "";
+        return t === "follow" || t === "Follow";
+      });
+      const unreadFollows = followNotifs.filter((n) => !(n.IsRead ?? n.isRead)).length;
+      setFollowTally((prev) => ({ ...prev, newFollowers: unreadFollows }));
     } catch { /* ignore */ }
   }, []);
 
@@ -69,6 +78,19 @@ export default function ActivityHub() {
         // Cumulative likes tally across all my posts
         const totalLikes = posts.reduce((sum, p) => sum + (p.like_count || p.likesCount || 0), 0);
         setLikeTally((prev) => ({ ...prev, total: totalLikes }));
+
+        // Fetch follow stats
+        try {
+          const [followingRes, followersRes] = await Promise.all([
+            apiClient.follows.following().catch(() => null),
+            apiClient.follows.followers(me.id).catch(() => null),
+          ]);
+          setFollowTally((prev) => ({
+            ...prev,
+            following: followingRes?.followingCount ?? 0,
+            followers: followersRes?.followersCount ?? 0,
+          }));
+        } catch { /* non-critical */ }
 
         await fetchNotifications(me.id);
       } catch (e) {
@@ -197,6 +219,35 @@ export default function ActivityHub() {
           {likeTally.unread > 0 && (
             <div>
               <p className="text-xl font-heading text-red-400">+{likeTally.unread}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">since last check</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Followers & Following Tally */}
+      <section className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <UserPlus className="w-4 h-4 text-emerald-400" />
+          <h2 className="font-heading text-sm text-foreground tracking-wide">Your Flock</h2>
+          {followTally.newFollowers > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 animate-pulse">
+              +{followTally.newFollowers} new
+            </span>
+          )}
+        </div>
+        <div className="flex items-end gap-8">
+          <div>
+            <p className="text-3xl font-heading text-foreground">{(followTally.followers).toLocaleString()}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">followers</p>
+          </div>
+          <div>
+            <p className="text-3xl font-heading text-foreground">{(followTally.following).toLocaleString()}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">following</p>
+          </div>
+          {followTally.newFollowers > 0 && (
+            <div>
+              <p className="text-xl font-heading text-emerald-400">+{followTally.newFollowers}</p>
               <p className="text-xs text-muted-foreground mt-0.5">since last check</p>
             </div>
           )}
