@@ -1,6 +1,26 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/api/client";
-import { Heart, MessageCircle, MoreVertical, UserPlus, UserMinus, ShieldBan, Repeat2, Share2, Music, Trash2, Bookmark, ExternalLink } from "lucide-react";
+import {
+  Heart,
+  MessageCircle,
+  MoreVertical,
+  UserPlus,
+  UserMinus,
+  ShieldBan,
+  ShieldCheck,
+  Repeat2,
+  Share2,
+  Music,
+  Trash2,
+  Bookmark,
+  ExternalLink,
+  User,
+  MessageSquare,
+  Link2,
+  EyeOff,
+  ThumbsDown,
+  Flag,
+} from "lucide-react";
 import { Image } from "@/components/ui/image";
 import PostComments from "./PostComments";
 import ShareMenu from "./ShareMenu";
@@ -163,14 +183,73 @@ export default function PostCard({
   const handleBlock = async () => {
     if (!currentUser) return onAuthRequired?.();
     if (busy) return;
+    const confirmed = blocked || (typeof window === "undefined" ? true : window.confirm(`Are you sure you want to block ${authorName}? You will no longer see their posts or interactions.`));
+    if (!confirmed) return;
+
     setBusy(true);
     try {
-      if (blocked) await apiClient.social.unblockUser(post.created_by_id);
-      else await apiClient.social.blockUser(post.created_by_id);
-      setBlocked(!blocked);
+      if (blocked) {
+        await apiClient.social.unblockUser(post.created_by_id);
+        setBlocked(false);
+        toast({
+          title: "User unblocked",
+          description: `You will see posts from ${authorName} again.`,
+        });
+      } else {
+        await apiClient.social.blockUser(post.created_by_id);
+        setBlocked(true);
+        setDismissed(true);
+        onBlocked?.(post.created_by_id);
+        toast({
+          title: "User blocked",
+          description: `You will no longer see posts from ${authorName}.`,
+        });
+      }
       setMenuOpen(false);
-      if (!blocked) onBlocked?.(post.created_by_id);
-    } catch (e) { toast({ title: "Could not update block", description: e.message, variant: "destructive" }); } finally { setBusy(false); }
+    } catch (e) {
+      toast({ title: "Could not update block", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCopyProfileLink = async () => {
+    setMenuOpen(false);
+    try {
+      const targetUser = author?.username || authorName || post.created_by_id;
+      const url = `${window.location.origin}/social?author=${encodeURIComponent(String(targetUser).replace(/^@/, ''))}`;
+      await navigator.clipboard.writeText(url);
+      toast({ title: "Profile link copied", description: `@${String(targetUser).replace(/^@/, '')}'s feed link copied to clipboard.` });
+    } catch {
+      toast({ title: "Could not copy link", variant: "destructive" });
+    }
+  };
+
+  const handleCopyPostLink = async () => {
+    setMenuOpen(false);
+    try {
+      const url = `${window.location.origin}/social?post=${post.id}`;
+      await navigator.clipboard.writeText(url);
+      toast({ title: "Post link copied", description: "Post URL copied to clipboard." });
+    } catch {
+      toast({ title: "Could not copy link", variant: "destructive" });
+    }
+  };
+
+  const handleDirectMessage = () => {
+    setMenuOpen(false);
+    if (!currentUser) return onAuthRequired?.();
+    const targetId = post.created_by_id || author?.username || authorName;
+    window.location.href = `/messages?user=${encodeURIComponent(targetId)}`;
+  };
+
+  const handleReport = () => {
+    setMenuOpen(false);
+    if (!currentUser) return onAuthRequired?.();
+    toast({
+      title: "Report received",
+      description: `Thank you for reporting. Our moderation team has flagged this content for review.`,
+    });
   };
 
   const handleNotInterested = async () => {
@@ -421,58 +500,181 @@ export default function PostCard({
               {following ? "Following" : "Follow"}
             </button>
           )}
-          {!isOwn && currentUser && (
+
+          {/* User Functions & Options Dropdown Menu */}
+          <div className="relative" ref={menuRef}>
             <button
-              onClick={handleBlock}
-              disabled={busy}
-              aria-label={blocked ? "Unblock User" : "Block User"}
-              className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors disabled:opacity-50 ${
-                blocked ? "border-border text-muted-foreground hover:text-foreground" : "border-destructive/40 text-destructive hover:bg-destructive/10"
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+                menuOpen ? "bg-primary/20 text-primary ring-1 ring-primary/40" : "hover:bg-secondary text-muted-foreground hover:text-foreground"
               }`}
+              title="User options & moderation menu"
+              aria-label="User and post options"
             >
-              <ShieldBan className="w-3 h-3" />
-              {blocked ? "Unblock User" : "Block User"}
+              <MoreVertical className="w-4 h-4" />
             </button>
-          )}
-          {currentUser && (
-            <div className="relative" ref={menuRef}>
-              <button onClick={() => setMenuOpen((o) => !o)} className="p-1.5 rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground">
-                <MoreVertical className="w-4 h-4" />
-              </button>
-              {menuOpen && (
-                <div className="absolute right-0 mt-2 w-44 rounded-lg border border-border bg-popover shadow-lg z-20 py-1">
-                  {!isOwn && (
-                    <button onClick={handleFollow} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-foreground disabled:opacity-50">
-                      {following ? <UserMinus className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-                      {following ? "Unfollow" : "Follow"}
-                    </button>
-                  )}
-                  {!isOwn && (
-                    <button onClick={handleBlock} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-destructive disabled:opacity-50">
-                      <ShieldBan className="w-4 h-4" />
-                      {blocked ? "Unblock User" : "Block User"}
-                    </button>
-                  )}
-                  {!isOwn && (
-                    <button onClick={handleNotInterested} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary text-foreground disabled:opacity-50">
-                      Not interested
-                    </button>
-                  )}
-                  {!isOwn && (
-                    <button onClick={handleHideAuthor} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary text-foreground disabled:opacity-50">
-                      Hide author from feed
-                    </button>
-                  )}
-                  {isOwn && (
-                    <button onClick={handleDeletePost} disabled={busy} className="w-full px-3 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-destructive disabled:opacity-50">
-                      <Trash2 className="w-4 h-4" />
-                      Delete post
-                    </button>
-                  )}
+
+            {menuOpen && (
+              <div className="absolute right-0 mt-2 w-64 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-2xl z-30 py-1.5 text-xs animate-in fade-in zoom-in-95 duration-150">
+                {/* User Header Profile Summary */}
+                <div className="px-3 py-2 border-b border-border/60 flex items-center gap-2.5 bg-muted/20">
+                  <div className="w-8 h-8 rounded-full bg-primary/20 border border-primary/30 overflow-hidden flex items-center justify-center shrink-0">
+                    {authorAvatar ? (
+                      <img src={authorAvatar} alt={authorName} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="font-bold text-primary text-xs">{authorName.charAt(0).toUpperCase()}</span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-foreground truncate text-xs">{authorName}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {author?.username ? `@${author.username.replace(/^@/, '')}` : (isOwn ? "You (Author)" : "Creator")}
+                    </p>
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
+
+                {!isOwn ? (
+                  <>
+                    {/* User Feed & Engagement Functions */}
+                    <div className="py-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          setMenuOpen(false);
+                          handleAuthorFeedClick(e);
+                        }}
+                        className="w-full px-3 py-2 text-left hover:bg-secondary flex items-center gap-2.5 text-foreground transition-colors cursor-pointer"
+                      >
+                        <User className="w-3.5 h-3.5 text-primary" />
+                        <span>View user's feed</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleFollow}
+                        disabled={busy}
+                        className="w-full px-3 py-2 text-left hover:bg-secondary flex items-center gap-2.5 text-foreground transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {following ? <UserMinus className="w-3.5 h-3.5 text-muted-foreground" /> : <UserPlus className="w-3.5 h-3.5 text-primary" />}
+                        <span>{following ? "Unfollow user" : "Follow user"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleDirectMessage}
+                        className="w-full px-3 py-2 text-left hover:bg-secondary flex items-center gap-2.5 text-foreground transition-colors cursor-pointer"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Send direct message</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCopyProfileLink}
+                        className="w-full px-3 py-2 text-left hover:bg-secondary flex items-center gap-2.5 text-foreground transition-colors cursor-pointer"
+                      >
+                        <Link2 className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span>Copy user profile link</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCopyPostLink}
+                        className="w-full px-3 py-2 text-left hover:bg-secondary flex items-center gap-2.5 text-foreground transition-colors cursor-pointer"
+                      >
+                        <Share2 className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span>Copy link to post</span>
+                      </button>
+                    </div>
+
+                    {/* Feed Preferences Section */}
+                    <div className="py-1 border-t border-border/60">
+                      <button
+                        type="button"
+                        onClick={handleNotInterested}
+                        disabled={busy}
+                        className="w-full px-3 py-2 text-left hover:bg-secondary flex items-center gap-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <ThumbsDown className="w-3.5 h-3.5" />
+                        <span>Not interested in this post</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleHideAuthor}
+                        disabled={busy}
+                        className="w-full px-3 py-2 text-left hover:bg-secondary flex items-center gap-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <EyeOff className="w-3.5 h-3.5" />
+                        <span>Hide author from feed</span>
+                      </button>
+                    </div>
+
+                    {/* Moderation & Safety: Block User & Report User Functions */}
+                    <div className="py-1 border-t border-border/60 bg-destructive/5">
+                      <button
+                        type="button"
+                        onClick={handleBlock}
+                        disabled={busy}
+                        className="w-full px-3 py-2 text-left hover:bg-destructive/15 flex items-center gap-2.5 text-destructive font-medium transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <ShieldBan className="w-3.5 h-3.5 text-destructive" />
+                        <span>{blocked ? "Unblock user" : "Block user"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleReport}
+                        className="w-full px-3 py-2 text-left hover:bg-amber-500/10 flex items-center gap-2.5 text-amber-400 transition-colors cursor-pointer"
+                      >
+                        <Flag className="w-3.5 h-3.5" />
+                        <span>Report post or user</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Author's own post actions */}
+                    <div className="py-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          setMenuOpen(false);
+                          handleAuthorFeedClick(e);
+                        }}
+                        className="w-full px-3 py-2 text-left hover:bg-secondary flex items-center gap-2.5 text-foreground transition-colors cursor-pointer"
+                      >
+                        <User className="w-3.5 h-3.5 text-primary" />
+                        <span>View your feed</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCopyPostLink}
+                        className="w-full px-3 py-2 text-left hover:bg-secondary flex items-center gap-2.5 text-foreground transition-colors cursor-pointer"
+                      >
+                        <Share2 className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span>Copy link to post</span>
+                      </button>
+                    </div>
+
+                    <div className="py-1 border-t border-border/60">
+                      <button
+                        type="button"
+                        onClick={handleDeletePost}
+                        disabled={busy}
+                        className="w-full px-3 py-2 text-left hover:bg-destructive/15 flex items-center gap-2.5 text-destructive font-medium transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete post permanently</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

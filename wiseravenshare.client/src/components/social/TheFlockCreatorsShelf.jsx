@@ -17,6 +17,10 @@ import {
   Radio,
   Eye,
   CheckCircle2,
+  MoreVertical,
+  ShieldBan,
+  Link2,
+  User,
 } from "lucide-react";
 
 // Fallback seed catalog so creators always show even if server is booting
@@ -121,6 +125,13 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
   const [totalFlockFollowers, setTotalFlockFollowers] = useState(0);
   const [triggering, setTriggering] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [activeMenuKey, setActiveMenuKey] = useState(null);
+
+  useEffect(() => {
+    const closeMenus = () => setActiveMenuKey(null);
+    window.addEventListener("click", closeMenus);
+    return () => window.removeEventListener("click", closeMenus);
+  }, []);
 
   useEffect(() => {
     followingMapRef.current = followingMap;
@@ -409,9 +420,88 @@ export default function TheFlockCreatorsShelf({ onSelectCreator }) {
                     </span>
                   </div>
 
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 truncate max-w-[100px]">
-                    {persona.archetype.split("&")[0].trim()}
-                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 truncate max-w-[85px]">
+                      {persona.archetype.split("&")[0].trim()}
+                    </span>
+
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMenuKey((curr) => curr === persona.key ? null : persona.key);
+                        }}
+                        className={`p-1 rounded-md transition-colors cursor-pointer ${
+                          activeMenuKey === persona.key
+                            ? "bg-primary/20 text-primary"
+                            : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                        }`}
+                        title="Creator actions & moderation"
+                        aria-label="Creator actions"
+                      >
+                        <MoreVertical className="w-3.5 h-3.5" />
+                      </button>
+
+                      {activeMenuKey === persona.key && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute right-0 mt-1.5 w-48 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-2xl z-30 py-1 text-xs animate-in fade-in zoom-in-95 duration-150"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveMenuKey(null);
+                              const targetName = persona.username || persona.displayName;
+                              window.dispatchEvent(new CustomEvent("wr_filter_author", { detail: { author: targetName } }));
+                              if (!window.location.pathname.includes("/social") && window.location.pathname !== "/") {
+                                window.location.href = `/social?author=${encodeURIComponent(targetName)}`;
+                              }
+                            }}
+                            className="w-full px-3 py-1.5 text-left hover:bg-secondary flex items-center gap-2 text-foreground cursor-pointer"
+                          >
+                            <User className="w-3.5 h-3.5 text-primary" />
+                            <span>View creator feed</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setActiveMenuKey(null);
+                              try {
+                                const targetName = persona.username || persona.displayName;
+                                const url = `${window.location.origin}/social?author=${encodeURIComponent(targetName)}`;
+                                await navigator.clipboard.writeText(url);
+                              } catch {}
+                            }}
+                            className="w-full px-3 py-1.5 text-left hover:bg-secondary flex items-center gap-2 text-foreground cursor-pointer"
+                          >
+                            <Link2 className="w-3.5 h-3.5 text-muted-foreground" />
+                            <span>Copy profile link</span>
+                          </button>
+
+                          <div className="my-1 border-t border-border/60" />
+
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setActiveMenuKey(null);
+                              if (persona.userId) {
+                                try {
+                                  await apiClient.social.blockUser(persona.userId);
+                                  window.dispatchEvent(new CustomEvent("wr_refresh_feed"));
+                                } catch {}
+                              }
+                            }}
+                            className="w-full px-3 py-1.5 text-left hover:bg-destructive/15 flex items-center gap-2 text-destructive font-medium cursor-pointer"
+                          >
+                            <ShieldBan className="w-3.5 h-3.5 text-destructive" />
+                            <span>Block creator</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div
