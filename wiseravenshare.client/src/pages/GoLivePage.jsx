@@ -63,6 +63,8 @@ function buildHub(path) {
 }
 
 const REACTION_EMOJIS = ["👍", "❤️", "🔥", "😂", "🎉", "🎤", "🎶", "⭐"];
+const GOLIVE_SESSION_STORAGE_KEY = "wiseravenshare_golive_session_v1";
+const GOLIVE_SESSION_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 function generateStreamId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -73,6 +75,38 @@ function generateStreamId() {
     const val = char === "x" ? rand : ((rand & 0x3) | 0x8);
     return val.toString(16);
   });
+}
+
+function loadGoLiveSessionSnapshot() {
+  if (typeof window === "undefined" || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(GOLIVE_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const updatedAt = Number(parsed?.updatedAt || 0);
+    if (!updatedAt || Date.now() - updatedAt > GOLIVE_SESSION_RETENTION_MS) {
+      window.localStorage.removeItem(GOLIVE_SESSION_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveGoLiveSessionSnapshot(snapshot) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(
+      GOLIVE_SESSION_STORAGE_KEY,
+      JSON.stringify({
+        ...snapshot,
+        updatedAt: Date.now(),
+      })
+    );
+  } catch {
+    // Best-effort persistence.
+  }
 }
 
 // ── HLS Video Player ───────────────────────────────────────────────────────────
@@ -156,6 +190,7 @@ export default function GoLivePage() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [peakViewers, setPeakViewers] = useState(0);
   const [summaryData, setSummaryData] = useState(null);
+  const [activeStreamId, setActiveStreamId] = useState("");
 
   // References
   const previewRef = useRef(null);
@@ -453,6 +488,45 @@ export default function GoLivePage() {
     return () => stopCamera();
   }, [startCamera, stopCamera]);
 
+  // Restore GoLive draft/session state for up to 24 hours.
+  useEffect(() => {
+    const saved = loadGoLiveSessionSnapshot();
+    if (!saved || saved.roomId !== roomId) return;
+
+    if (typeof saved.streamTitle === "string" && saved.streamTitle.trim()) {
+      setStreamTitle(saved.streamTitle);
+    }
+    if (typeof saved.visibility === "string" && saved.visibility.trim()) {
+      setVisibility(saved.visibility);
+    }
+    if (typeof saved.mode === "string" && saved.mode.trim()) {
+      setMode(saved.mode);
+    }
+    if (typeof saved.hlsInput === "string") {
+      setHlsInput(saved.hlsInput);
+    }
+    if (typeof saved.hlsUrl === "string") {
+      setHlsUrl(saved.hlsUrl);
+    }
+    if (typeof saved.activeStreamId === "string" && saved.activeStreamId.trim()) {
+      currentStreamIdRef.current = saved.activeStreamId;
+      setActiveStreamId(saved.activeStreamId);
+    }
+  }, [roomId]);
+
+  // Persist GoLive draft/session state for up to 24 hours.
+  useEffect(() => {
+    saveGoLiveSessionSnapshot({
+      roomId,
+      streamTitle,
+      visibility,
+      mode,
+      hlsInput,
+      hlsUrl,
+      activeStreamId,
+    });
+  }, [roomId, streamTitle, visibility, mode, hlsInput, hlsUrl, activeStreamId]);
+
   // Scroll chat to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -466,6 +540,7 @@ export default function GoLivePage() {
 
     let sId = generateStreamId();
     currentStreamIdRef.current = sId;
+    setActiveStreamId(sId);
     chunksRef.current = [];
     setRecPhase("starting");
 
@@ -479,6 +554,7 @@ export default function GoLivePage() {
       const canonicalId = started?.stream_id || started?.streamId || sId;
       sId = canonicalId;
       currentStreamIdRef.current = canonicalId;
+      setActiveStreamId(canonicalId);
 
       toast({
         title: "Broadcast Started!",
@@ -540,6 +616,7 @@ export default function GoLivePage() {
 
         setRecPhase("done");
         setIsLive(false);
+        setActiveStreamId("");
       };
 
       rec.start(5000); // 5-second chunks
@@ -560,6 +637,7 @@ export default function GoLivePage() {
     } else {
       setIsLive(false);
       setRecPhase("done");
+      setActiveStreamId("");
       try {
         const summary = await apiClient.live.end(currentStreamIdRef.current || roomId);
         setSummaryData(summary);
