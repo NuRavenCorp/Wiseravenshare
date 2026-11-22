@@ -3406,6 +3406,17 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(ex, "Platform branding bootstrap failed during startup.");
     }
 
+    // Configure Spaces CORS for live streaming uploads and direct media access
+    try
+    {
+        var blobStorage = scope.ServiceProvider.GetRequiredService<IBlobStorageService>();
+        await blobStorage.EnsureCorsConfiguredAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Failed configuring DigitalOcean Spaces CORS at startup.");
+    }
+
     var userDbPersistenceAvailable = userStore.IsDatabasePersistenceAvailable();
     var videoDbPersistenceAvailable = await videoLibraryStore.IsDatabasePersistenceAvailableAsync();
     var userStatus = userStore.GetPersistenceStatus();

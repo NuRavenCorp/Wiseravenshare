@@ -1036,12 +1036,60 @@ public sealed class FunctionCompatController : ControllerBase
         }
 
         var recipientId = request.RecipientId;
-        if (!recipientId.HasValue && !string.IsNullOrWhiteSpace(request.RecipientEmail))
+        var recipientTarget = (!string.IsNullOrWhiteSpace(request.RecipientEmail)
+            ? request.RecipientEmail
+            : (!string.IsNullOrWhiteSpace(request.Recipient) ? request.Recipient : request.Recipient_Email))?.Trim();
+
+        if (!recipientId.HasValue && !string.IsNullOrWhiteSpace(recipientTarget))
         {
+            var normalizedTarget = recipientTarget.ToLowerInvariant();
             recipientId = await _db.Users.AsNoTracking()
-                .Where(x => x.Email == request.RecipientEmail)
+                .Where(x => (x.Email != null && x.Email.ToLower() == normalizedTarget)
+                         || (x.Username != null && x.Username.ToLower() == normalizedTarget)
+                         || (x.DisplayName != null && x.DisplayName.ToLower() == normalizedTarget))
                 .Select(x => (Guid?)x.Id)
                 .FirstOrDefaultAsync();
+
+            if (!recipientId.HasValue)
+            {
+                var profileMatch = await _db.UserProfiles.AsNoTracking()
+                    .Where(x => (x.Email != null && x.Email.ToLower() == normalizedTarget)
+                             || (x.Username != null && x.Username.ToLower() == normalizedTarget)
+                             || (x.DisplayName != null && x.DisplayName.ToLower() == normalizedTarget))
+                    .Select(x => (Guid?)x.UserId)
+                    .FirstOrDefaultAsync();
+                if (profileMatch.HasValue && profileMatch.Value != Guid.Empty)
+                {
+                    recipientId = profileMatch;
+                }
+            }
+
+            if (!recipientId.HasValue)
+            {
+                var configuredUsers = ReadConfiguredUsers();
+                var match = configuredUsers.FirstOrDefault(u =>
+                    string.Equals(u.Email, recipientTarget, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(u.Name, recipientTarget, StringComparison.OrdinalIgnoreCase));
+
+                var safeEmail = match != null ? match.Email : (recipientTarget.Contains('@') ? recipientTarget : $"{recipientTarget}@wiseravenshare.com");
+                var safeName = match != null ? match.Name : (recipientTarget.Contains('@') ? recipientTarget.Split('@')[0] : recipientTarget);
+
+                var newUser = new User
+                {
+                    Id = Guid.NewGuid(),
+                    Email = safeEmail,
+                    Username = safeName,
+                    DisplayName = safeName,
+                    PasswordHash = Guid.NewGuid().ToString("N"),
+                    Role = UserRole.User,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _db.Users.Add(newUser);
+                await _db.SaveChangesAsync();
+                recipientId = newUser.Id;
+            }
         }
 
         Guid conversationId;
@@ -3072,6 +3120,39 @@ public sealed class FunctionCompatController : ControllerBase
         var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(raw.Trim().ToLowerInvariant()));
         return new Guid(hash);
     }
+
+    private record ConfiguredUserRecord(string Name, string Email, string Password);
+
+    private List<ConfiguredUserRecord> ReadConfiguredUsers()
+    {
+        var users = new List<ConfiguredUserRecord>();
+        for (var i = 0; i < 16; i++)
+        {
+            var email = _configuration[$"Authentication:Users:{i}:Email"]
+                ?? _configuration[$"Authentication:Users:{i}:email"]
+                ?? _configuration[$"AUTHENTICATION:EMAIL:{i}"]
+                ?? _configuration[$"AUTHENTICATION__EMAIL__{i}"]
+                ?? _configuration[$"Authentication:Email:{i}"]
+                ?? _configuration[$"AUTHENTICATION_EMAIL_{i}"];
+
+            var password = _configuration[$"Authentication:Users:{i}:Password"]
+                ?? _configuration[$"Authentication:Users:{i}:password"]
+                ?? _configuration[$"AUTHENTICATION:PASSWORD:{i}"]
+                ?? _configuration[$"AUTHENTICATION__PASSWORD__{i}"]
+                ?? _configuration[$"Authentication:Password:{i}"]
+                ?? _configuration[$"AUTHENTICATION_PASSWORD_{i}"];
+
+            var name = _configuration[$"Authentication:Users:{i}:Name"]
+                ?? _configuration[$"Authentication:Users:{i}:name"]
+                ?? _configuration[$"AUTHENTICATION:NAME:{i}"]
+                ?? _configuration[$"AUTHENTICATION__NAME__{i}"];
+
+            if (string.IsNullOrWhiteSpace(email)) continue;
+            var safeName = string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name.Trim();
+            users.Add(new ConfiguredUserRecord(safeName, email.Trim(), password ?? string.Empty));
+        }
+        return users;
+    }
 }
 
 public sealed class FunctionPromptRequest
@@ -3205,6 +3286,9 @@ public sealed class SendMessageRequest
     public Guid? ConversationId { get; set; }
     public Guid? RecipientId { get; set; }
     public string? RecipientEmail { get; set; }
+    public string? Recipient { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("recipient_email")]
+    public string? Recipient_Email { get; set; }
     // Primary field
     public string Content { get; set; } = string.Empty;
     // Accepted aliases so the frontend can send any of these

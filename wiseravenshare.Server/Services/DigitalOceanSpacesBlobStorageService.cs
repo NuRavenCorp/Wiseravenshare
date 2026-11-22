@@ -22,6 +22,8 @@ public interface IBlobStorageService
     Task<bool> ExistsAsync(string objectKey, CancellationToken cancellationToken = default);
 
     Task<string?> GetPresignedUploadUrlAsync(string objectKey, string contentType, TimeSpan expiresIn);
+
+    Task EnsureCorsConfiguredAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed record StoredBlobResult(string ObjectKey, string PublicUrl);
@@ -273,6 +275,41 @@ public sealed class DigitalOceanSpacesBlobStorageService : IBlobStorageService
         {
             _logger.LogWarning(ex, "Unable to create presigned upload URL for object {ObjectKey}.", objectKey);
             return Task.FromResult<string?>(null);
+        }
+    }
+
+    public async Task EnsureCorsConfiguredAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsConfigured || string.IsNullOrWhiteSpace(_bucketName)) return;
+
+        try
+        {
+            using var client = CreateClient();
+            var corsRequest = new PutCORSConfigurationRequest
+            {
+                BucketName = _bucketName,
+                Configuration = new CORSConfiguration
+                {
+                    Rules = new List<CORSRule>
+                    {
+                        new CORSRule
+                        {
+                            Id = "WiseRavenShareLiveCORS",
+                            AllowedOrigins = new List<string> { "*", "https://wiseravenshare.com", "https://www.wiseravenshare.com" },
+                            AllowedMethods = new List<string> { "GET", "PUT", "POST", "HEAD", "DELETE" },
+                            AllowedHeaders = new List<string> { "*" },
+                            ExposeHeaders = new List<string> { "ETag", "x-amz-request-id" },
+                            MaxAgeSeconds = 3600
+                        }
+                    }
+                }
+            };
+            await client.PutCORSConfigurationAsync(corsRequest, cancellationToken);
+            _logger.LogInformation("DigitalOcean Spaces CORS successfully configured for bucket {Bucket}", _bucketName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to apply CORS rules to Spaces bucket {Bucket}", _bucketName);
         }
     }
 

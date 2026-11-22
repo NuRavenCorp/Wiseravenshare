@@ -832,6 +832,102 @@ SELECT EXISTS (
         });
     }
 
+    [HttpPost("{streamId}/segments/{index:int}/upload")]
+    [HttpPut("{streamId}/segments/{index:int}/upload")]
+    [Authorize]
+    [RequestSizeLimit(100 * 1024 * 1024)]
+    public async Task<IActionResult> UploadSegment(
+        [FromRoute] string streamId,
+        [FromRoute] int index,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(streamId))
+        {
+            return BadRequest(new { message = "streamId is required." });
+        }
+
+        if (!TryResolveUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Invalid user session." });
+        }
+
+        if (!_liveStreamStateStore.TryGet(streamId, out var stream))
+        {
+            return NotFound(new { message = "Stream not found." });
+        }
+
+        if (!IsOwner(stream, userId))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Not your stream." });
+        }
+
+        var key = $"live/{streamId}/segments/{index:D6}.webm";
+        var mime = "video/webm";
+
+        Stream segmentStream;
+        long size = 0;
+        if (Request.HasFormContentType && Request.Form.Files.Count > 0)
+        {
+            var file = Request.Form.Files[0];
+            segmentStream = file.OpenReadStream();
+            size = file.Length;
+            if (!string.IsNullOrWhiteSpace(file.ContentType)) mime = file.ContentType;
+        }
+        else
+        {
+            segmentStream = Request.Body;
+            size = Request.ContentLength ?? 0;
+            if (!string.IsNullOrWhiteSpace(Request.ContentType)) mime = Request.ContentType;
+        }
+
+        string? persistedBlobKey = null;
+        if (_blobStorageService.IsConfigured)
+        {
+            try
+            {
+                var uploaded = await _blobStorageService.UploadAsync(key, segmentStream, mime, cancellationToken);
+                persistedBlobKey = uploaded.ObjectKey;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Blob storage upload failed for live segment {Key}; storing locally.", key);
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(persistedBlobKey))
+        {
+            var bucketsRoot = _configuration["Persistence:BucketsRoot"] ?? "/app/Buckets";
+            var localPath = Path.Combine(bucketsRoot, "live", streamId, "segments", $"{index:D6}.webm");
+            Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
+            await using var fs = System.IO.File.Create(localPath);
+            if (segmentStream.CanSeek) segmentStream.Position = 0;
+            await segmentStream.CopyToAsync(fs, cancellationToken);
+            persistedBlobKey = key;
+        }
+
+        _liveStreamStateStore.UpsertSegment(streamId, index, key, size, string.Empty);
+        _liveStreamStateStore.MarkSegmentUploaded(streamId, index);
+
+        var streamPath = AppendBlobSignatureIfNeeded(
+            StreamingUrlHelper.StreamByBlobPath(key),
+            key);
+
+        _liveStreamStateStore.Update(streamId, s =>
+        {
+            s.current_chunk_uri = streamPath;
+            s.chunk_sequence = Math.Max(s.chunk_sequence, index + 1);
+        });
+
+        var totalDone = _liveStreamStateStore.GetSegments(streamId).Count(x => string.Equals(x.upload_state, "done", StringComparison.OrdinalIgnoreCase));
+        return Ok(new
+        {
+            confirmed = true,
+            total_segments = totalDone,
+            key,
+            url = streamPath
+        });
+    }
+
     [HttpPost("{streamId}/segments/{index:int}/confirm")]
     [Authorize]
     public async Task<IActionResult> ConfirmSegment(

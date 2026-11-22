@@ -95,6 +95,8 @@ const AuthenticatedApp = () => {
         <Route path="/ai-news" element={<AiNews />} />
         <Route path="/messages" element={<Messages />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/profile" element={<Navigate to="/dashboard?tab=profile" replace />} />
+        <Route path="/settings" element={<Navigate to="/dashboard?tab=profile" replace />} />
         <Route path="/media" element={<Media />} />
         <Route path="/fm-radio" element={<FMRadioPage />} />
         <Route path="/ravenchat" element={<RavenChat />} />

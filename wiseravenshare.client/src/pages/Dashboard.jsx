@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import Navbar from "@/components/landing/Navbar";
 import { User, Bookmark, Calendar, Lightbulb, Users, Feather, UserPlus, TrendingUp, BarChart3, Radio, PenSquare, MessageCircle, LayoutDashboard, CreditCard } from "lucide-react";
 import TodaysVibe from "@/components/vibe/TodaysVibe";
@@ -37,7 +38,18 @@ const sections = [
 ];
 
 export default function Dashboard() {
-  const [active, setActive] = useState("hub");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const [active, setActive] = useState(
+    tabParam && sections.some((s) => s.id === tabParam) ? tabParam : "hub"
+  );
+
+  useEffect(() => {
+    if (tabParam && sections.some((s) => s.id === tabParam)) {
+      setActive(tabParam);
+    }
+  }, [tabParam]);
+
   const current = sections.find((s) => s.id === active);
 
   return (
@@ -57,7 +69,10 @@ export default function Dashboard() {
                 return (
                   <button
                     key={s.id}
-                    onClick={() => setActive(s.id)}
+                    onClick={() => {
+                      setActive(s.id);
+                      setSearchParams({ tab: s.id });
+                    }}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
                       active === s.id
                         ? "bg-primary/15 text-primary"

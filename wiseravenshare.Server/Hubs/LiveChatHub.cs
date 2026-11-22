@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace Wiseravenshare.Server.Hubs;
 
-[Authorize]
+[AllowAnonymous]
 public sealed class LiveChatHub : Hub
 {
     public async Task JoinRoom(string roomId)

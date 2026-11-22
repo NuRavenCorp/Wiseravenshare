@@ -92,22 +92,39 @@ export default function LiveStreamBroadcaster({ onEnd }) {
 
       const segmentIndex = segmentIndexRef.current++;
       const sha256 = await sha256Hex(blob);
-      const presigned = await apiClient.live.presignSegment(streamId, {
-        segment_index: segmentIndex,
-        size_bytes: blob.size,
-        sha256,
-      });
+      let uploadedDirectly = false;
 
-      const putResponse = await fetch(presigned.url, {
-        method: "PUT",
-        headers: { "Content-Type": blob.type || "video/webm" },
-        body: blob,
-      });
-      if (!putResponse.ok) {
-        throw new Error(`Segment upload failed with ${putResponse.status}`);
+      try {
+        const presigned = await apiClient.live.presignSegment(streamId, {
+          segment_index: segmentIndex,
+          size_bytes: blob.size,
+          sha256,
+        });
+
+        if (presigned?.url) {
+          const putResponse = await fetch(presigned.url, {
+            method: "PUT",
+            headers: { "Content-Type": blob.type || "video/webm" },
+            body: blob,
+          });
+          if (putResponse.ok) {
+            await apiClient.live.confirmSegment(streamId, segmentIndex);
+            uploadedDirectly = true;
+          }
+        }
+      } catch (presignErr) {
+        console.warn("Direct Spaces upload failed (preflight/CORS); falling back to server proxy endpoint:", presignErr);
       }
 
-      await apiClient.live.confirmSegment(streamId, segmentIndex);
+      if (!uploadedDirectly) {
+        // Fallback to server endpoint to guarantee no CORS or preflight blocking
+        const form = new FormData();
+        form.append("file", blob, `segment-${segmentIndex}.webm`);
+        await apiClient.requestJson(`/api/live/${encodeURIComponent(streamId)}/segments/${segmentIndex}/upload`, {
+          method: "POST",
+          body: form,
+        });
+      }
     } catch (error) {
       console.error(error);
       if (force) {

@@ -9,7 +9,7 @@ namespace Wiseravenshare.Server.Hubs;
 /// Real-time hub for Go Live: viewer counts, live chat, floating reactions,
 /// host moderation (pin/delete/ban/slow mode), and co-hosting signaling.
 /// </summary>
-[Authorize]
+[AllowAnonymous]
 public sealed class GoLiveHub : Hub
 {
     private static readonly ConcurrentDictionary<string, int> ViewerCounts = new(StringComparer.OrdinalIgnoreCase);
