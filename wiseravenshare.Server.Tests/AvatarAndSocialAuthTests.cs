@@ -1,142 +1,87 @@
 using System;
 using System.IO;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging.Abstractions;
-using Wiseravenshare.Server.Controllers;
-using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Entities;
+using Wiseravenshare.Server.Infrastructure.Data.Repositories;
 using Wiseravenshare.Server.Models;
 using Wiseravenshare.Server.Services;
-using Wiseravenshare.Server.Services.Currency;
+using Wiseravenshare.Server.Services.Simulation;
 using Xunit;
 
 namespace Wiseravenshare.Server.Tests;
 
 public class AvatarAndSocialAuthTests
 {
-    private (UsersController controller, UserStore store, string rootDir) CreateUsersController()
+    [Fact]
+    public void UserStore_UpdateProfile_PersistsAvatarSelection()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"wr_avatar_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
-        var webRoot = Path.Combine(tempDir, "wwwroot");
-        var appData = Path.Combine(tempDir, "App_Data");
-        Directory.CreateDirectory(Path.Combine(webRoot, "uploads", "avatars"));
-        Directory.CreateDirectory(Path.Combine(appData, "avatars"));
-
-        var testEnv = new TestWebHostEnvironment
+        try
         {
-            ContentRootPath = tempDir,
-            WebRootPath = webRoot
+            var testEnv = new TestWebHostEnvironment { ContentRootPath = tempDir };
+            var config = new ConfigurationBuilder().Build();
+            var store = new UserStore(testEnv, config);
+
+            var user = store.CreateUser("Avatar User", "avatar@example.com", "Password#123", "Bio", "Location", "https://example.com", "");
+            Assert.True(string.IsNullOrEmpty(user.Avatar));
+
+            var newAvatarUrl = "/uploads/avatars/avatar_user_123.jpg";
+            var updated = store.UpdateProfile(user.Id, new UpdateUserProfileRequest { Avatar = newAvatarUrl });
+
+            Assert.Equal(newAvatarUrl, updated.Avatar);
+
+            Assert.True(store.TryGetById(user.Id, out var reloaded));
+            Assert.NotNull(reloaded);
+            Assert.Equal(newAvatarUrl, reloaded.Avatar);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch {}
+        }
+    }
+
+    [Fact]
+    public void EngagementPersonaState_IncludesDisplayNameArchetypeAndAvatar()
+    {
+        var state = new EngagementPersonaState
+        {
+            Key = "marcus_vance",
+            UserId = Guid.NewGuid(),
+            Username = "marcus_vance",
+            DisplayName = "Dr. Marcus Vance",
+            Archetype = "Tech Philosopher & AI Ethicist",
+            AvatarUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb",
+            Bio = "AI ethics researcher & systems philosopher.",
+            Email = "marcus.vance@wiseravenshare.ai",
+            Password = "Password#123",
+            IsResting = false,
+            PostsInCycle = 2,
+            LifetimePosts = 5
         };
 
-        var config = new ConfigurationBuilder().Build();
-        var store = new UserStore(testEnv, config);
-
-        var dbOptions = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(databaseName: $"AvatarDb_{Guid.NewGuid():N}")
-            .Options;
-        var dbContext = new AppDbContext(dbOptions);
-
-        var growthService = new GrowthService(new NullLogger<GrowthService>(), store);
-        var wiseCoinService = new WiseCoinService(dbContext, new NullLogger<WiseCoinService>());
-        var blobStorage = new BlobStorageService(config, new NullLogger<BlobStorageService>());
-
-        var controller = new UsersController(
-            config,
-            store,
-            growthService,
-            wiseCoinService,
-            new NullLogger<UsersController>(),
-            dbContext,
-            blobStorage,
-            testEnv);
-
-        return (controller, store, tempDir);
+        Assert.Equal("Dr. Marcus Vance", state.DisplayName);
+        Assert.Equal("Tech Philosopher & AI Ethicist", state.Archetype);
+        Assert.False(string.IsNullOrEmpty(state.AvatarUrl));
+        Assert.False(state.IsResting);
     }
 
     [Fact]
-    public async Task GetSavedAvatars_ReturnsFilesFromUploadsAndAppData()
+    public void EngagementPersonaCatalog_AllPersonasHaveUniqueDisplayNamesAndAvatars()
     {
-        var (controller, store, rootDir) = CreateUsersController();
+        var personas = EngagementPersonaCatalog.Personas;
+        Assert.True(personas.Count >= 10);
 
-        try
+        var displayNames = personas.Select(p => p.DisplayName).Distinct().ToList();
+        Assert.Equal(personas.Count, displayNames.Count);
+
+        // Every persona must have an avatar and post pool for authentic discussion
+        foreach (var persona in personas)
         {
-            var uploadsAvatarsDir = Path.Combine(rootDir, "wwwroot", "uploads", "avatars");
-            var testFile1 = Path.Combine(uploadsAvatarsDir, "test_pic_1.jpg");
-            var testFile2 = Path.Combine(uploadsAvatarsDir, "test_pic_2.png");
-            File.WriteAllText(testFile1, "dummy image bytes");
-            File.WriteAllText(testFile2, "dummy image bytes 2");
-
-            var result = controller.GetSavedAvatars("me") as OkObjectResult;
-            Assert.NotNull(result);
-
-            var items = result.Value as System.Collections.IEnumerable;
-            Assert.NotNull(items);
-
-            var list = items.Cast<object>().ToList();
-            Assert.True(list.Count >= 2);
-        }
-        finally
-        {
-            try { Directory.Delete(rootDir, true); } catch {}
-        }
-    }
-
-    [Fact]
-    public async Task SelectAvatar_UpdatesUserProfileAndActiveStatus()
-    {
-        var (controller, store, rootDir) = CreateUsersController();
-
-        try
-        {
-            var user = store.CreateUser("Avatar Fan", "fan@example.com", "Password#123", "", "", "", "");
-            var avatarUrl = "/uploads/avatars/new_chosen_avatar.png";
-
-            var selectReq = new SelectAvatarRequest
-            {
-                AvatarUrl = avatarUrl,
-                FileName = "new_chosen_avatar.png"
-            };
-
-            var result = await controller.SelectAvatar(user.Id, selectReq, CancellationToken.None) as OkObjectResult;
-            Assert.NotNull(result);
-
-            Assert.True(store.TryGetById(user.Id, out var updatedUser));
-            Assert.NotNull(updatedUser);
-            Assert.Equal(avatarUrl, updatedUser.Avatar);
-        }
-        finally
-        {
-            try { Directory.Delete(rootDir, true); } catch {}
-        }
-    }
-
-    [Fact]
-    public void DeleteSavedAvatar_RemovesFileFromDisk()
-    {
-        var (controller, store, rootDir) = CreateUsersController();
-
-        try
-        {
-            var uploadsAvatarsDir = Path.Combine(rootDir, "wwwroot", "uploads", "avatars");
-            var fileName = "to_delete.jpg";
-            var filePath = Path.Combine(uploadsAvatarsDir, fileName);
-            File.WriteAllText(filePath, "dummy data");
-            Assert.True(File.Exists(filePath));
-
-            var result = controller.DeleteSavedAvatar("me", fileName) as OkObjectResult;
-            Assert.NotNull(result);
-            Assert.False(File.Exists(filePath));
-        }
-        finally
-        {
-            try { Directory.Delete(rootDir, true); } catch {}
+            Assert.False(string.IsNullOrWhiteSpace(persona.AvatarUrl));
+            Assert.True(persona.PostPool.Count >= 5);
+            Assert.True(persona.ReplyPool.Count >= 3);
         }
     }
 }

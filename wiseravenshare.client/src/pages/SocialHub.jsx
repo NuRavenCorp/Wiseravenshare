@@ -46,6 +46,7 @@ export default function SocialHub() {
           <h1 className="font-heading text-4xl text-foreground mb-2 text-glow">Your Social Hub</h1>
           <p className="text-muted-foreground">Follow creators, share posts, explore what is trending, and connect your other social accounts.</p>
         </div>
+        <TheFlockCreatorsShelf />
         <LimitationsNotice />
         <div className="mb-8">
           <TodaysVibe />
