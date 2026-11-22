@@ -17,7 +17,17 @@ const TRUTH_STYLES = {
 };
 const EMPTY_BLOCKED_IDS = Object.freeze([]);
 
-export default function PostCard({ post, currentUser, onAuthRequired, onHashtagClick, onBlocked, onBookmarkChange, blockedIds = EMPTY_BLOCKED_IDS }) {
+export default function PostCard({
+  post,
+  currentUser,
+  onAuthRequired,
+  onHashtagClick,
+  onBlocked,
+  onBookmarkChange,
+  blockedIds = EMPTY_BLOCKED_IDS,
+  autoOpenComments = false,
+  targetCommentId = "",
+}) {
   const [author, setAuthor] = useState(null);
   const [authorFollowersCount, setAuthorFollowersCount] = useState(post.author?.followersCount || 0);
   const [liked, setLiked] = useState(false);
@@ -93,6 +103,12 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  useEffect(() => {
+    if (autoOpenComments) {
+      setShowComments(true);
+    }
+  }, [autoOpenComments]);
 
   const handleLike = async () => {
     if (!currentUser) return onAuthRequired?.();
@@ -542,6 +558,7 @@ export default function PostCard({ post, currentUser, onAuthRequired, onHashtagC
           postId={post.id}
           commentCount={commentCount}
           currentUser={currentUser}
+          targetCommentId={targetCommentId}
           onAuthRequired={onAuthRequired}
           onCountChange={setCommentCount}
         />

@@ -3,7 +3,7 @@ import { apiClient } from "@/api/client";
 import { Send, Loader2, Reply, CornerDownRight, Heart } from "lucide-react";
 import { Image } from "@/components/ui/image";
 
-export default function PostComments({ postId, commentCount, currentUser, onAuthRequired, onCountChange }) {
+export default function PostComments({ postId, commentCount, currentUser, targetCommentId = "", onAuthRequired, onCountChange }) {
   const [comments, setComments] = useState([]);
   const [likedComments, setLikedComments] = useState({});
   const [loading, setLoading] = useState(true);
@@ -12,6 +12,7 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
   const [replyTo, setReplyTo] = useState(null);
   const [replyText, setReplyText] = useState("");
   const [collapsed, setCollapsed] = useState({});
+  const [highlightedCommentId, setHighlightedCommentId] = useState("");
 
   const normalizeComment = (comment) => ({
     id: comment.id,
@@ -37,6 +38,45 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
       })
       .finally(() => setLoading(false));
   }, [postId, currentUser?.id]);
+
+  useEffect(() => {
+    const targetId = String(targetCommentId || "");
+    if (!targetId || comments.length === 0) return;
+
+    const target = comments.find((c) => String(c.id) === targetId);
+    if (!target) return;
+
+    const parentLookup = new Map(comments.map((c) => [String(c.id), c.parent_id ? String(c.parent_id) : ""]));
+    setCollapsed((prev) => {
+      const next = { ...prev };
+      let cursor = targetId;
+      let guard = 0;
+      while (guard < 20) {
+        const parentId = parentLookup.get(cursor);
+        if (!parentId) break;
+        next[parentId] = false;
+        cursor = parentId;
+        guard += 1;
+      }
+      return next;
+    });
+
+    if (currentUser) {
+      setReplyTo({ id: target.id });
+    }
+
+    setHighlightedCommentId(targetId);
+    const highlightTimer = setTimeout(() => setHighlightedCommentId(""), 3500);
+    const scrollTimer = setTimeout(() => {
+      const el = document.getElementById(`comment-${targetId}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+
+    return () => {
+      clearTimeout(highlightTimer);
+      clearTimeout(scrollTimer);
+    };
+  }, [targetCommentId, comments, currentUser]);
 
   const buildTree = (flat) => {
     const map = {};
@@ -121,8 +161,8 @@ export default function PostComments({ postId, commentCount, currentUser, onAuth
     const likeCount = node.like_count || 0;
 
     return (
-      <div key={node.id} style={{ marginLeft: depth > 0 ? indent : 0 }}>
-        <div className={`rounded-xl px-3 py-2.5 ${depth > 0 ? "bg-secondary/20 border border-border/40" : "bg-secondary/40"}`}>
+      <div id={`comment-${node.id}`} key={node.id} style={{ marginLeft: depth > 0 ? indent : 0 }}>
+        <div className={`rounded-xl px-3 py-2.5 ${depth > 0 ? "bg-secondary/20 border border-border/40" : "bg-secondary/40"} ${String(node.id) === highlightedCommentId ? "ring-2 ring-primary bg-primary/10" : ""}`}>
           <div className="flex items-center gap-2 mb-1.5">
             <div className="w-6 h-6 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center overflow-hidden shrink-0">
               {(author?.avatarUrl || author?.avatar_uri) ? (

@@ -135,23 +135,42 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
     await uploadAvatarFile(file);
   };
 
+  const canLoadAvatarUrl = (url) =>
+    new Promise((resolve) => {
+      if (!url) {
+        resolve(false);
+        return;
+      }
+      if (url.startsWith("data:") || url.startsWith("blob:")) {
+        resolve(true);
+        return;
+      }
+
+      const probe = new window.Image();
+      probe.onload = () => resolve(true);
+      probe.onerror = () => resolve(false);
+      probe.src = url;
+    });
+
   const uploadAvatarFile = async (file) => {
     setUploading(true);
     setUploadSuccess(false);
 
-    // Read immediately into dataUrl for instantaneous visual display
+    const previousAvatar = avatarUrl;
+    let localPreviewUrl = "";
     try {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const localDataUrl = e.target?.result;
-        if (localDataUrl) {
-          setAvatarUrl(localDataUrl);
-          try {
-            localStorage.setItem("wiseravenshare_guest_avatar", localDataUrl);
-          } catch {}
-        }
-      };
-      reader.readAsDataURL(file);
+      localPreviewUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(typeof e.target?.result === "string" ? e.target.result : "");
+        reader.onerror = () => resolve("");
+        reader.readAsDataURL(file);
+      });
+      if (localPreviewUrl) {
+        setAvatarUrl(localPreviewUrl);
+        try {
+          localStorage.setItem("wiseravenshare_guest_avatar", localPreviewUrl);
+        } catch {}
+      }
     } catch {}
 
     try {
@@ -161,10 +180,14 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
 
       if (newUrl) {
         const resolved = resolveMediaUrl(newUrl);
-        setAvatarUrl(resolved);
-        try {
-          localStorage.setItem("wiseravenshare_guest_avatar", resolved);
-        } catch {}
+        const imageLoads = await canLoadAvatarUrl(resolved);
+        const nextAvatar = imageLoads ? resolved : (localPreviewUrl || previousAvatar || "");
+        if (nextAvatar) {
+          setAvatarUrl(nextAvatar);
+          try {
+            localStorage.setItem("wiseravenshare_guest_avatar", nextAvatar);
+          } catch {}
+        }
 
         // Update local saved avatars cache
         try {
@@ -173,7 +196,7 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
           const updatedList = [
             {
               fileName: res.fileName || file.name,
-              url: resolved,
+              url: nextAvatar || resolved,
               createdAt: new Date().toISOString(),
               isActive: true,
             },
@@ -185,7 +208,7 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
         // Emit global event
         window.dispatchEvent(
           new CustomEvent("wr_avatar_updated", {
-            detail: { avatarUrl: resolved, fileName: res?.fileName },
+            detail: { avatarUrl: nextAvatar || resolved, fileName: res?.fileName },
           })
         );
       }

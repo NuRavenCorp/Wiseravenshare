@@ -132,20 +132,29 @@ public sealed class UserNotificationsController : ControllerBase
                     break;
 
                 case NotificationType.Comment:
-                    title = "New Comment";
+                    var isThreadReply = n.Comment?.ParentCommentId is not null;
+                    title = isThreadReply ? "New Thread Reply" : "New Comment";
                     if (!string.IsNullOrWhiteSpace(commentSnippet))
                     {
                         displayContent = !string.IsNullOrWhiteSpace(actorHandle)
-                            ? $"@{actorHandle} commented: \"{commentSnippet}\""
-                            : $"New comment: \"{commentSnippet}\"";
+                            ? (isThreadReply
+                                ? $"@{actorHandle} replied in your thread: \"{commentSnippet}\""
+                                : $"@{actorHandle} commented: \"{commentSnippet}\"")
+                            : (isThreadReply
+                                ? $"New thread reply: \"{commentSnippet}\""
+                                : $"New comment: \"{commentSnippet}\"");
                     }
                     else
                     {
                         displayContent = !string.IsNullOrWhiteSpace(actorHandle)
-                            ? $"@{actorHandle} commented on your post"
+                            ? (isThreadReply ? $"@{actorHandle} replied in your thread" : $"@{actorHandle} commented on your post")
                             : (n.Content ?? "Someone commented on your post");
                     }
-                    link = n.PostId.HasValue ? $"/social?postId={n.PostId}" : "/social";
+                    link = n.PostId.HasValue
+                        ? (n.CommentId.HasValue
+                            ? $"/social?post={n.PostId}&comment={n.CommentId}"
+                            : $"/social?post={n.PostId}")
+                        : "/social";
                     break;
 
                 case NotificationType.Like:
@@ -153,7 +162,7 @@ public sealed class UserNotificationsController : ControllerBase
                     displayContent = !string.IsNullOrWhiteSpace(actorHandle)
                         ? $"@{actorHandle} liked your post"
                         : (n.Content ?? "Someone liked your post");
-                    link = n.PostId.HasValue ? $"/social?postId={n.PostId}" : "/social";
+                    link = n.PostId.HasValue ? $"/social?post={n.PostId}" : "/social";
                     break;
 
                 case NotificationType.Repost:
@@ -161,7 +170,7 @@ public sealed class UserNotificationsController : ControllerBase
                     displayContent = !string.IsNullOrWhiteSpace(actorHandle)
                         ? $"@{actorHandle} reposted your post"
                         : (n.Content ?? "Someone reposted your post");
-                    link = n.PostId.HasValue ? $"/social?postId={n.PostId}" : "/social";
+                    link = n.PostId.HasValue ? $"/social?post={n.PostId}" : "/social";
                     break;
 
                 case NotificationType.ViralContent:
@@ -170,7 +179,7 @@ public sealed class UserNotificationsController : ControllerBase
                     displayContent = !string.IsNullOrWhiteSpace(n.Content)
                         ? n.Content
                         : "Your post is gaining major viral traction and community engagement!";
-                    link = n.PostId.HasValue ? $"/social?postId={n.PostId}" : "/social";
+                    link = n.PostId.HasValue ? $"/social?post={n.PostId}" : "/social";
                     break;
 
                 case NotificationType.LiveStream:
@@ -182,7 +191,9 @@ public sealed class UserNotificationsController : ControllerBase
                 default:
                     title = n.Type.ToString();
                     displayContent = n.Content ?? n.Type.ToString();
-                    link = n.PostId.HasValue ? $"/social?postId={n.PostId}" : (!string.IsNullOrWhiteSpace(n.StreamId) ? $"/go-live/{n.StreamId}" : "/social");
+                    link = n.PostId.HasValue
+                        ? (n.CommentId.HasValue ? $"/social?post={n.PostId}&comment={n.CommentId}" : $"/social?post={n.PostId}")
+                        : (!string.IsNullOrWhiteSpace(n.StreamId) ? $"/go-live/{n.StreamId}" : "/social");
                     break;
             }
 

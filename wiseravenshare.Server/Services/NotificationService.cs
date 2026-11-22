@@ -53,8 +53,10 @@ public sealed class NotificationService : INotificationService
             _db.Notifications.Add(notification);
             await _db.SaveChangesAsync(cancellationToken);
 
-            var link = postId.HasValue 
-                ? $"/social?postId={postId.Value}" 
+            var link = postId.HasValue
+                ? (commentId.HasValue
+                    ? $"/social?post={postId.Value}&comment={commentId.Value}"
+                    : $"/social?post={postId.Value}")
                 : (!string.IsNullOrWhiteSpace(streamId) ? $"/go-live/{streamId}" : "/social");
 
             var title = type switch

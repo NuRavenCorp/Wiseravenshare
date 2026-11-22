@@ -439,6 +439,30 @@ namespace Wiseravenshare.Server.Controllers
                 content: "commented on your post",
                 cancellationToken: HttpContext.RequestAborted);
 
+            if (dto.ParentCommentId.HasValue)
+            {
+                try
+                {
+                    var existingComments = await _postService.GetCommentsAsync(id, 1, 500);
+                    var parentComment = existingComments.FirstOrDefault(c => c.Id == dto.ParentCommentId.Value);
+                    if (parentComment is not null && parentComment.UserId != Guid.Empty && parentComment.UserId != userId && parentComment.UserId != ownerId)
+                    {
+                        _ = _notificationService.SendAsync(
+                            parentComment.UserId,
+                            Wiseravenshare.Server.Entities.NotificationType.Comment,
+                            actorId: userId,
+                            postId: id,
+                            commentId: comment.Id,
+                            content: "replied to your comment",
+                            cancellationToken: HttpContext.RequestAborted);
+                    }
+                }
+                catch
+                {
+                    // Best-effort thread reply notification.
+                }
+            }
+
             try
             {
                 var post = await _postService.GetPostAsync(id);

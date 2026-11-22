@@ -101,6 +101,9 @@ export default function Navbar() {
               <Link to="/planner" className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5">
                 <CalendarDays className="w-4 h-4" /> Planner
               </Link>
+              <Link to="/notifications" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                Notifications
+              </Link>
               <NotificationBell />
               <Button onClick={() => logout()} variant="outline" className="rounded-full px-6">
                 <LogOut className="w-4 h-4" /> Leave
@@ -165,6 +168,9 @@ export default function Navbar() {
               </Link>
               <Link to="/planner" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground flex items-center gap-1.5">
                 <CalendarDays className="w-4 h-4" /> Planner
+              </Link>
+              <Link to="/notifications" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
+                Notifications
               </Link>
               <Button onClick={() => logout()} variant="outline" className="rounded-full">
                 <LogOut className="w-4 h-4" /> Leave

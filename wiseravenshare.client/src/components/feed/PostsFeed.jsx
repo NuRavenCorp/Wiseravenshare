@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useLocation } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { Loader2, Feather, LayoutGrid, Clock, TrendingUp, Users, X, ShieldBan, ShieldCheck } from "lucide-react";
 import PostCard from "./PostCard";
@@ -34,6 +35,7 @@ const getAgeHours = (createdDate) => {
 };
 
 export default function PostsFeed() {
+  const location = useLocation();
   const [posts, setPosts] = useState(() => {
     try {
       const cached = localStorage.getItem("wiseravenshare_cached_posts");
@@ -52,6 +54,7 @@ export default function PostsFeed() {
   const [mode, setMode] = useState("following");
   const [tag, setTag] = useState("");
   const [followingCount, setFollowingCount] = useState(0);
+  const [notificationTarget, setNotificationTarget] = useState({ postId: "", commentId: "" });
 
   // Track optimistically-added posts so they survive server re-fetches.
   const optimisticPostsRef = React.useRef(new Map());
@@ -296,13 +299,16 @@ export default function PostsFeed() {
   });
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const targetPostId = params.get("post");
-    if (!targetPostId) return;
+    const params = new URLSearchParams(location.search || "");
+    const targetPostId = params.get("post") || "";
+    const targetCommentId = params.get("comment") || "";
+    setNotificationTarget({ postId: targetPostId, commentId: targetCommentId });
+  }, [location.search]);
 
+  useEffect(() => {
+    if (!notificationTarget.postId) return;
     const timer = setTimeout(() => {
-      const el = document.getElementById(`post-${targetPostId}`);
+      const el = document.getElementById(`post-${notificationTarget.postId}`);
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "center" });
         el.classList.add("ring-2", "ring-primary", "bg-primary/5");
@@ -313,7 +319,7 @@ export default function PostsFeed() {
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [posts]);
+  }, [posts, notificationTarget.postId]);
   const removeBlockedUser = async (userId) => {
     const blocked = String(userId);
     setBlockedIds((current) => [...new Set([...current, blocked])]);
@@ -423,6 +429,8 @@ export default function PostsFeed() {
               post={post}
               currentUser={currentUser}
               blockedIds={blockedIds}
+              autoOpenComments={Boolean(notificationTarget.postId) && String(notificationTarget.postId) === String(post.id)}
+              targetCommentId={String(notificationTarget.postId) === String(post.id) ? notificationTarget.commentId : ""}
               onHashtagClick={openTag}
               onBlocked={removeBlockedUser}
               onAuthRequired={handleAuthRequired}
