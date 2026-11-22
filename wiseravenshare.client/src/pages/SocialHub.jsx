@@ -15,6 +15,7 @@ import FollowStatsHero from "@/components/dashboard/FollowStatsHero";
 import { Share2, Download, Feather, Link2, CheckCircle2, Circle } from "lucide-react";
 import PostComposer from "@/components/feed/PostComposer";
 import PostsFeed from "@/components/feed/PostsFeed";
+import LiveNowCarousel from "@/components/live/LiveNowCarousel";
 
 // All supported platforms — order determines display sequence
 const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky", "linkedin"];
@@ -82,6 +83,7 @@ export default function SocialHub() {
           </TabsList>
 
           <TabsContent value="feed" className="space-y-8">
+            <LiveNowCarousel />
             <PostsFeed />
             <SystemFeedSection />
           </TabsContent>

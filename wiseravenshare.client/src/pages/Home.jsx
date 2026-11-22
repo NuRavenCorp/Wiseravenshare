@@ -8,6 +8,7 @@ import { LogIn, LogOut, GraduationCap, ChevronUp } from "lucide-react";
 import HomeTiles from "@/components/landing/HomeTiles";
 import PostsFeed from "@/components/feed/PostsFeed";
 import TopLeftAvatarLogoContainer from "@/components/navigation/TopLeftAvatarLogoContainer";
+import LiveNowCarousel from "@/components/live/LiveNowCarousel";
 
 const INTRO_KEY = "wrs_intro_seen";
 
@@ -100,6 +101,7 @@ export default function Home() {
           </div>
 
           <section className="space-y-5">
+            <LiveNowCarousel />
             <div className="text-center space-y-2">
               <h2 className="font-heading text-2xl text-foreground">Recent Posts</h2>
               <p className="text-sm text-muted-foreground">

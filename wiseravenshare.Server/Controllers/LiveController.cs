@@ -35,6 +35,7 @@ public sealed class LiveController : ControllerBase
     private readonly IMediaBlobSignatureService _signatureService;
     private readonly AppDbContext _db;
     private readonly IHubContext<NotificationHub> _notificationHub;
+    private readonly IHubContext<GoLiveHub> _goLiveHub;
     private readonly IConfiguration _configuration;
     private readonly ILogger<LiveController> _logger;
 
@@ -46,6 +47,7 @@ public sealed class LiveController : ControllerBase
         IMediaBlobSignatureService signatureService,
         AppDbContext db,
         IHubContext<NotificationHub> notificationHub,
+        IHubContext<GoLiveHub> goLiveHub,
         IConfiguration configuration,
         ILogger<LiveController> logger)
     {
@@ -56,8 +58,81 @@ public sealed class LiveController : ControllerBase
         _signatureService = signatureService;
         _db = db;
         _notificationHub = notificationHub;
+        _goLiveHub = goLiveHub;
         _configuration = configuration;
         _logger = logger;
+    }
+
+    [HttpGet("active")]
+    [AllowAnonymous]
+    public IActionResult GetActiveStreams([FromQuery] int limit = 20)
+    {
+        var streams = _liveStreamStateStore.GetAll()
+            .Where(s => s.deleted_at is null && string.Equals(s.status, "live", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(s => s.started_at ?? s.created_date)
+            .Take(Math.Clamp(limit, 1, 50))
+            .Select(s => new
+            {
+                id = s.id,
+                stream_id = s.id,
+                title = string.IsNullOrWhiteSpace(s.title) ? "Live Stream" : s.title,
+                host_user_id = s.streamer_id,
+                hostUserId = s.streamer_id,
+                streamer_id = s.streamer_id,
+                status = s.status,
+                started_at = s.started_at ?? s.created_date,
+                startedAt = s.started_at ?? s.created_date,
+                is_audio_only = s.is_audio_only,
+                viewer_count = GoLiveHub.GetCurrentViewerCount(s.id),
+                viewerCount = GoLiveHub.GetCurrentViewerCount(s.id),
+                hls_playback_url = EnsureSignedBlobPath(s.current_chunk_uri),
+                hlsPlaybackUrl = EnsureSignedBlobPath(s.current_chunk_uri)
+            })
+            .ToList();
+
+        return Ok(streams);
+    }
+
+    [HttpGet("{streamId}/thumbnail.jpg")]
+    [AllowAnonymous]
+    [ResponseCache(Duration = 15)]
+    public IActionResult GetLiveThumbnail(string streamId)
+    {
+        if (string.IsNullOrWhiteSpace(streamId)) return NotFound();
+
+        var localPath = Path.Combine(Directory.GetCurrentDirectory(), "recordings", "thumbs", $"{streamId}.jpg");
+        if (System.IO.File.Exists(localPath))
+        {
+            return PhysicalFile(localPath, "image/jpeg");
+        }
+
+        var title = "WISE RAVEN LIVE";
+        if (_liveStreamStateStore.TryGet(streamId, out var s) && !string.IsNullOrWhiteSpace(s.title))
+        {
+            title = s.title.Length > 24 ? s.title[..24] + "…" : s.title;
+        }
+
+        var svg = $"""
+        <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+          <defs>
+            <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#180b2b" />
+              <stop offset="50%" stop-color="#090514" />
+              <stop offset="100%" stop-color="#1c0b36" />
+            </linearGradient>
+          </defs>
+          <rect width="640" height="360" fill="url(#g)" />
+          <circle cx="320" cy="160" r="48" fill="#e11d48" opacity="0.15" />
+          <circle cx="320" cy="160" r="32" fill="#e11d48" opacity="0.85" />
+          <polygon points="312,146 336,160 312,174" fill="#ffffff" />
+          <rect x="24" y="24" width="72" height="26" rx="6" fill="#e11d48" />
+          <text x="60" y="42" font-family="sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">LIVE</text>
+          <text x="320" y="240" font-family="sans-serif" font-size="18" font-weight="bold" fill="#f8fafc" text-anchor="middle">{System.Security.SecurityElement.Escape(title)}</text>
+          <text x="320" y="268" font-family="sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">WiseRavenShare Live Broadcast</text>
+        </svg>
+        """;
+
+        return Content(svg, "image/svg+xml");
     }
 
     [HttpGet("feed")]
@@ -636,6 +711,23 @@ SELECT EXISTS (
             {
                 _logger.LogWarning(ex, "Live notification fan-out failed for stream {StreamId}", existing.id);
             }
+
+            try
+            {
+                await _goLiveHub.Clients.All.SendAsync("StreamStarted", new
+                {
+                    id = existing.id,
+                    streamId = existing.id,
+                    title = existing.title,
+                    hostUserId = userId,
+                    streamerId = userId,
+                    startedAt = existing.started_at ?? now
+                }, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast StreamStarted event for {StreamId}", streamId);
+            }
         }
 
         return Ok(new
@@ -799,7 +891,7 @@ SELECT EXISTS (
 
     [HttpPost("{streamId}/end")]
     [Authorize]
-    public IActionResult EndStream([FromRoute] string streamId)
+    public async Task<IActionResult> EndStream([FromRoute] string streamId)
     {
         if (string.IsNullOrWhiteSpace(streamId))
         {
@@ -831,10 +923,73 @@ SELECT EXISTS (
             }
         });
 
+        var (peak, comments, reactions) = GoLiveHub.ConsumeStats(streamId);
+        var duration = ended?.ended_at.HasValue == true && ended.started_at.HasValue
+            ? ended.ended_at.Value - ended.started_at.Value
+            : TimeSpan.Zero;
+        var durationFormatted = $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
+
+        // Notify GoLiveHub
+        try
+        {
+            var roomGroup = $"golive:{streamId.Trim().ToUpperInvariant()}";
+            await _goLiveHub.Clients.Group(roomGroup).SendAsync("StreamEnded", streamId);
+            await _goLiveHub.Clients.All.SendAsync("StreamEnded", streamId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to broadcast StreamEnded for {StreamId}", streamId);
+        }
+
+        // Automatically publish VOD replay to feed
+        Guid? replayPostId = null;
+        try
+        {
+            if (Guid.TryParse(userId, out var ownerGuid))
+            {
+                var mediaUrl = !string.IsNullOrWhiteSpace(ended?.final_recording_uri)
+                    ? ended.final_recording_uri
+                    : (!string.IsNullOrWhiteSpace(ended?.current_chunk_uri) ? EnsureSignedBlobPath(ended.current_chunk_uri) : null);
+
+                var replayPost = new Wiseravenshare.Server.Entities.Post
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = ownerGuid,
+                    Content = $"🔴 Live Broadcast Replay: {ended?.title ?? "Live Stream"}\n\nRecorded on WiseRavenShare GoLive.",
+                    Type = Wiseravenshare.Server.Entities.PostType.Video,
+                    MediaUrls = !string.IsNullOrWhiteSpace(mediaUrl) ? new[] { mediaUrl } : Array.Empty<string>(),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _db.Posts.Add(replayPost);
+                await _db.SaveChangesAsync();
+                replayPostId = replayPost.Id;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to auto-create feed replay post for stream {StreamId}", streamId);
+        }
+
         return Ok(new
         {
             stream_id = ended?.id,
+            streamId = ended?.id,
+            title = ended?.title,
             ended_at = ended?.ended_at,
+            endedAt = ended?.ended_at,
+            duration_formatted = durationFormatted,
+            durationFormatted,
+            peak_viewers = peak,
+            peakViewers = peak,
+            total_comments = comments,
+            totalComments = comments,
+            total_reactions = reactions,
+            totalReactions = reactions,
+            replay_status = "VOD replay published to your feed.",
+            replayStatus = "VOD replay published to your feed.",
+            replay_post_id = replayPostId,
+            replayPostId,
             expires_at = ended?.expires_at,
             kept_permanently = ended?.kept_permanently ?? false
         });

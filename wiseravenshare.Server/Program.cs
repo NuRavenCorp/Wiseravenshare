@@ -3761,6 +3761,8 @@ app.MapHub<LiveChatHub>("/api/hubs/live-chat");
 app.MapHub<SocialHub>("/api/hubs/social");
 app.MapHub<WiseRavenShare.Server.API.Hubs.AssistantHub>("/api/hubs/assistant");
 app.MapHub<GoLiveHub>("/api/hubs/go-live");
+app.MapHub<GoLiveHub>("/hubs/livestream");
+app.MapHub<GoLiveHub>("/api/hubs/livestream");
 app.MapGet("/manifest.json", async (HttpContext context) =>
 {
     var manifestPath = Path.Combine(app.Environment.WebRootPath ?? string.Empty, "manifest.json");

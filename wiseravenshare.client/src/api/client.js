@@ -1038,6 +1038,15 @@ export const apiClient = {
         method: "GET",
       });
     },
+    active(limit = 20) {
+      return requestJson(`/api/live/active?limit=${encodeURIComponent(limit)}`, { method: "GET" });
+    },
+    iceServers() {
+      return requestJson("/api/live/ice-servers", { method: "GET" });
+    },
+    thumbnailUrl(streamId) {
+      return `/api/live/${encodeURIComponent(streamId)}/thumbnail.jpg`;
+    },
     start(streamId, payload = {}) {
       return requestJson(`/api/live/${encodeURIComponent(streamId)}/start`, {
         method: "POST",
