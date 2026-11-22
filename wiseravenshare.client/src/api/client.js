@@ -1532,8 +1532,15 @@ export const apiClient = {
     status(userId) {
       return requestJson(`/api/follow/status/${encodeURIComponent(userId)}`, { method: "GET" });
     },
-    toggle(userId) {
-      return requestJson("/api/follow/toggle", { method: "POST", body: JSON.stringify({ targetUserId: userId }) });
+    toggle(userId, personaKey, targetUsername) {
+      return requestJson("/api/follow/toggle", {
+        method: "POST",
+        body: JSON.stringify({
+          targetUserId: userId,
+          personaKey: personaKey || null,
+          targetUsername: targetUsername || null,
+        }),
+      });
     },
   },
   // Social platform connect/disconnect via server OAuth flow

@@ -141,11 +141,28 @@ public class FollowStore
     public void RegisterPersona(string key, Guid userId, string username)
     {
         if (string.IsNullOrWhiteSpace(key)) return;
-        _personaKeyToUserId[key] = userId;
-        _personaKeyToUserId[username] = userId;
+        if (_personaKeyToUserId.TryGetValue(key, out var existingMappedId) && existingMappedId != Guid.Empty)
+        {
+            if (userId != Guid.Empty)
+            {
+                _userIdToPersonaKey[userId] = key;
+            }
+
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                _personaKeyToUserId[username] = existingMappedId;
+            }
+            return;
+        }
+
         if (userId != Guid.Empty)
         {
+            _personaKeyToUserId[key] = userId;
             _userIdToPersonaKey[userId] = key;
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                _personaKeyToUserId[username] = userId;
+            }
         }
     }
 
@@ -154,12 +171,11 @@ public class FollowStore
         if (followerId == Guid.Empty) return false;
 
         var targetId = targetUserId;
-        if (targetId == Guid.Empty && !string.IsNullOrWhiteSpace(personaKeyOrUsername))
+        if (!string.IsNullOrWhiteSpace(personaKeyOrUsername)
+            && _personaKeyToUserId.TryGetValue(personaKeyOrUsername, out var mappedPersonaId)
+            && mappedPersonaId != Guid.Empty)
         {
-            if (_personaKeyToUserId.TryGetValue(personaKeyOrUsername, out var pid))
-            {
-                targetId = pid;
-            }
+            targetId = mappedPersonaId;
         }
 
         if (targetId == Guid.Empty) return false;
@@ -183,7 +199,7 @@ public class FollowStore
         if (!string.IsNullOrWhiteSpace(personaKeyOrUsername))
         {
             personaKey = personaKeyOrUsername;
-            if (targetId == Guid.Empty && _personaKeyToUserId.TryGetValue(personaKeyOrUsername, out var pid))
+            if (_personaKeyToUserId.TryGetValue(personaKeyOrUsername, out var pid) && pid != Guid.Empty)
             {
                 targetId = pid;
             }
@@ -219,7 +235,7 @@ public class FollowStore
         if (!string.IsNullOrWhiteSpace(personaKeyOrUsername))
         {
             personaKey = personaKeyOrUsername;
-            if (targetId == Guid.Empty && _personaKeyToUserId.TryGetValue(personaKeyOrUsername, out var pid))
+            if (_personaKeyToUserId.TryGetValue(personaKeyOrUsername, out var pid) && pid != Guid.Empty)
             {
                 targetId = pid;
             }
@@ -276,9 +292,14 @@ public class FollowStore
         if (!string.IsNullOrWhiteSpace(personaKeyOrUsername))
         {
             personaKey = personaKeyOrUsername;
-            if (targetId == Guid.Empty && _personaKeyToUserId.TryGetValue(personaKeyOrUsername, out var pid))
+            if (_personaKeyToUserId.TryGetValue(personaKeyOrUsername, out var pid) && pid != Guid.Empty)
             {
                 targetId = pid;
+            }
+            else if (targetId != Guid.Empty)
+            {
+                _personaKeyToUserId[personaKey] = targetId;
+                _userIdToPersonaKey[targetId] = personaKey;
             }
         }
         else if (targetId != Guid.Empty && _userIdToPersonaKey.TryGetValue(targetId, out var pk))
