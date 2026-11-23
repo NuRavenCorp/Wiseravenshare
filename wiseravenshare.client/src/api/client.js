@@ -86,7 +86,10 @@ export const resolveMediaUrl = (url) => {
   if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("http://") || url.startsWith("https://")) {
     return url;
   }
-  const cleanPath = url.startsWith("/") ? url : `/${url}`;
+  let cleanPath = url.startsWith("/") ? url : `/${url}`;
+  if (cleanPath.startsWith("/avatar_")) {
+    cleanPath = `/uploads/avatars${cleanPath}`;
+  }
   return `${API_BASE_URL}${cleanPath}`;
 };
 const buildUrl = resolveApiUrl;

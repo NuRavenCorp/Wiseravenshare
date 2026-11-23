@@ -58,13 +58,24 @@ public class FollowStore
     private readonly object _fileLock = new();
     private string? _filePath;
 
-    // Authentic initial baseline follower counts for all 14 personas
+    // Authentic initial baseline follower counts for all personas across cohorts
     private static readonly Dictionary<string, int> DefaultPersonaTallies = new(StringComparer.OrdinalIgnoreCase)
     {
         ["marcus_vance"] = 342,
         ["novapulse"] = 518,
         ["seraphinabloom"] = 284,
+        ["rook_investigates"] = 672,
         ["cipher_chen"] = 419,
+        ["chloechic"] = 560,
+        ["d_volkov"] = 395,
+        ["amara_chronicles"] = 482,
+        ["jax_ironmind"] = 314,
+        ["lyra_cosmic"] = 789,
+        ["barnaby_satire"] = 215,
+        ["zen_kenji"] = 290,
+        ["maya_glitch"] = 375,
+        ["tara_capital"] = 540,
+        ["chefdante"] = 460,
         ["elena_investigates"] = 672,
         ["tariq_quantum"] = 215,
         ["kitsune_draws"] = 789,
@@ -74,16 +85,38 @@ public class FollowStore
         ["aurelia_sound"] = 560,
         ["kai_zen"] = 290,
         ["sora_writer"] = 375,
-        ["orion_deepsea"] = 240
+        ["orion_deepsea"] = 240,
+        // Cohort 2 personas
+        ["elena_quantum"] = 430,
+        ["cipher_privacy"] = 512,
+        ["mayaspace"] = 388,
+        ["tariq_grid"] = 345,
+        ["chloedupont"] = 468,
+        ["hiroshi_robotics"] = 525,
+        ["amara_dialect"] = 392,
+        ["liam_gamedev"] = 615,
+        ["sofia_ocean"] = 410,
+        ["rowan_luthier"] = 358
     };
 
-    // Authentic initial baseline following counts for all 14 personas
+    // Authentic initial baseline following counts for all personas across cohorts
     private static readonly Dictionary<string, int> DefaultPersonaFollowing = new(StringComparer.OrdinalIgnoreCase)
     {
         ["marcus_vance"] = 42,
         ["novapulse"] = 68,
         ["seraphinabloom"] = 35,
+        ["rook_investigates"] = 89,
         ["cipher_chen"] = 54,
+        ["chloechic"] = 73,
+        ["d_volkov"] = 47,
+        ["amara_chronicles"] = 61,
+        ["jax_ironmind"] = 39,
+        ["lyra_cosmic"] = 95,
+        ["barnaby_satire"] = 28,
+        ["zen_kenji"] = 31,
+        ["maya_glitch"] = 52,
+        ["tara_capital"] = 66,
+        ["chefdante"] = 45,
         ["elena_investigates"] = 89,
         ["tariq_quantum"] = 28,
         ["kitsune_draws"] = 95,
@@ -93,7 +126,18 @@ public class FollowStore
         ["aurelia_sound"] = 73,
         ["kai_zen"] = 31,
         ["sora_writer"] = 52,
-        ["orion_deepsea"] = 33
+        ["orion_deepsea"] = 33,
+        // Cohort 2 personas
+        ["elena_quantum"] = 56,
+        ["cipher_privacy"] = 64,
+        ["mayaspace"] = 48,
+        ["tariq_grid"] = 52,
+        ["chloedupont"] = 71,
+        ["hiroshi_robotics"] = 63,
+        ["amara_dialect"] = 49,
+        ["liam_gamedev"] = 78,
+        ["sofia_ocean"] = 55,
+        ["rowan_luthier"] = 44
     };
 
     public FollowStore(
@@ -395,6 +439,15 @@ public class FollowStore
         return true;
     }
 
+    // Canonical 14 Flock creator bot personas for baseline follower onboarding
+    private static readonly string[] CoreFlockKeys = new[]
+    {
+        "marcus_vance", "novapulse", "seraphinabloom", "cipher_chen",
+        "elena_investigates", "tariq_quantum", "kitsune_draws", "devante_civic",
+        "maya_astronomy", "zane_solarpunk", "aurelia_sound", "kai_zen",
+        "sora_writer", "orion_deepsea"
+    };
+
     /// <summary>
     /// Ensures all authentic Flock creator bot personas follow the target user.
     /// Returns the number of bot follow relations established.
@@ -406,7 +459,7 @@ public class FollowStore
         var botsFollowed = 0;
         var followersSet = _userFollowers.GetOrAdd(targetUserId, _ => new HashSet<Guid>());
 
-        foreach (var personaKey in DefaultPersonaTallies.Keys)
+        foreach (var personaKey in CoreFlockKeys)
         {
             var botGuid = _personaKeyToUserId.TryGetValue(personaKey, out var id) && id != Guid.Empty
                 ? id

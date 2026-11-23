@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Infrastructure.Data;
 using Wiseravenshare.Server.Services;
+using UserRecord = Wiseravenshare.Server.Models.UserRecord;
 
 namespace Wiseravenshare.Server.Services.Simulation;
 
@@ -295,12 +296,14 @@ public sealed class EngagementSimulatorService
             catch { }
         }
 
-        // ── Ensure bots follow all logged in and registered human users ──
+        // ── Ensure bots follow all logged in, active, and online users ──
         var followStore = scope.ServiceProvider.GetService<FollowStore>();
         if (followStore != null)
         {
             try
             {
+                var onlineUsers = new HashSet<Guid>();
+
                 var allUsers = _userStore.GetAllUsersSnapshot();
                 foreach (var u in allUsers)
                 {
@@ -312,15 +315,29 @@ public sealed class EngagementSimulatorService
 
                         if (!isBot)
                         {
-                            var followed = followStore.HaveBotsFollowUser(uGuid);
-                            if (followed > 0) actionsPerformed += followed;
+                            onlineUsers.Add(uGuid);
                         }
                     }
+                }
+
+                // Also include users who recently posted or commented (active/online within recent window)
+                foreach (var p in recentPosts)
+                {
+                    if (p.UserId != Guid.Empty && !_personaStates.Values.Any(ps => ps.UserId == p.UserId))
+                    {
+                        onlineUsers.Add(p.UserId);
+                    }
+                }
+
+                if (onlineUsers.Count > 0)
+                {
+                    var followed = followStore.HaveBotsFollowAllUsers(onlineUsers);
+                    if (followed > 0) actionsPerformed += followed;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed having bots follow registered users during cadence tick.");
+                _logger.LogDebug(ex, "Failed having bots follow registered/online users during cadence tick.");
             }
         }
 
@@ -356,9 +373,11 @@ public sealed class EngagementSimulatorService
                 continue;
             }
 
-            // ── ACTIVE WINDOW: Check if post is due (3 hours apart, 10 posts max per 28h cycle) ──
-            var postDue = state.LastPostAtUtc == null || (now - state.LastPostAtUtc.Value) >= PostSpacing;
-            if (postDue && state.PostsInCycle < 10)
+            // ── ACTIVE WINDOW: Check if post is due (Cohort 2: 4 times daily / 6 hours apart; Cohort 1: 3 hours apart) ──
+            var postSpacing = persona.PostsPerDay <= 4 ? TimeSpan.FromHours(6) : PostSpacing;
+            var maxPostsInCycle = persona.PostsPerDay <= 4 ? 4 : 10;
+            var postDue = state.LastPostAtUtc == null || (now - state.LastPostAtUtc.Value) >= postSpacing;
+            if (postDue && state.PostsInCycle < maxPostsInCycle)
             {
                 try
                 {
@@ -538,6 +557,205 @@ public sealed class EngagementSimulatorService
 
         SavePersistedState();
         return actionsPerformed;
+    }
+
+    /// <summary>
+    /// Triggered when a post receives a comment.
+    /// If the post belongs to an engagement bot persona (specifically Cohort 2 or interactive bots):
+    /// 1. Follows the commenter (follows those online).
+    /// 2. Contextually replies back to the comment on the post.
+    /// 3. Publishes an authentic responsive post on the bot's feed referencing or exploring the topic ("post when their posts are commented on").
+    /// </summary>
+    public async Task<bool> HandlePostCommentedAsync(Guid postId, Guid commenterUserId, string commentContent, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+
+        using var scope = _serviceProvider.CreateScope();
+        var postRepo = scope.ServiceProvider.GetService<Wiseravenshare.Server.Interfaces.Repositories.IPostRepository>();
+        var followStore = scope.ServiceProvider.GetService<FollowStore>();
+        var notificationService = scope.ServiceProvider.GetService<INotificationService>();
+        AppDbContext? db = null;
+        try { db = scope.ServiceProvider.GetService<AppDbContext>(); } catch { }
+
+        // Find the target post
+        Post? targetPost = null;
+        if (postRepo != null)
+        {
+            try { targetPost = await postRepo.GetByIdAsync(postId); } catch { }
+        }
+        if (targetPost == null && db != null)
+        {
+            try { targetPost = await db.Posts.FirstOrDefaultAsync(p => p.Id == postId && !p.IsDeleted, ct); } catch { }
+        }
+
+        if (targetPost == null) return false;
+
+        // Check if post belongs to one of our personas
+        var personaState = _personaStates.Values.FirstOrDefault(p => p.UserId == targetPost.UserId);
+        if (personaState == null) return false;
+
+        var persona = EngagementPersonaCatalog.Personas.FirstOrDefault(p => string.Equals(p.Key, personaState.Key, StringComparison.OrdinalIgnoreCase));
+        if (persona == null) return false;
+
+        // Do not respond to self
+        if (commenterUserId == personaState.UserId) return false;
+
+        var now = DateTime.UtcNow;
+
+        // 1. Follow the commenter ("follows those online")
+        if (commenterUserId != Guid.Empty && followStore != null)
+        {
+            try
+            {
+                var followingIds = followStore.GetFollowingIds(personaState.UserId);
+                if (!followingIds.Contains(commenterUserId))
+                {
+                    followStore.ToggleFollow(personaState.UserId, commenterUserId, personaState.Key, out _, out _, out _);
+                    personaState.LifetimeFollows++;
+                    _logger.LogInformation("Engager bot @{Username} followed commenter {CommenterId} who was active/online.", personaState.Username, commenterUserId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed following commenter {CommenterId}", commenterUserId);
+            }
+        }
+
+        // Resolve commenter username or display name for mention
+        var commenterName = "friend";
+        if (commenterUserId != Guid.Empty)
+        {
+            UserRecord? commenterRecord = null;
+            if (_userStore.TryGetById(commenterUserId.ToString("D"), out var cD) && cD != null) commenterRecord = cD;
+            else if (_userStore.TryGetById(commenterUserId.ToString("N"), out var cN) && cN != null) commenterRecord = cN;
+            else commenterRecord = _userStore.FindByLoginIdentifier(commenterUserId.ToString());
+
+            if (commenterRecord != null)
+            {
+                commenterName = !string.IsNullOrWhiteSpace(commenterRecord.Handle) ? commenterRecord.Handle : commenterRecord.Name;
+            }
+            else if (db != null)
+            {
+                try
+                {
+                    var dbCommenter = await db.Users.FirstOrDefaultAsync(u => u.Id == commenterUserId, ct);
+                    if (dbCommenter != null)
+                    {
+                        commenterName = !string.IsNullOrWhiteSpace(dbCommenter.Username) ? dbCommenter.Username : dbCommenter.DisplayName;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        // 2. Publish reply comment in thread
+        try
+        {
+            var replyPool = persona.ReplyPool.Count > 0 ? persona.ReplyPool : new List<string> { "Thanks for sharing this perspective!" };
+            var replyText = replyPool[Random.Shared.Next(replyPool.Count)];
+            if (!string.IsNullOrWhiteSpace(commenterName) && commenterName != "friend")
+            {
+                replyText = $"@{commenterName} {replyText}";
+            }
+
+            if (postRepo != null)
+            {
+                await postRepo.AddCommentAsync(postId, personaState.UserId, replyText);
+            }
+            else if (db != null)
+            {
+                db.Comments.Add(new Comment
+                {
+                    Id = Guid.NewGuid(),
+                    PostId = postId,
+                    UserId = personaState.UserId,
+                    Content = replyText,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+                await db.SaveChangesAsync(ct);
+            }
+
+            personaState.LastCommentAtUtc = now;
+            personaState.CommentsInCycle++;
+            personaState.LifetimeComments++;
+
+            if (notificationService != null && commenterUserId != Guid.Empty)
+            {
+                _ = notificationService.SendAsync(
+                    commenterUserId,
+                    NotificationType.Comment,
+                    actorId: personaState.UserId,
+                    postId: postId,
+                    content: $"replied: \"{(replyText.Length > 60 ? replyText[..60] + "..." : replyText)}\"",
+                    cancellationToken: ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed posting reply comment for persona @{Username}", personaState.Username);
+        }
+
+        // 3. Post when their posts are commented on ("that post when their posts are commented on")
+        try
+        {
+            var snippet = commentContent.Length > 60 ? commentContent[..60] + "..." : commentContent;
+            var reflectionThoughts = new[]
+            {
+                $"Fascinating exchange with @{commenterName} on our recent post: \"{snippet}\". The feedback highlights why open dialogue and diverse viewpoints make creative exploration so compelling.",
+                $"Reflecting on a thought-provoking comment from @{commenterName}: \"{snippet}\". It's inspiring to see thoughtful discussions unfolding across our community.",
+                $"Great conversation with @{commenterName} regarding \"{snippet}\". When we share different vantage points, everyone in the network gains deeper clarity.",
+                $"Continuing the thread sparked by @{commenterName}: \"{snippet}\". The nuance here is exactly what makes independent creators thrive."
+            };
+            var postContent = reflectionThoughts[Random.Shared.Next(reflectionThoughts.Length)];
+
+            var newPost = new Post
+            {
+                Id = Guid.NewGuid(),
+                UserId = personaState.UserId,
+                Content = postContent,
+                Type = PostType.Text,
+                IsSensitive = false,
+                TruthScore = 85m,
+                TruthStatus = "Verified",
+                LikesCount = 4 + (personaState.Key.Length % 5),
+                ViewsCount = 35 + (personaState.Key.Length * 4),
+                CreatedAt = now,
+                UpdatedAt = now,
+                User = new User
+                {
+                    Id = personaState.UserId,
+                    Username = personaState.Username,
+                    DisplayName = persona.DisplayName,
+                    AvatarUrl = persona.AvatarUrl,
+                    Role = UserRole.AIAgent
+                }
+            };
+
+            if (postRepo != null)
+            {
+                await postRepo.AddAsync(newPost);
+            }
+            else if (db != null)
+            {
+                db.Posts.Add(newPost);
+                await db.SaveChangesAsync(ct);
+            }
+
+            personaState.LastPostAtUtc = now;
+            personaState.PostsInCycle++;
+            personaState.LifetimePosts++;
+
+            _logger.LogInformation("Persona @{Username} published responsive post after comment from @{Commenter}: '{Snippet}'",
+                personaState.Username, commenterName, postContent.Length > 60 ? postContent[..60] + "..." : postContent);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed creating responsive post for persona @{Username}", personaState.Username);
+        }
+
+        SavePersistedState();
+        return true;
     }
 
     public EngagementSimulatorStatus GetStatus()

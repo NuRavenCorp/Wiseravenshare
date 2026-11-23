@@ -361,9 +361,10 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
             <div className="relative">
               {activeAvatar ? (
                 <img
-                  src={activeAvatar}
+                  src={resolveMediaUrl(activeAvatar)}
                   alt="Current Avatar"
                   className="w-12 h-12 rounded-full object-cover ring-2 ring-primary ring-offset-2 ring-offset-background shadow-inner"
+                  onError={() => setActiveAvatar("")}
                 />
               ) : (
                 <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center ring-2 ring-primary/40 ring-offset-2 ring-offset-background">

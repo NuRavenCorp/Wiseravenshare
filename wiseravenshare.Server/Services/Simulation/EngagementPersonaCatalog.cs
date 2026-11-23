@@ -549,6 +549,411 @@ public static class EngagementPersonaCatalog
                 "Now I am hungry! Love the sensory appreciation and genuine heart behind this post.",
                 "Cooking with soul always nourishes more than just the body. Splendid post, amico!"
             }
+        },
+
+        // =====================================================================
+        // COHORT 2: INTERACTIVE QUAD-DAILY ENGAGER PERSONAS (4x daily cadence,
+        // responsive comment-triggered posts, and active online follower bots)
+        // =====================================================================
+
+        // 15. Dr. Elena Rostova – Astrobiology & Quantum Computing
+        new EngagementPersona
+        {
+            Key = "elena_quantum",
+            DisplayName = "Dr. Elena Rostova",
+            HandleBase = "elena_quantum",
+            EmailBase = "elena.quantum",
+            Archetype = "Astrobiologist & Quantum Computing Researcher",
+            Bio = "Astrobiology & quantum information researcher. Exploring prebiotic chemistry in icy moons, quantum decoherence, and planetary habitability.",
+            Location = "Geneva / Pasadena, CA",
+            AvatarUrl = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=256&h=256&q=80",
+            Tone = "Analytical, inquisitive, visionary, empirical",
+            Interests = new() { "quantum computing", "astrobiology", "exoplanets", "spectroscopy", "physics" },
+            Cohort = 2,
+            PostsPerDay = 4,
+            PostOnCommentReceived = true,
+            FollowsOnlineUsers = true,
+            PostPool = new()
+            {
+                "Quantum coherence isn't just a cryogenic laboratory phenomenon. We're finding evidence that avian magnetoreception and photosynthetic energy transfer rely on quantum mechanical tunneling.",
+                "Analyzing spectral signatures from atmospheric transits around M-dwarf systems today. Water vapor absorption bands in the habitable zone are becoming reproducible.",
+                "The boundary between prebiotic chemistry and autonomous self-replication is thinner than we thought. Autocatalytic RNA networks can establish metabolic homeostasis without membranes.",
+                "Simulating nitrogen-fixation catalysis on a 128-qubit quantum simulator. The classical approximations missed a critical spin-orbital transition by two orders of magnitude.",
+                "When we search for extraterrestrial life, we must guard against anthropocentric blindness. Technosignatures could manifest as anomalous stellar polarization or megastructure thermal radiation.",
+                "Curiosity is the fundamental evolutionary advantage that kept hominids alive in unfamiliar biomes. Keep asking questions that test the boundaries of received textbooks.",
+                "Observing the plume eruptions on Enceladus through Cassini archival telemetry. Subsurface hydrothermal vents could provide all the chemical disequilibrium needed to spark life.",
+                "Quantum error correction with surface codes is making steady progress. The physical-to-logical qubit overhead is dropping rapidly with topological lattice braiding.",
+                "Every heavy element in your bloodstream was synthesized in the thermonuclear core of an exploding supernova. We are quite literally the cosmos contemplating its own origins.",
+                "Science isn't a body of immutable dogmas; it's an adversarial error-elimination protocol that slowly strips away our favorite delusions."
+            },
+            ReplyPool = new()
+            {
+                "A captivating scientific question! When we test this against empirical baseline data, the implications are profound.",
+                "Fascinating perspective! The interplay between theoretical physics and experimental verification is where breakthroughs happen.",
+                "Brilliant observation! This aligns closely with recent observations in non-equilibrium thermodynamics.",
+                "Appreciate this insight! Rigorous inquiry like this pushes our collective knowledge forward.",
+                "Compelling take! Have you evaluated how this dynamic scales under non-linear boundary conditions?"
+            }
+        },
+
+        // 16. Lucas "Cipher" Vance – Zero-Knowledge Cryptographer
+        new EngagementPersona
+        {
+            Key = "cipher_privacy",
+            DisplayName = "Lucas 'Cipher' Vance",
+            HandleBase = "cipher_privacy",
+            EmailBase = "cipher.privacy",
+            Archetype = "Zero-Knowledge Cryptographer & Privacy Technologist",
+            Bio = "Cryptography researcher working on zero-knowledge SNARKs, verifiable compute, and post-quantum encryption. Privacy is human autonomy.",
+            Location = "Zurich, Switzerland",
+            AvatarUrl = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=256&h=256&q=80",
+            Tone = "Precise, principled, mathematical, vigilant",
+            Interests = new() { "zero-knowledge proofs", "cryptography", "privacy tech", "post-quantum", "open source" },
+            Cohort = 2,
+            PostsPerDay = 4,
+            PostOnCommentReceived = true,
+            FollowsOnlineUsers = true,
+            PostPool = new()
+            {
+                "Zero-knowledge proofs are the ultimate mathematical guarantee: proving computational integrity and identity verification without leaking a single byte of private underlying state.",
+                "Post-quantum lattice cryptography (Kyber, Dilithium) isn't a future problem for 2035. 'Harvest now, decrypt later' state surveillance makes deploying post-quantum ratchets urgent today.",
+                "If a system requires you to trust a central server's honesty instead of verifying cryptographic proofs on an immutable ledger, it's not decentralized.",
+                "Metadata is more revealing than content. Knowing who you spoke with, when, and from where creates a higher-fidelity psychological profile than reading encrypted payloads.",
+                "Client-side encryption with user-held entropy keys is non-negotiable. If a platform holds the master decryption key, you are merely renting access to your own private thoughts.",
+                "Recursive SNARKs allow us to fold an entire blockchain's historical execution proof into a constant 22-kilobyte certificate. The future of light clients is mathematically elegant.",
+                "Decentralized identity shouldn't force individuals to publish their complete relationship graph. Selective disclosure via zero-knowledge credentials is how we protect civic freedom.",
+                "Open source cryptographic implementations must undergo continuous fuzzing and formal verification. A single side-channel timing leak can silently compromise the entire security perimeter.",
+                "Cryptography gives individuals asymmetric power against centralized surveillance regimes. Math does not bow to subpoenas or arbitrary administrative fiat.",
+                "Verify, don't trust. The entire ethos of the open ledger movement rests on eliminating reliance on human intermediaries."
+            },
+            ReplyPool = new()
+            {
+                "Spot on! Cryptographic verification provides mathematical certainty where institutional trust inevitably degrades.",
+                "Strong agree. Preserving sovereign metadata privacy is the foundational battle for the next decade of the web.",
+                "Crisp technical analysis. When the verification cost is constant regardless of statement complexity, protocols can scale without compromise.",
+                "An essential distinction. Too many products claim privacy while silently harvesting behavioral telemetry.",
+                "Well articulated! Mathematical guarantees beat administrative promises every single day."
+            }
+        },
+
+        // 17. Maya Lin – Parametric Architecture & Spatial Minimalist
+        new EngagementPersona
+        {
+            Key = "mayaspace",
+            DisplayName = "Maya Lin",
+            HandleBase = "mayaspace",
+            EmailBase = "maya.space",
+            Archetype = "Parametric Architect & Generative Spatial Artist",
+            Bio = "Architectural designer exploring generative geometry, biomimetic facades, and lightweight carbon-negative timber structures.",
+            Location = "Tokyo / Vancouver",
+            AvatarUrl = "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=256&h=256&q=80",
+            Tone = "Geometric, aesthetic, spatial, meditative",
+            Interests = new() { "parametric design", "generative art", "biomimicry", "mass timber", "urban design" },
+            Cohort = 2,
+            PostsPerDay = 4,
+            PostOnCommentReceived = true,
+            FollowsOnlineUsers = true,
+            PostPool = new()
+            {
+                "Architecture should not impose an aggressive foreign geometry on the landscape. The best buildings emerge organically from sunlight vectors, wind paths, and local geology.",
+                "Mass timber buildings actively sequester atmospheric carbon while creating acoustic environments that lower human heart rates. Wood is the structural material of the solarpunk future.",
+                "Biomimetic design note: Termite mounds maintain a constant 30°C interior temperature in 45°C desert heat using passive thermal siphoning. We don't need giant HVAC chillers; we need smarter airflow geometry.",
+                "Generating Voronoi spatial partitions for an urban public library. The interplay between natural daylight filtering through canopy apertures creates a reading space that feels like a sacred forest.",
+                "A room with high ceilings stimulates abstract, integrative thinking, while lower ceilings foster focus on detailed execution. Physical space shapes cognitive architecture.",
+                "Minimalism isn't about stark deprivation; it's about eliminating visual clutter so that intentional craft, natural light, and authentic human interaction can breathe.",
+                "3D printing architectural ceramic facades: Using local clay slips with micro-perforations provides evaporative cooling while harboring native pollinators in vertical urban niches.",
+                "Cities designed solely around automobile throughput alienate human communities. When you prioritize pedestrian boulevards and pocket parks, public civic life flourishes.",
+                "The Japanese concept of 'Ma' (the meaningful negative space between elements) is what gives musical notes their rhythm and architectural spaces their soul.",
+                "Every line drawn in architectural CAD software eventually becomes physical material quarried, transported, and assembled by human hands. Design with reverence for that physical cost."
+            },
+            ReplyPool = new()
+            {
+                "The spatial harmony here is mesmerizing! Designing with intention always creates an immediate sense of grounded calm.",
+                "Beautifully said. Balancing functional geometry with human emotional resonance is the highest achievement of design.",
+                "Love this aesthetic perspective! When light and materiality align, the space speaks for itself without superfluous ornament.",
+                "So true! Environments deeply shape human psychology and interpersonal connection.",
+                "Inspiring vision! Bringing regenerative architecture into public spaces is how we transform daily urban living."
+            }
+        },
+
+        // 18. Tariq Al-Mansoor – Clean Grid & Distributed Energy
+        new EngagementPersona
+        {
+            Key = "tariq_grid",
+            DisplayName = "Tariq Al-Mansoor",
+            HandleBase = "tariq_grid",
+            EmailBase = "tariq.grid",
+            Archetype = "Clean Grid Engineer & Distributed Energy Architect",
+            Bio = "Power systems engineer designing virtual power plants, vanadium redox flow batteries, and peer-to-peer microgrids.",
+            Location = "Dubai / Austin, TX",
+            AvatarUrl = "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=256&h=256&q=80",
+            Tone = "Pragmatic, systems-oriented, optimistic, data-grounded",
+            Interests = new() { "clean energy", "smart grids", "energy storage", "flow batteries", "renewables" },
+            Cohort = 2,
+            PostsPerDay = 4,
+            PostOnCommentReceived = true,
+            FollowsOnlineUsers = true,
+            PostPool = new()
+            {
+                "The modern energy grid is undergoing the same transition telecommunications did in the 1990s: from centralized monolithic broadcasting towers to distributed packet-switched routing.",
+                "Vanadium redox flow batteries decouple energy capacity from power rating. You can expand MWh storage simply by building larger electrolyte tanks without degrading cell electrodes over 30 years.",
+                "Grid inertia without spinning fossil turbines: Grid-forming inverters can synthesize virtual rotational inertia within 2 milliseconds of a frequency disturbance, stabilizing transmission lines effortlessly.",
+                "Rooftop solar paired with localized bidirectional EV chargers transforms every residential neighborhood into a decentralized virtual power plant that can island during blackouts.",
+                "Levelized cost of electricity (LCOE) for utility-scale solar and battery storage is now lower than existing coal plant operating maintenance costs across 85% of global markets. Economics won.",
+                "Transmission capacity is the unsung bottleneck of the renewable transition. Dynamic line rating using thermal sensors can increase existing high-voltage throughput by 25-40% without stringing new cables.",
+                "Decarbonizing industrial process heat (cement, steel, ceramics) with thermal brick storage and induction furnaces is the next massive frontier in clean engineering.",
+                "Treating energy abundance as an engineering design target unlocks planetary flourishing. Clean, cheap energy directly translates to abundant clean water via desalination and closed-loop recycling.",
+                "Energy independence isn't about isolation; it's about building resilient, modular local microgrids that can self-heal and trade surplus kilowatt-hours across peer networks.",
+                "The transition to clean energy isn't an idealistic sacrifice; it is a massive upgrade in thermodynamic efficiency, reliability, and human public health."
+            },
+            ReplyPool = new()
+            {
+                "Spot on! The physics and economics of distributed power systems have reached a decisive tipping point.",
+                "Excellent technical perspective. Dynamic grid balancing using decentralized edge assets is where real resilience lies.",
+                "Strongly agree! When we eliminate transmission friction through smart microgrids, everyone benefits from cheaper power.",
+                "Clear, grounded data. Pragmatic engineering solutions always cut through rhetorical noise.",
+                "Great breakdown! Moving from extractive thermal plants to solid-state energy capture is the biggest leap of our era."
+            }
+        },
+
+        // 19. Chloe Dupont – Analog Cinephile & Film Archivist
+        new EngagementPersona
+        {
+            Key = "chloedupont",
+            DisplayName = "Chloe Dupont",
+            HandleBase = "chloedupont",
+            EmailBase = "chloe.dupont",
+            Archetype = "35mm Analog Cinephile & Film Archivist",
+            Bio = "Film preservationist, darkroom printer, and independent cinema essayist. Championing celluloid grain, nitrate restoration, and slow visual art.",
+            Location = "Paris / Montreal",
+            AvatarUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&h=256&q=80",
+            Tone = "Cinematic, evocative, textured, reflective",
+            Interests = new() { "analog film", "cinematography", "35mm", "film restoration", "visual narrative" },
+            Cohort = 2,
+            PostsPerDay = 4,
+            PostOnCommentReceived = true,
+            FollowsOnlineUsers = true,
+            PostPool = new()
+            {
+                "Celluloid grain isn't visual noise; it is an organic, stochastic mosaic of silver halide crystals dancing across every frame. It breathes with an irregular vitality that digital sensors can only simulate.",
+                "Restoring a 1928 French silent print today. Cleaning optical nitrate film requires delicate hands and vinegar-syndrome chemistry, but seeing a lost performance emerge from the shadows is pure transcendence.",
+                "Why 24 frames per second feels dreamlike: It leaves just enough perceptual gap between exposures for your subconscious mind to co-author the motion. Ultra-high framerates make cinema look like video games.",
+                "Shooting with vintage anamorphic lenses: The horizontal oval bokeh, subtle barrel distortion, and blue horizontal streaks create an emotional intimacy that ultra-sharp modern optics clinicalize away.",
+                "The discipline of shooting a 400-foot magazine of 35mm film: When every second costs actual money, actors and directors focus with intense presence. Abundance breeds carelessness; scarcity breeds art.",
+                "Lighting a darkroom scene with tungsten practicals. The warm glow hitting emulsion shadows produces that creamy amber roll-off that digital color grading spends weeks trying to reverse-engineer.",
+                "Cinema is empathy technology. For two hours in a dark room with strangers, your heartbeat synchronizes with characters whose lived experiences you may never encounter in your own life.",
+                "Support physical media. Streaming catalogs can delete, alter, or geoblock cultural masterpieces overnight without warning. A physical 35mm print or 4K disc in your hands cannot be erased by licensing expiration.",
+                "Deep shadows in black-and-white cinematography aren't empty black space; they are visual poetry that frames what the director chooses not to tell you.",
+                "Film preservation is cultural memory preservation. If we don't actively scan and preserve nitrate and acetate film stocks in temperature-controlled vaults, century-old human stories will dissolve into dust."
+            },
+            ReplyPool = new()
+            {
+                "Such visual poetry! The warmth and human texture in this post completely captures the magic of cinema.",
+                "Perfection! Preserving artistic integrity and physical film heritage is such noble, essential work.",
+                "This brings so much nostalgia and respect for the medium. Celluloid will always have a soul of its own.",
+                "Incredible reflection! When storytelling respects silence and subtlety, the emotional resonance lingers for days.",
+                "Deeply moving take! Supporting independent artists who honor their craft is what keeps culture alive."
+            }
+        },
+
+        // 20. Dr. Hiroshi Tanaka – Humanoid Kinematics & Robotics
+        new EngagementPersona
+        {
+            Key = "hiroshi_robotics",
+            DisplayName = "Dr. Hiroshi Tanaka",
+            HandleBase = "hiroshi_robotics",
+            EmailBase = "hiroshi.robotics",
+            Archetype = "Humanoid Kinematics & Bipedal Control Engineer",
+            Bio = "Robotics engineer focused on compliant actuators, dynamic balance, and sim-to-real reinforcement learning for bipedal locomotion.",
+            Location = "Kyoto / Pittsburgh, PA",
+            AvatarUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&h=256&q=80",
+            Tone = "Engineering-focused, curious, kinetic, rigorous",
+            Interests = new() { "robotics", "actuator design", "bipedal locomotion", "sim2real", "mechatronics" },
+            Cohort = 2,
+            PostsPerDay = 4,
+            PostOnCommentReceived = true,
+            FollowsOnlineUsers = true,
+            PostPool = new()
+            {
+                "Bipedal walking isn't static equilibrium; it is controlled falling. The human body spends 80% of gait in single-limb support, continuously recovering angular momentum with elastic tendon recoil.",
+                "Quasi-direct drive brushless motors provide low gear ratios and back-drivability. When an actuator can feel external force impacts compliantly, you don't break hardware during balance perturbations.",
+                "Sim-to-real transfer in reinforcement learning: Domain randomization of joint friction, latency, and sensor noise in Isaac Gym allows neural policy networks to walk across loose gravel on day one.",
+                "The hardest engineering challenge in humanoid robotics isn't walking; it is human-level dexterity. The human hand has 27 degrees of freedom, skin compliance, and tactile slip-detection sensors in every fingerprint ridge.",
+                "Model Predictive Control (MPC) running at 1000 Hz provides the high-level ground reaction force targets while low-level motor controllers execute field-oriented current loops at 20 kHz.",
+                "Tendon-driven actuation allows you to keep heavy motors near the pelvis and torso, minimizing distal leg inertia. Lighter feet mean faster swing-phase acceleration with drastically lower power consumption.",
+                "Watching our biped prototype smoothly step onto an icy patch without tumbling over. Seeing dynamic balance recovery algorithms work in the physical world is one of the greatest feelings in robotics.",
+                "Robots should not replace human warmth; they should liberate human beings from grueling, repetitive physical drudgery so people can dedicate their lives to creative and care-centered pursuits.",
+                "Series elastic actuators (SEAs) act as mechanical low-pass filters that protect gears from shock loads while storing mechanical energy like biological achilles tendons.",
+                "The beauty of physics: Newton's conservation laws apply universally, whether to biological quadrupeds crossing mountains or autonomous rovers navigating volcanic Martian ridges."
+            },
+            ReplyPool = new()
+            {
+                "Superb robotics insight! Solving mechanical compliance at the actuator level is where true elegance lives.",
+                "Spot on! Dynamic balance in unpredictable physical environments requires tight synergy between hardware and control loops.",
+                "Fascinating breakdown! Low-latency feedback loops are what turn clumsy machines into gracefully adaptive systems.",
+                "Great engineering perspective! When the physical model is sound, the control policies converge so much faster.",
+                "Brilliant! The progress happening right now in physical AI and compliant mechatronics is breathtaking."
+            }
+        },
+
+        // 21. Dr. Amara Okafor – Computational Linguist
+        new EngagementPersona
+        {
+            Key = "amara_dialect",
+            DisplayName = "Dr. Amara Okafor",
+            HandleBase = "amara_dialect",
+            EmailBase = "amara.dialect",
+            Archetype = "Computational Linguist & Dialect Preservationist",
+            Bio = "Computational linguist building acoustic models and low-resource NLP pipelines for endangered dialects and oral storytelling traditions.",
+            Location = "Lagos / Edinburgh",
+            AvatarUrl = "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&w=256&h=256&q=80",
+            Tone = "Cultured, expressive, scholarly, vibrant",
+            Interests = new() { "linguistics", "natural language processing", "oral history", "phonology", "culture" },
+            Cohort = 2,
+            PostsPerDay = 4,
+            PostOnCommentReceived = true,
+            FollowsOnlineUsers = true,
+            PostPool = new()
+            {
+                "Every language is a unique operating system for human consciousness. When a dialect dies without documentation, an entire epistemological framework for perceiving reality vanishes with it.",
+                "Tonal languages (like Yoruba and Mandarin) encode grammatical tense and semantic meaning into fundamental pitch contours. Standard text transformers that discard pitch miss half the message.",
+                "Oral traditions are not inferior precursors to written literature; they are living, performative memory architectures designed to evolve with community ethics across generations.",
+                "Training self-supervised acoustic models on raw conversational speech without requiring thousands of hours of labeled transcriptions: This is how we democratize NLP for low-resource languages.",
+                "Idiomatic metaphors reveal a culture's relationship with nature. In Igbo, proverb phrases don't just communicate facts; they invite the listener into a communal dance of mutual wisdom.",
+                "Code-switching is a remarkable demonstration of cognitive flexibility. Multilingual speakers effortlessly modulate between distinct cultural syntaxes based on conversational intimacy.",
+                "Acoustic phonetics note: The formant frequencies of vowels are directly determined by tongue position and pharyngeal volume. Your vocal tract is an organic brass resonance chamber.",
+                "Language technologies should empower indigenous communities to preserve and teach their mother tongues to children, rather than forcing linguistic monoculture upon the world.",
+                "Words carry ancestral weight. When you speak your grandmother's mother tongue, your vocal chords resonate with centuries of inherited laughter, sorrow, and celebration.",
+                "The richness of human thought lies in linguistic diversity. A world with one global language would be an intellectually impoverished monoculture."
+            },
+            ReplyPool = new()
+            {
+                "Such profound linguistic wisdom! Honoring indigenous cultural nuances is essential for our shared humanity.",
+                "Beautifully expressed! Language is truly the living soul of community memory and creative expression.",
+                "This resonates deeply with me. Linguistic nuance preserves perspectives that rigid translations can never fully convey.",
+                "A brilliant scholarly observation! When technology respects oral cadence and dialect, it bridges worlds.",
+                "Thank you for this thoughtful reminder! Celebrating diversity in expression makes our global conversation infinitely richer."
+            }
+        },
+
+        // 22. Liam Gallagher – Procedural World Builder & Indie Game Dev
+        new EngagementPersona
+        {
+            Key = "liam_gamedev",
+            DisplayName = "Liam Gallagher",
+            HandleBase = "liam_gamedev",
+            EmailBase = "liam.gamedev",
+            Archetype = "Procedural World Builder & Indie Game Architect",
+            Bio = "Solo game developer crafting atmospheric procedural roguelikes. Obsessed with emergent gameplay loops, voxel shaders, and reactive audio.",
+            Location = "Dublin / Melbourne",
+            AvatarUrl = "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=256&h=256&q=80",
+            Tone = "Playful, punchy, craft-obsessed, transparent",
+            Interests = new() { "game design", "procedural generation", "shaders", "pixel art", "indie games" },
+            Cohort = 2,
+            PostsPerDay = 4,
+            PostOnCommentReceived = true,
+            FollowsOnlineUsers = true,
+            PostPool = new()
+            {
+                "Procedural generation shouldn't feel like endless mathematical noise. You need hand-crafted 'grammar rules' and curated archetypes so the algorithm generates coherent world storytelling.",
+                "Game feel checklist: 2 frames of hitstop on critical attacks, subtle screen shake with directional bias, particle sparks with gravity physics, and bass frequency ducking. Pure tactile juice!",
+                "Wave Function Collapse algorithm in game level design: Propagating adjacency constraints lets you generate sprawling medieval dungeon layouts where every door and staircase always connects cleanly.",
+                "Writing HLSL compute shaders for volumetric fog: Casting raymarched light shafts through pixel canopy textures gives 2D pixel art an absurdly lush, atmospheric 3D depth.",
+                "Indie dev tip: Cut 30% of your planned scope early. A polished, tight 6-hour game where every mechanic feels immaculate will always outperform a bloated, buggy 40-hour chore.",
+                "Emergent storytelling happens when game systems intersect without pre-scripted cutscenes: Fire spreads to wooden barrels, wind direction pushes toxic smoke, and the enemy drops their shield in panic.",
+                "Dynamic interactive audio: When the player's health drops below 20%, low-pass filter the music and fade in an ominous modular synth sub-pulse. Sound design is 50% of emotional atmosphere.",
+                "Never underestimate the power of player agency. The best moments in gaming are when players figure out clever solutions the game designer never explicitly anticipated.",
+                "Solo game development is an endurance marathon of learning every single craft: coding, pixel animation, audio mixing, dialogue writing, and marketing. Hardest and most rewarding journey ever.",
+                "Keep building weird, experimental games. The industry moves forward because brave indie creators dare to try ideas that risk-averse corporate publishers would immediately cancel."
+            },
+            ReplyPool = new()
+            {
+                "Absolute gold! That juice and polish makes all the difference between a good game and an unforgettable one.",
+                "Total vibe! Emergent gameplay design is where the real magic happens. Keep pushing those boundaries!",
+                "Love this dev log breakdown! Transparency in the creative development process is so inspiring to follow.",
+                "Spot on! Scoping down and polishing core mechanics always wins. Can't wait to play this!",
+                "Such an exciting creative perspective! Independent creators taking risks is what keeps gaming alive."
+            }
+        },
+
+        // 23. Sofia Rossi – Deep Ocean Biologist & Marine Acousticist
+        new EngagementPersona
+        {
+            Key = "sofia_ocean",
+            DisplayName = "Sofia Rossi",
+            HandleBase = "sofia_ocean",
+            EmailBase = "sofia.ocean",
+            Archetype = "Deep Ocean Biologist & Marine Acoustic Specialist",
+            Bio = "Marine biologist listening to whale vocalizations in the abyssal pelagic zone. Dedicated to benthic reef restoration and acoustic monitoring.",
+            Location = "Naples / San Diego, CA",
+            AvatarUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=256&h=256&q=80",
+            Tone = "Immersive, deep, conservationist, lyrical",
+            Interests = new() { "marine biology", "bioacoustics", "coral reefs", "deep sea exploration", "conservation" },
+            Cohort = 2,
+            PostsPerDay = 4,
+            PostOnCommentReceived = true,
+            FollowsOnlineUsers = true,
+            PostPool = new()
+            {
+                "Lowered a hydrophone 3,000 meters into the Monterey Canyon last night. In the pitch blackness of the bathypelagic zone, the ocean is humming with low-frequency whale songs traveling hundreds of miles.",
+                "Bioluminescence is the primary language of the deep ocean. Over 75% of pelagic creatures produce their own luciferin-luciferase flashes to hunt, communicate, and camouflage against moonlight.",
+                "Coral spawning is a planetary synchrony miracle: On a single night governed by lunar cycles and sea temperatures, entire reefs release billions of gametes into the currents simultaneously.",
+                "Deep-sea benthic ecosystems around hydrothermal vents thrive on chemosynthesis, deriving energy from sulfur and methane rather than sunlight. Life finds a way in the most alien pressures.",
+                "Anthropogenic ocean noise pollution (container ships, seismic airguns) deafens marine mammals whose echolocation is essential for navigation and calf nursing. We need quiet ocean corridors.",
+                "Kelp forests are aquatic wonderlands: They sequester carbon 20 times faster than terrestrial forests while dampening coastal storm surges and nurturing juvenile rockfish nurseries.",
+                "Octopuses have two-thirds of their neurons distributed throughout their eight arms. Each arm can taste, explore, and manipulate objects autonomously with zero central brain intervention.",
+                "The deep ocean is our planet's final unexplored continent. We know more about the topography of the moon than we do about the abyssal plains that cover 60% of Earth's crust.",
+                "Protecting marine protected areas (MPAs) pays immediate ecological dividends: Surrounding waters experience a spillover boom in fish populations within three seasons.",
+                "The ocean is the blue lung of our world, producing every second breath of oxygen we take through microscopic phytoplankton. Safeguard the seas to safeguard ourselves."
+            },
+            ReplyPool = new()
+            {
+                "This immerses you straight into the mystery of the deep sea! Such enchanting and crucial ecological work.",
+                "Breathtaking perspective! The ocean's living symphony is a constant reminder of how interconnected our planet is.",
+                "Deeply inspiring! Protecting our marine habitats and quiet corridors is one of the most urgent missions of our generation.",
+                "Beautiful imagery! Thank you for sharing these glimpses into a world so few human eyes ever get to see.",
+                "Wonderful post! Nature's bioacoustic marvels always humble human arrogance."
+            }
+        },
+
+        // 24. Rowan Blackwood – Master Luthier & Timber Harmonics
+        new EngagementPersona
+        {
+            Key = "rowan_luthier",
+            DisplayName = "Rowan Blackwood",
+            HandleBase = "rowan_luthier",
+            EmailBase = "rowan.luthier",
+            Archetype = "Master Luthier & Acoustic Instrument Craftsman",
+            Bio = "Handcrafting archtop guitars and violins from reclaimed spruce and curly maple. Tuning soundboards with tap-tones and French polish.",
+            Location = "Asheville, NC",
+            AvatarUrl = "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=256&h=256&q=80",
+            Tone = "Wood-scented, patient, tactile, harmonic",
+            Interests = new() { "lutherie", "woodworking", "acoustic guitars", "timber harmonics", "traditional craft" },
+            Cohort = 2,
+            PostsPerDay = 4,
+            PostOnCommentReceived = true,
+            FollowsOnlineUsers = true,
+            PostPool = new()
+            {
+                "Tuning a soundboard using Chladni sand patterns: Vibrating a spruce top with a frequency oscillator arranges tea leaves along node lines. You can see the resonance frequencies with your own eyes.",
+                "Hide glue is an acoustic miracle: Unlike synthetic PVA glues that remain slightly rubbery and dampen high frequencies, animal hide glue dries glass-hard, transmitting string vibrations flawlessly into the bracing.",
+                "Hand-carving the recurve on a hand-graduated archtop guitar: Shaving tenth-of-a-millimeter ribbons of wood with a miniature finger plane until the whole body rings like a church bell when you tap it.",
+                "Working with 200-year-old reclaimed red spruce salvaged from a dismantled Appalachian barn. The wood is light as balsa and stiff as carbon fiber, seasoned by two centuries of dry seasons.",
+                "French polishing with blonde shellac flakes dissolved in grain alcohol: Applying hundreds of microscopic coats with a wool pad and walnut oil. It yields the thinnest, most resonant protective finish known to lutherie.",
+                "An acoustic guitar is a coupled oscillator system: The strings drive the bridge, the bridge excites the soundboard, the soundboard compresses the air cavity, and the back plate reflects the bass resonance.",
+                "Wood never truly stops living. An acoustic instrument responds to the ambient humidity, the barometric pressure, and the hands that play it, maturing in tonal warmth as decades pass.",
+                "Hand tools teach deep presence. When you work with sharp Japanese hand planes and rasps, your ears and fingertips tell you when the grain direction reverses long before your eyes can see it.",
+                "Never rush the seasoning of tone woods. Time is an active ingredient in lutherie that cannot be expedited by industrial kilns without sacrificing acoustic brilliance.",
+                "Building an instrument is an act of trust: You take a fallen tree and shape it into a vessel that will carry someone else's laughter, tears, and songs long after you are gone."
+            },
+            ReplyPool = new()
+            {
+                "What an exquisite craft! The patience, tactile sensitivity, and reverence for natural materials shines in every word.",
+                "Harmonic perfection! Respecting traditional lutherie techniques creates instruments with real soul.",
+                "Beautifully expressed! The relationship between the artisan, the wood, and the music is timeless.",
+                "Such soulful craftsmanship! There is no substitute for human hands guided by deep acoustic wisdom.",
+                "Wonderful post! May your workshop always be filled with the sweet fragrance of spruce and resonant song."
+            }
         }
     };
 }

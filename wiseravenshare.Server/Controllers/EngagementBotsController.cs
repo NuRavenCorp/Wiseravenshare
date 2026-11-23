@@ -18,7 +18,7 @@ public sealed class EngagementBotsController : ControllerBase
     }
 
     /// <summary>
-    /// Returns the live status of all 14 authentic engagement personas,
+    /// Returns the live status of all 24 authentic engagement personas across cohorts,
     /// their active/resting cycle state, post counts, and lifetime statistics.
     /// </summary>
     [HttpGet("status")]

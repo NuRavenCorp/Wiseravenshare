@@ -5,6 +5,7 @@ import { Loader2, Feather, LayoutGrid, Clock, TrendingUp, Users, X, ShieldBan, S
 import PostCard from "./PostCard";
 import PostComposer from "./PostComposer";
 import PostTimeline from "./PostTimeline";
+import UserPersonalFeedTimeline from "./UserPersonalFeedTimeline";
 
 const normalizePost = (post) => ({
   ...post,
@@ -591,6 +592,16 @@ export default function PostsFeed() {
         </div>
       )}
 
+      {/* Extended Main Feed Page: Dedicated Personal Feed & Timeline */}
+      <UserPersonalFeedTimeline
+        currentUser={currentUser}
+        allPosts={posts}
+        onAuthRequired={handleAuthRequired}
+        onHashtagClick={openTag}
+        onAuthorClick={handleAuthorClick}
+        blockedIds={blockedIds}
+      />
+
       {/* Bottom Feed Navigation & Namesake Links */}
       <div className="mt-8 pt-6 border-t border-border/60 flex flex-wrap items-center justify-between gap-4 text-xs text-muted-foreground">
         <div className="flex flex-wrap items-center gap-2">
@@ -652,6 +663,17 @@ export default function PostsFeed() {
             }`}
           >
             <Clock className="w-3.5 h-3.5" /> Timeline
+          </a>
+          <a
+            href="#personal-timeline"
+            onClick={(e) => {
+              e.preventDefault();
+              const section = document.getElementById("personal-feed-timeline-section");
+              if (section) section.scrollIntoView({ behavior: "smooth" });
+            }}
+            className="px-3 py-1.5 rounded-md transition-colors flex items-center gap-1.5 hover:text-foreground border border-border"
+          >
+            <Users className="w-3.5 h-3.5 text-primary" /> Personal Timeline
           </a>
         </div>
 

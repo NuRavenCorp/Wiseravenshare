@@ -17,7 +17,7 @@ public class EngagementSimulatorTests
 
         // User requested: "I need at least ten more would be better, all with different personality traits"
         Assert.True(personas.Count >= 10, $"Expected at least 10 personas, but found {personas.Count}");
-        Assert.Equal(14, personas.Count);
+        Assert.Equal(24, personas.Count);
 
         // Verify uniqueness of keys, handles, and archetypes
         var keys = personas.Select(p => p.Key).Distinct().ToList();
@@ -125,5 +125,23 @@ public class EngagementSimulatorTests
         Assert.Equal(original.LifetimeComments, restored.LifetimeComments);
         Assert.Equal(original.LifetimeFollows, restored.LifetimeFollows);
         Assert.Equal(original.IsResting, restored.IsResting);
+    }
+
+    [Fact]
+    public void Cohort2_ContainsTenInteractiveQuadDailyPersonasWithCommentAndFollowFlags()
+    {
+        var cohort2 = EngagementPersonaCatalog.Personas.Where(p => p.Cohort == 2).ToList();
+
+        // 10 new engager bots
+        Assert.Equal(10, cohort2.Count);
+
+        foreach (var p in cohort2)
+        {
+            Assert.Equal(4, p.PostsPerDay);
+            Assert.True(p.PostOnCommentReceived, $"Persona {p.Key} should post on comment received");
+            Assert.True(p.FollowsOnlineUsers, $"Persona {p.Key} should follow online users");
+            Assert.True(p.PostPool.Count >= 10, $"Persona {p.Key} should have at least 10 posts in pool");
+            Assert.True(p.ReplyPool.Count >= 5, $"Persona {p.Key} should have at least 5 replies in pool");
+        }
     }
 }

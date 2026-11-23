@@ -21,4 +21,8 @@ public sealed class EngagementPersona
     public List<string> Interests { get; set; } = new();
     public List<string> PostPool { get; set; } = new();
     public List<string> ReplyPool { get; set; } = new();
+    public int Cohort { get; set; } = 1;
+    public int PostsPerDay { get; set; } = 8;
+    public bool PostOnCommentReceived { get; set; }
+    public bool FollowsOnlineUsers { get; set; }
 }

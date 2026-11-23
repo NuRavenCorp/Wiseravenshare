@@ -475,6 +475,21 @@ namespace Wiseravenshare.Server.Controllers
             catch { /* best-effort viral notification */ }
 
             await _cacheInvalidation.InvalidateFeedAsync(HttpContext.RequestAborted);
+
+            // Trigger engager bots if post belongs to a persona ("posts when their posts are commented on", "follows those online")
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var simulator = HttpContext.RequestServices.GetService<Wiseravenshare.Server.Services.Simulation.EngagementSimulatorService>();
+                    if (simulator != null)
+                    {
+                        await simulator.HandlePostCommentedAsync(id, userId, dto?.Content ?? string.Empty);
+                    }
+                }
+                catch { }
+            });
+
             return Ok(comment);
         }
 

@@ -571,7 +571,12 @@ public sealed class UsersController : ControllerBase
     }
 
     [HttpGet("/uploads/avatars/{fileName}")]
+    [HttpGet("/avatars/{fileName}")]
+    [HttpGet("/{fileName:regex(^avatar_.*)}")]
+    [HttpGet("/api/users/avatar/file/{fileName}")]
+    [HttpGet("/api/users/avatars/{fileName}")]
     [HttpGet("avatar/file/{fileName}")]
+    [HttpGet("avatars/{fileName}")]
     [AllowAnonymous]
     public IActionResult GetAvatarFile(string fileName)
     {

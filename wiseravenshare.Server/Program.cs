@@ -3044,7 +3044,7 @@ builder.Services.AddAuthentication(options =>
                 var path = context.HttpContext.Request.Path;
 
                 if (!string.IsNullOrWhiteSpace(accessToken)
-                    && (path.StartsWithSegments("/api/hubs/messages") || path.StartsWithSegments("/api/hubs/notifications") || path.StartsWithSegments("/api/hubs/evolution") || path.StartsWithSegments("/api/hubs/collaboration") || path.StartsWithSegments("/api/hubs/communique") || path.StartsWithSegments("/hubs") || path.StartsWithSegments("/api/hubs/social") || path.StartsWithSegments("/api/hubs/assistant")))
+                    && (path.StartsWithSegments("/api/hubs") || path.StartsWithSegments("/hubs")))
                 {
                     context.Token = accessToken;
                 }
@@ -3827,9 +3827,9 @@ app.MapHub<WebRtcSignalingHub>("/api/hubs/webrtc");
 app.MapHub<LiveChatHub>("/api/hubs/live-chat");
 app.MapHub<SocialHub>("/api/hubs/social");
 app.MapHub<WiseRavenShare.Server.API.Hubs.AssistantHub>("/api/hubs/assistant");
-app.MapHub<GoLiveHub>("/api/hubs/go-live");
-app.MapHub<GoLiveHub>("/hubs/livestream");
-app.MapHub<GoLiveHub>("/api/hubs/livestream");
+app.MapHub<GoLiveHub>("/api/hubs/go-live").RequireCors("ClientPolicy").AllowAnonymous();
+app.MapHub<GoLiveHub>("/hubs/livestream").RequireCors("ClientPolicy").AllowAnonymous();
+app.MapHub<GoLiveHub>("/api/hubs/livestream").RequireCors("ClientPolicy").AllowAnonymous();
 app.MapGet("/manifest.json", async (HttpContext context) =>
 {
     var manifestPath = Path.Combine(app.Environment.WebRootPath ?? string.Empty, "manifest.json");
