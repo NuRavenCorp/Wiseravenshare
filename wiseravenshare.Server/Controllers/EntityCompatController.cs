@@ -316,7 +316,7 @@ public sealed partial class EntityCompatController : ControllerBase
                     stream.ended_at ??= DateTime.UtcNow;
                     if (!stream.kept_permanently && !stream.expires_at.HasValue)
                     {
-                        stream.expires_at = stream.ended_at.Value.AddHours(72);
+                        stream.expires_at = stream.ended_at.Value.AddHours(24);
                     }
                 }
             }
@@ -340,7 +340,7 @@ public sealed partial class EntityCompatController : ControllerBase
                 stream.ended_at = endedAt.Value;
                 if (!stream.kept_permanently && !stream.expires_at.HasValue)
                 {
-                    stream.expires_at = endedAt.Value.AddHours(72);
+                    stream.expires_at = endedAt.Value.AddHours(24);
                 }
             }
 

@@ -130,12 +130,12 @@ public sealed class LiveStreamAssemblyHostedService : BackgroundService
             UserId = stream.created_by_id,
             Title = $"Live: {title}",
             Description = "Auto-saved live recording",
-            Tags = new[] { "live", "auto-saved" },
+            Tags = new[] { "video", "live", "auto-saved" },
             VideoUrl = mediaUrl,
             Status = "published",
             PrivacyStatus = "unlisted",
             StorageMode = "temporary",
-            IsPermanent = true,
+            IsPermanent = false,
         }, cancellationToken);
 
         var approxDurationMs = segments.Count * 5000L;
@@ -148,7 +148,7 @@ public sealed class LiveStreamAssemblyHostedService : BackgroundService
             s.recorded_duration_ms = approxDurationMs;
             if (!s.expires_at.HasValue && s.ended_at.HasValue && !s.kept_permanently)
             {
-                s.expires_at = s.ended_at.Value.AddHours(72);
+                s.expires_at = s.ended_at.Value.AddHours(24);
             }
         });
     }

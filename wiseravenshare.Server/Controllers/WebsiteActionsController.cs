@@ -342,7 +342,7 @@ public sealed class WebsiteActionsController : ControllerBase
                 s.ended_at ??= DateTime.UtcNow;
                 if (!s.kept_permanently)
                 {
-                    s.expires_at = s.ended_at.Value.AddHours(72);
+                    s.expires_at = s.ended_at.Value.AddHours(24);
                 }
             });
 

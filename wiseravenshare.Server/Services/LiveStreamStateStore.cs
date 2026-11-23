@@ -37,7 +37,7 @@ public sealed class LiveStreamStateStore
         var expiresAt = stream.expires_at;
         if (!expiresAt.HasValue && endedAt.HasValue && !stream.kept_permanently)
         {
-            expiresAt = endedAt.Value.AddHours(72);
+            expiresAt = endedAt.Value.AddHours(24);
         }
 
         var title = string.IsNullOrWhiteSpace(stream.title) ? "Untitled live" : stream.title.Trim();

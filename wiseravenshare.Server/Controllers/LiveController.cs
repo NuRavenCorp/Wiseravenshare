@@ -19,6 +19,8 @@ namespace Wiseravenshare.Server.Controllers;
 [Route("api/live")]
 public sealed class LiveController : ControllerBase
 {
+    private static readonly TimeSpan LiveRecordingLifespan = TimeSpan.FromHours(24);
+
     private static readonly HashSet<string> KeepPhrases = new(StringComparer.OrdinalIgnoreCase)
     {
         "keep",
@@ -1015,7 +1017,7 @@ SELECT EXISTS (
             s.status = "ended";
             if (!s.kept_permanently)
             {
-                s.expires_at = s.ended_at.Value.AddHours(72);
+                s.expires_at = s.ended_at.Value.Add(LiveRecordingLifespan);
             }
         });
 
@@ -1039,13 +1041,14 @@ SELECT EXISTS (
 
         // Automatically publish VOD replay to feed
         Guid? replayPostId = null;
+        var playbackUrl = $"/api/live/{Uri.EscapeDataString(streamId)}/playback";
         try
         {
             if (Guid.TryParse(userId, out var ownerGuid))
             {
                 var mediaUrl = !string.IsNullOrWhiteSpace(ended?.final_recording_uri)
                     ? ended.final_recording_uri
-                    : (!string.IsNullOrWhiteSpace(ended?.current_chunk_uri) ? EnsureSignedBlobPath(ended.current_chunk_uri) : null);
+                    : playbackUrl;
 
                 var replayPost = new Wiseravenshare.Server.Entities.Post
                 {
@@ -1086,6 +1089,8 @@ SELECT EXISTS (
             replayStatus = "VOD replay published to your feed.",
             replay_post_id = replayPostId,
             replayPostId,
+            playback_url = playbackUrl,
+            playbackUrl,
             expires_at = ended?.expires_at,
             kept_permanently = ended?.kept_permanently ?? false
         });
@@ -1295,6 +1300,7 @@ SELECT EXISTS (
         // Create stream record if it doesn't already exist (broadcaster may not have called /start)
         if (!_liveStreamStateStore.TryGet(streamId, out var stream))
         {
+            var now = DateTime.UtcNow;
             stream = _liveStreamStateStore.Create(new LiveStreamState
             {
                 id              = streamId,
@@ -1302,12 +1308,12 @@ SELECT EXISTS (
                 streamer_id     = userId,
                 title           = $"Recording {streamId}",
                 status          = "ended",
-                started_at      = DateTime.UtcNow,
-                ended_at        = DateTime.UtcNow,
-                created_date    = DateTime.UtcNow,
-                updated_date    = DateTime.UtcNow,
-                kept_permanently = true,
-                kept_at         = DateTime.UtcNow,
+                started_at      = now,
+                ended_at        = now,
+                created_date    = now,
+                updated_date    = now,
+                kept_permanently = false,
+                expires_at      = now.Add(LiveRecordingLifespan),
             });
         }
 
@@ -1371,12 +1377,12 @@ SELECT EXISTS (
                     UserId = userId,
                     Title = $"Live: {title}",
                     Description = "Auto-saved live recording",
-                    Tags = new[] { "live", "auto-saved" },
+                    Tags = new[] { "video", "live", "auto-saved" },
                     VideoUrl = playbackUrl,
                     Status = "published",
                     PrivacyStatus = "unlisted",
                     StorageMode = "temporary",
-                    IsPermanent = true
+                    IsPermanent = false
                 }, cancellationToken);
                 finalVideoId = createdVideo.Id;
             }
@@ -1391,11 +1397,12 @@ SELECT EXISTS (
             s.final_recording_key = persistedBlobKey;
             s.final_recording_uri = playbackUrl;
             s.final_video_id = finalVideoId;
-            s.kept_permanently = true;
-            s.kept_at = DateTime.UtcNow;
             s.ended_at ??= DateTime.UtcNow;
             s.status = "ended";
-            s.expires_at = null;
+            if (!s.kept_permanently)
+            {
+                s.expires_at = s.ended_at.Value.Add(LiveRecordingLifespan);
+            }
         });
 
         _logger.LogInformation("Recording saved for stream {StreamId}: {Bytes} bytes", streamId, file.Length);

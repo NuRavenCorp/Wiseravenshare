@@ -583,9 +583,10 @@ export default function GoLivePage() {
         const blob = new Blob(chunksRef.current, { type: rec.mimeType || mimeType });
         const form = new FormData();
         form.append("file", blob, `recording-${finishedStreamId}.webm`);
+        let recordingUpload = null;
 
         try {
-          await apiClient.requestJson(`/api/live/${encodeURIComponent(finishedStreamId)}/recording`, {
+          recordingUpload = await apiClient.requestJson(`/api/live/${encodeURIComponent(finishedStreamId)}/recording`, {
             method: "POST",
             body: form,
           });
@@ -602,7 +603,15 @@ export default function GoLivePage() {
         // Call server end stream to get post-broadcast analytics
         try {
           const summary = await apiClient.live.end(finishedStreamId);
-          setSummaryData(summary);
+          setSummaryData({
+            ...summary,
+            playbackUrl:
+              summary?.playbackUrl ||
+              summary?.playback_url ||
+              recordingUpload?.playback_url ||
+              recordingUpload?.playbackUrl ||
+              "",
+          });
         } catch {
           setSummaryData({
             title: streamTitle,
@@ -611,6 +620,7 @@ export default function GoLivePage() {
             totalComments: comments.length,
             totalReactions: flyingReactions.length,
             replayStatus: "VOD replay packaged for your feed.",
+            playbackUrl: recordingUpload?.playback_url || recordingUpload?.playbackUrl || "",
           });
         }
 

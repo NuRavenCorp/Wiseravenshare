@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 
 export default function StreamSummaryModal({ summary, onClose, onGoToFeed }) {
   if (!summary) return null;
+  const playbackUrl = summary.playbackUrl || summary.playback_url || "";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -73,6 +74,13 @@ export default function StreamSummaryModal({ summary, onClose, onGoToFeed }) {
 
         {/* Actions */}
         <div className="flex items-center gap-2 pt-1">
+          {playbackUrl && (
+            <Button asChild variant="secondary" className="flex-1 font-semibold rounded-xl">
+              <a href={playbackUrl} target="_blank" rel="noreferrer">
+                <Video className="w-4 h-4 mr-1.5" /> Watch Replay
+              </a>
+            </Button>
+          )}
           {onGoToFeed && (
             <Button onClick={onGoToFeed} variant="default" className="flex-1 font-semibold rounded-xl">
               <Video className="w-4 h-4 mr-1.5" /> View in Feed

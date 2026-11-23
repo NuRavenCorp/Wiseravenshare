@@ -6,8 +6,8 @@ namespace Wiseravenshare.Server.HostedServices;
 public sealed class LiveStreamExpiryHostedService : BackgroundService
 {
     private static readonly TimeSpan WorkerInterval = TimeSpan.FromMinutes(15);
-    private static readonly TimeSpan ExpiryDuration = TimeSpan.FromHours(72);
-    private static readonly TimeSpan ReminderWindow = TimeSpan.FromHours(24);
+    private static readonly TimeSpan ExpiryDuration = TimeSpan.FromHours(24);
+    private static readonly TimeSpan ReminderWindow = TimeSpan.FromHours(6);
 
     private readonly LiveStreamStateStore _liveStreamStateStore;
     private readonly IServiceScopeFactory _scopeFactory;
