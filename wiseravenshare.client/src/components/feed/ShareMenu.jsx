@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Facebook, Twitter, Youtube, Link2, Share2, MessageCircle, Send } from "lucide-react";
+import { Facebook, Twitter, Link2, Share2, MessageCircle, Send, Instagram, Globe } from "lucide-react";
 
 const PLATFORMS = [
   { key: "facebook", label: "Facebook", icon: Facebook, color: "text-[#1877F2]",
     href: (url, text) => `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}&quote=${encodeURIComponent(text)}` },
-  { key: "x", label: "X", icon: Twitter, color: "text-foreground",
+  { key: "twitter", label: "Twitter / X", icon: Twitter, color: "text-foreground",
     href: (url, text) => `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}` },
-  { key: "whatsapp", label: "WhatsApp", icon: MessageCircle, color: "text-[#25D366]",
-    href: (url, text) => `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}` },
-  { key: "youtube", label: "YouTube", icon: Youtube, color: "text-[#FF0000]",
-    href: (_url, text) => `https://www.youtube.com/results?search_query=${encodeURIComponent(text)}` },
+  { key: "reddit", label: "Reddit", icon: MessageCircle, color: "text-[#FF4500]",
+    href: (url, text) => `https://www.reddit.com/submit?url=${encodeURIComponent(url)}&title=${encodeURIComponent(text)}` },
+  { key: "instagram", label: "Instagram", icon: Instagram, color: "text-[#E1306C]",
+    href: () => "https://www.instagram.com/", copyFirst: true },
+  { key: "tiktok", label: "TikTok", icon: Globe, color: "text-[#25F4EE]",
+    href: () => "https://www.tiktok.com/upload", copyFirst: true },
   { key: "telegram", label: "Telegram", icon: Send, color: "text-[#0088cc]",
     href: (url, text) => `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}` },
 ];
@@ -17,6 +19,7 @@ const PLATFORMS = [
 export default function ShareMenu({ open, url, text, onClose, onShare }) {
   const ref = useRef(null);
   const [copied, setCopied] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -28,12 +31,24 @@ export default function ShareMenu({ open, url, text, onClose, onShare }) {
   }, [open, onClose]);
 
   useEffect(() => {
-    if (!open) setCopied(false);
+    if (!open) {
+      setCopied(false);
+      setStatusMessage("");
+    }
   }, [open]);
 
   if (!open) return null;
 
-  const openShare = (href) => {
+  const openShare = async (platform) => {
+    if (platform.copyFirst) {
+      try {
+        await navigator.clipboard.writeText(`${text} ${url}`.trim());
+        setStatusMessage(`Copied for ${platform.label}. Paste it there.`);
+      } catch {
+        setStatusMessage(`Open ${platform.label}, then paste your link.`);
+      }
+    }
+    const href = platform.href(url, text);
     window.open(href, "_blank", "noopener,noreferrer,width=640,height=560");
     onShare?.();
   };
@@ -56,13 +71,16 @@ export default function ShareMenu({ open, url, text, onClose, onShare }) {
         {PLATFORMS.map((p) => (
           <button
             key={p.key}
-            onClick={() => openShare(p.href(url, text))}
+            onClick={() => { void openShare(p); }}
             className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-foreground hover:bg-secondary transition-colors text-left"
           >
             <p.icon className={`w-4 h-4 ${p.color}`} />
             {p.label}
           </button>
         ))}
+        {statusMessage && (
+          <p className="px-2.5 py-1 text-[11px] text-muted-foreground">{statusMessage}</p>
+        )}
         <div className="h-px bg-border my-1" />
         <button
           onClick={copyLink}

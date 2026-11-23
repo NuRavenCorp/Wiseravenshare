@@ -105,7 +105,8 @@ public class SocialController : ControllerBase
             && !request.PublishToWiseRavenStream
             && !request.PublishToTwitter
             && !request.PublishToBluesky
-            && !request.PublishToLinkedIn)
+            && !request.PublishToLinkedIn
+            && !request.PublishToReddit)
         {
             return BadRequest(new ErrorResponse
             {

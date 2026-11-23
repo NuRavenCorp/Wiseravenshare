@@ -150,7 +150,7 @@ public sealed class UsersController : ControllerBase
         var existing = _userStore.FindByLoginIdentifier(dbUser.Email);
         if (existing != null)
         {
-            if (string.IsNullOrWhiteSpace(existing.Avatar) && !string.IsNullOrWhiteSpace(dbUser.AvatarUrl))
+            if (!string.IsNullOrWhiteSpace(dbUser.AvatarUrl) && existing.Avatar != dbUser.AvatarUrl)
             {
                 existing.Avatar = dbUser.AvatarUrl;
                 _userStore.UpdateProfile(existing.Id, new UpdateUserProfileRequest { Avatar = dbUser.AvatarUrl });

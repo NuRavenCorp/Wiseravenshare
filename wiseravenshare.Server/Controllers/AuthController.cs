@@ -909,7 +909,7 @@ public class AuthController : ControllerBase
             _userStore.TryGetByEmail(actorEmail, out user);
         }
 
-        var allPlatforms = new[] { "facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky", "linkedin" };
+        var allPlatforms = new[] { "facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky", "linkedin", "reddit" };
         var result = new Dictionary<string, object>();
 
         if (user is null)
@@ -1213,6 +1213,7 @@ public class AuthController : ControllerBase
                 "youtube" => new UpdateSocialFeedsRequest { YouTube = verifiedConnection },
                 "twitter" => new UpdateSocialFeedsRequest { Twitter = verifiedConnection },
                 "linkedin" => new UpdateSocialFeedsRequest { LinkedIn = verifiedConnection },
+                "reddit" => new UpdateSocialFeedsRequest { Reddit = verifiedConnection },
                 _ => null
             };
 
@@ -1267,6 +1268,7 @@ public class AuthController : ControllerBase
             "youtube" => new UpdateSocialFeedsRequest { YouTube = currentConnection },
             "twitter" => new UpdateSocialFeedsRequest { Twitter = currentConnection },
             "linkedin" => new UpdateSocialFeedsRequest { LinkedIn = currentConnection },
+            "reddit" => new UpdateSocialFeedsRequest { Reddit = currentConnection },
             _ => null
         };
 
@@ -1322,6 +1324,7 @@ public class AuthController : ControllerBase
             "youtube" => new UpdateSocialFeedsRequest { YouTube = cleared },
             "twitter" => new UpdateSocialFeedsRequest { Twitter = cleared },
             "linkedin" => new UpdateSocialFeedsRequest { LinkedIn = cleared },
+            "reddit" => new UpdateSocialFeedsRequest { Reddit = cleared },
             "bluesky" => new UpdateSocialFeedsRequest { Bluesky = cleared },
             _ => null
         };
@@ -2846,6 +2849,7 @@ public class AuthController : ControllerBase
             "x" => "twitter",         // X is the rebrand of Twitter
             "bluesky" => "bluesky",
             "linkedin" => "linkedin",
+            "reddit" => "reddit",
             _ => string.Empty
         };
     }
@@ -2863,6 +2867,7 @@ public class AuthController : ControllerBase
             "twitter" => "Twitter",
             "bluesky" => "Bluesky",
             "linkedin" => "LinkedIn",
+            "reddit" => "Reddit",
             _ => string.Empty
         };
 
@@ -2904,6 +2909,10 @@ public class AuthController : ControllerBase
                 _configuration["LINKEDIN_CLIENT_ID"],
                 _configuration["Social:LinkedIn:ClientId"],
                 _configuration["Social:LinkedIn:AppId"]),
+            "reddit" => ResolveOAuthSettingValue(
+                _configuration["REDDIT_CLIENT_ID"],
+                _configuration["Social:Reddit:ClientId"],
+                _configuration["Social:Reddit:AppId"]),
             _ => string.Empty
         };
         var fallbackClientSecret = provider switch
@@ -2935,6 +2944,10 @@ public class AuthController : ControllerBase
                 _configuration["LINKEDIN_CLIENT_SECRET"],
                 _configuration["Social:LinkedIn:ClientSecret"],
                 _configuration["Social:LinkedIn:AppSecret"]),
+            "reddit" => ResolveOAuthSettingValue(
+                _configuration["REDDIT_CLIENT_SECRET"],
+                _configuration["Social:Reddit:ClientSecret"],
+                _configuration["Social:Reddit:AppSecret"]),
             _ => string.Empty
         };
         var fallbackRedirectUri = provider switch
@@ -2956,6 +2969,10 @@ public class AuthController : ControllerBase
                 _configuration["Social:LinkedIn:RedirectUri"],
                 _configuration["LINKEDIN_OAUTH_REDIRECT_URI"],
                 _configuration["LINKEDIN_REDIRECT_URI"]),
+            "reddit" => ResolveOAuthSettingValue(
+                _configuration["Social:Reddit:RedirectUri"],
+                _configuration["REDDIT_OAUTH_REDIRECT_URI"],
+                _configuration["REDDIT_REDIRECT_URI"]),
             _ => string.Empty
         };
 
@@ -3322,6 +3339,15 @@ public class AuthController : ControllerBase
                 ["scope"] = "openid profile email w_member_social",
                 ["state"] = state
             }),
+            "reddit" => BuildUrl("https://www.reddit.com/api/v1/authorize", new Dictionary<string, string?>
+            {
+                ["client_id"] = config.ClientId,
+                ["redirect_uri"] = callbackUrl,
+                ["response_type"] = "code",
+                ["scope"] = "identity submit read",
+                ["state"] = state,
+                ["duration"] = "permanent"
+            }),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
         };
     }
@@ -3344,6 +3370,7 @@ public class AuthController : ControllerBase
             "twitter" => await ResolveTwitterProfileAsync(httpClient, config, code, callbackUrl, codeVerifier),
             "bluesky" => await ResolveBlueskyProfileAsync(httpClient, config, code, callbackUrl),
             "linkedin" => await ResolveLinkedInProfileAsync(httpClient, config, code, callbackUrl),
+            "reddit" => await ResolveRedditProfileAsync(httpClient, config, code, callbackUrl),
             _ => throw new InvalidOperationException("Unsupported OAuth provider.")
         };
     }
@@ -3468,6 +3495,70 @@ public class AuthController : ControllerBase
             TokenExpiresAt = tokenExpiresAt,
             DestinationId = twitterId,
             DestinationName = username
+        };
+    }
+
+    private static async Task<SocialProfile> ResolveRedditProfileAsync(HttpClient httpClient, OAuthProviderConfig config, string code, string callbackUrl)
+    {
+        var tokenRequest = new HttpRequestMessage(HttpMethod.Post, "https://www.reddit.com/api/v1/access_token");
+        var tokenParams = new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["code"] = code,
+            ["redirect_uri"] = callbackUrl
+        };
+        tokenRequest.Content = new FormUrlEncodedContent(tokenParams);
+        if (!string.IsNullOrWhiteSpace(config.ClientId) && !string.IsNullOrWhiteSpace(config.ClientSecret))
+        {
+            var authBytes = Encoding.UTF8.GetBytes($"{config.ClientId}:{config.ClientSecret}");
+            tokenRequest.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(authBytes));
+        }
+        tokenRequest.Headers.UserAgent.ParseAdd("web:wiseravenshare:v1.0.0 (by /u/wiseravenshare_dev)");
+
+        using var response = await httpClient.SendAsync(tokenRequest);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var tokenJson = await JsonDocument.ParseAsync(stream);
+        var tokenRoot = tokenJson.RootElement;
+        var accessToken = tokenRoot.TryGetProperty("access_token", out var atNode) ? atNode.GetString() ?? string.Empty : string.Empty;
+        var refreshToken = tokenRoot.TryGetProperty("refresh_token", out var rtNode) ? rtNode.GetString() ?? string.Empty : string.Empty;
+        DateTimeOffset? tokenExpiresAt = null;
+        if (tokenRoot.TryGetProperty("expires_in", out var expNode) && expNode.TryGetInt32(out var expSeconds) && expSeconds > 0)
+        {
+            tokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expSeconds);
+        }
+
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            throw new InvalidOperationException("Reddit access token was not returned.");
+        }
+
+        var meRequest = new HttpRequestMessage(HttpMethod.Get, "https://oauth.reddit.com/api/v1/me");
+        meRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        meRequest.Headers.UserAgent.ParseAdd("web:wiseravenshare:v1.0.0 (by /u/wiseravenshare_dev)");
+        using var meResponse = await httpClient.SendAsync(meRequest);
+        meResponse.EnsureSuccessStatusCode();
+
+        await using var meStream = await meResponse.Content.ReadAsStreamAsync();
+        using var meJson = await JsonDocument.ParseAsync(meStream);
+        var meRoot = meJson.RootElement;
+        var username = meRoot.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty;
+        var subreddit = meRoot.TryGetProperty("subreddit", out var subredditNode)
+            && subredditNode.ValueKind == JsonValueKind.Object
+            && subredditNode.TryGetProperty("display_name", out var displayNode)
+            ? displayNode.GetString() ?? string.Empty
+            : string.Empty;
+
+        return new SocialProfile
+        {
+            ProviderUserId = username,
+            Name = username,
+            Email = $"{username}@reddit.local",
+            AccessToken = accessToken,
+            RefreshToken = refreshToken,
+            TokenExpiresAt = tokenExpiresAt,
+            DestinationId = !string.IsNullOrWhiteSpace(subreddit) ? subreddit : $"u_{username}",
+            DestinationName = !string.IsNullOrWhiteSpace(subreddit) ? subreddit : username
         };
     }
 
@@ -4027,6 +4118,7 @@ public class AuthController : ControllerBase
             "youtube" => new UpdateSocialFeedsRequest { YouTube = connection },
             "twitter" => new UpdateSocialFeedsRequest { Twitter = connection },
             "linkedin" => new UpdateSocialFeedsRequest { LinkedIn = connection },
+            "reddit" => new UpdateSocialFeedsRequest { Reddit = connection },
             "bluesky" => new UpdateSocialFeedsRequest { Bluesky = connection },
             _ => null
         };
@@ -4049,6 +4141,7 @@ public class AuthController : ControllerBase
             "youtube" => "youtube-channel",
             "twitter" => "x-profile",
             "linkedin" => "linkedin-profile",
+            "reddit" => "reddit-profile",
             _ => string.Empty
         };
 
@@ -4194,6 +4287,7 @@ public class AuthController : ControllerBase
             "youtube" => feeds.YouTube,
             "twitter" => feeds.Twitter,
             "linkedin" => feeds.LinkedIn,
+            "reddit" => feeds.Reddit,
             "bluesky" => feeds.Bluesky,
             _ => null
         };
@@ -4365,6 +4459,18 @@ public class AuthController : ControllerBase
                 if (string.IsNullOrWhiteSpace(next.Designation)) next.Designation = "linkedin-profile";
                 return new UpdateSocialFeedsRequest { LinkedIn = next };
 
+            case "reddit":
+                var redditUser = ReadField(fields, "username", "handle");
+                if (!string.IsNullOrWhiteSpace(redditUser))
+                {
+                    var normalized = redditUser.TrimStart('@').Replace("u/", "", StringComparison.OrdinalIgnoreCase);
+                    next.Username = normalized;
+                    next.ProfileUrl = $"https://www.reddit.com/user/{normalized}";
+                    next.FeedUrl = $"https://www.reddit.com/user/{normalized}/submitted/";
+                }
+                if (string.IsNullOrWhiteSpace(next.Designation)) next.Designation = "reddit-profile";
+                return new UpdateSocialFeedsRequest { Reddit = next };
+
             default:
                 return null;
         }
@@ -4380,7 +4486,7 @@ public class AuthController : ControllerBase
             "facebook" => providerUserId,
             "instagram" => !string.IsNullOrWhiteSpace(providerUserId) ? providerUserId : displayName,
             "tiktok" => !string.IsNullOrWhiteSpace(providerUserId) ? providerUserId : displayName,
-            "youtube" or "twitter" or "linkedin" or "bluesky" => !string.IsNullOrWhiteSpace(displayName) ? displayName : providerUserId,
+            "youtube" or "twitter" or "linkedin" or "reddit" or "bluesky" => !string.IsNullOrWhiteSpace(displayName) ? displayName : providerUserId,
             _ => string.Empty
         };
     }
@@ -4403,6 +4509,7 @@ public class AuthController : ControllerBase
             "twitter" => $"https://x.com/{identifier}",
             "bluesky" => $"https://bsky.app/profile/{identifier.TrimStart('@')}",
             "linkedin" => $"https://www.linkedin.com/in/{identifier}",
+            "reddit" => $"https://www.reddit.com/user/{identifier.TrimStart('@')}",
             _ => string.Empty
         };
     }
@@ -4924,12 +5031,12 @@ LIMIT 1;";
             var existingById = await _userRepository.GetByIdAsync(parsedId);
             if (existingById is not null)
             {
-                if (string.IsNullOrWhiteSpace(authUser.Avatar) && !string.IsNullOrWhiteSpace(existingById.AvatarUrl))
+                if (!string.IsNullOrWhiteSpace(existingById.AvatarUrl))
                 {
                     authUser.Avatar = existingById.AvatarUrl;
                     _userStore.UpdateProfile(authUser.Id, new UpdateUserProfileRequest { Avatar = existingById.AvatarUrl });
                 }
-                else if (!string.IsNullOrWhiteSpace(authUser.Avatar) && existingById.AvatarUrl != authUser.Avatar)
+                else if (!string.IsNullOrWhiteSpace(authUser.Avatar))
                 {
                     existingById.AvatarUrl = authUser.Avatar;
                     await _userRepository.UpdateAsync(existingById);
@@ -4947,12 +5054,12 @@ LIMIT 1;";
                     existingByEmail.IsActive = true;
                 }
 
-                if (string.IsNullOrWhiteSpace(authUser.Avatar) && !string.IsNullOrWhiteSpace(existingByEmail.AvatarUrl))
+                if (!string.IsNullOrWhiteSpace(existingByEmail.AvatarUrl))
                 {
                     authUser.Avatar = existingByEmail.AvatarUrl;
                     _userStore.UpdateProfile(authUser.Id, new UpdateUserProfileRequest { Avatar = existingByEmail.AvatarUrl });
                 }
-                else if (!string.IsNullOrWhiteSpace(authUser.Avatar) && existingByEmail.AvatarUrl != authUser.Avatar)
+                else if (!string.IsNullOrWhiteSpace(authUser.Avatar))
                 {
                     existingByEmail.AvatarUrl = authUser.Avatar;
                 }

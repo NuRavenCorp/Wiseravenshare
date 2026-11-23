@@ -23,7 +23,25 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
   const fileInputRef = useRef(null);
 
   // States
-  const [avatarUrl, setAvatarUrl] = useState(activeAvatar || "");
+  const [avatarUrl, setAvatarUrl] = useState(() => {
+    if (activeAvatar) return activeAvatar;
+    if (typeof window === "undefined" || !window.localStorage) return "";
+    try {
+      const activeStored = localStorage.getItem("wiseravenshare_active_avatar");
+      if (activeStored) return activeStored;
+      const guestStored = localStorage.getItem("wiseravenshare_guest_avatar");
+      if (guestStored) return guestStored;
+      const saved = localStorage.getItem("wiseravenshare_saved_avatars");
+      if (saved) {
+        const list = JSON.parse(saved);
+        if (Array.isArray(list) && list.length > 0) {
+          const active = list.find((a) => a.isActive) || list[0];
+          if (active?.url) return active.url;
+        }
+      }
+    } catch {}
+    return "";
+  });
   const [uploading, setUploading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [followCounts, setFollowCounts] = useState({ followers: 14, following: 0 });
@@ -49,22 +67,31 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
     }
 
     try {
-      return (
-        localStorage.getItem("wiseravenshare_active_avatar") ||
-        localStorage.getItem("wiseravenshare_guest_avatar") ||
-        ""
-      );
+      const activeStored = localStorage.getItem("wiseravenshare_active_avatar");
+      if (activeStored) return activeStored;
+      const guestStored = localStorage.getItem("wiseravenshare_guest_avatar");
+      if (guestStored) return guestStored;
+      const saved = localStorage.getItem("wiseravenshare_saved_avatars");
+      if (saved) {
+        const list = JSON.parse(saved);
+        if (Array.isArray(list) && list.length > 0) {
+          const active = list.find((a) => a.isActive) || list[0];
+          if (active?.url) return active.url;
+        }
+      }
+      return "";
     } catch {
       return "";
     }
   }, [activeAvatar, user?.avatar, user?.avatarUrl, user?.avatar_uri]);
 
-  // Sync avatar with global auth state
+  // Sync avatar on mount, when auth state changes, or when activeAvatar changes
   useEffect(() => {
-    if (activeAvatar) {
-      setAvatarUrl(activeAvatar);
+    const current = resolveCurrentAvatar();
+    if (current) {
+      setAvatarUrl(current);
     }
-  }, [activeAvatar]);
+  }, [resolveCurrentAvatar, activeAvatar, user]);
 
   // Load followers and following counts
   const fetchFollowTallies = useCallback(async () => {
@@ -298,6 +325,9 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
               src={resolveMediaUrl(avatarUrl)}
               alt="Photo Avatar"
               className="w-full h-full object-cover rounded-full"
+              onError={() => {
+                setAvatarUrl("");
+              }}
             />
           ) : brandLogoUrl ? (
             <img
@@ -498,13 +528,23 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
             {/* Quick Link to Saved Avatars Vault */}
             <div className="pt-2 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
               <span>Saved Photo Avatars Vault</span>
-              <Link
-                to="/social"
-                onClick={() => setShowOptionsModal(false)}
-                className="text-primary hover:underline flex items-center gap-1"
-              >
-                <FolderOpen className="w-3.5 h-3.5" /> View Full Vault
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link
+                  to="/dashboard?tab=profile"
+                  onClick={() => setShowOptionsModal(false)}
+                  className="text-primary hover:underline flex items-center gap-1"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" /> Profile Vault
+                </Link>
+                <span>•</span>
+                <Link
+                  to="/social"
+                  onClick={() => setShowOptionsModal(false)}
+                  className="text-primary hover:underline flex items-center gap-1"
+                >
+                  Social Vault
+                </Link>
+              </div>
             </div>
           </div>
         </div>

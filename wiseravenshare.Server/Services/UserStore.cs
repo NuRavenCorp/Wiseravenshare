@@ -539,6 +539,11 @@ public sealed class UserStore
             current.LinkedIn = NormalizeConnection(request.LinkedIn, "linkedin");
         }
 
+        if (request.Reddit is not null)
+        {
+            current.Reddit = NormalizeConnection(request.Reddit, "reddit");
+        }
+
         if (request.Bluesky is not null)
         {
             current.Bluesky = NormalizeConnection(request.Bluesky, "bluesky");
@@ -753,6 +758,7 @@ public sealed class UserStore
             YouTube = NormalizeConnection(feeds.YouTube, "youtube"),
             Twitter = NormalizeConnection(feeds.Twitter, "twitter"),
             LinkedIn = NormalizeConnection(feeds.LinkedIn, "linkedin"),
+            Reddit = NormalizeConnection(feeds.Reddit, "reddit"),
             Bluesky = NormalizeConnection(feeds.Bluesky, "bluesky")
         };
     }
@@ -833,6 +839,7 @@ public sealed class UserStore
             "youtube" or "yt" => "youtube",
             "twitter" or "x" => "twitter",
             "linkedin" => "linkedin",
+            "reddit" => "reddit",
             "bluesky" or "bsky" => "bluesky",
             "facebook" => "facebook",
             "instagram" => "instagram",
@@ -854,6 +861,7 @@ public sealed class UserStore
             {
                 "youtube" => ExtractYouTubeIdentifier(uri),
                 "linkedin" => ExtractLinkedInIdentifier(uri),
+                "reddit" => ExtractRedditIdentifier(uri),
                 "bluesky" => ExtractBlueskyIdentifier(uri),
                 _ => ExtractIdentifierFromUrlPath(uri)
             };
@@ -897,6 +905,7 @@ public sealed class UserStore
             {
                 "youtube" => ExtractYouTubeIdentifier(uri),
                 "linkedin" => ExtractLinkedInIdentifier(uri),
+                "reddit" => ExtractRedditIdentifier(uri),
                 "bluesky" => ExtractBlueskyIdentifier(uri),
                 _ => ExtractIdentifierFromUrlPath(uri)
             };
@@ -978,6 +987,7 @@ public sealed class UserStore
                 : $"https://www.youtube.com/@{username}",
             "twitter" => $"https://x.com/{username}",
             "linkedin" => $"https://www.linkedin.com/in/{username}",
+            "reddit" => $"https://www.reddit.com/user/{username}",
             "bluesky" => $"https://bsky.app/profile/{username}",
             _ => $"https://www.tiktok.com/@{username}"
         };
@@ -996,9 +1006,22 @@ public sealed class UserStore
             "linkedin" => profileUrl.Contains("/company/", StringComparison.OrdinalIgnoreCase)
                 ? "linkedin-company"
                 : "linkedin-profile",
+            "reddit" => "reddit-profile",
             "bluesky" => "bluesky-actor",
             _ => "tiktok-creator"
         };
+    }
+
+    private static string ExtractRedditIdentifier(Uri uri)
+    {
+        var segments = uri.AbsolutePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length >= 2 && string.Equals(segments[0], "user", StringComparison.OrdinalIgnoreCase))
+        {
+            return segments[1];
+        }
+
+        return segments.Length > 0 ? segments[0] : string.Empty;
     }
 
     private static string ExtractBlueskyIdentifier(Uri uri)
@@ -1557,4 +1580,3 @@ ADD COLUMN IF NOT EXISTS ai_settings JSONB NOT NULL DEFAULT '{{}}'::jsonb;";
         return builder.ConnectionString;
     }
 }
-

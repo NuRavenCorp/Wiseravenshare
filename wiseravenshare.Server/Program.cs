@@ -28,6 +28,34 @@ using System.Diagnostics;
 using System.Globalization;
 using Microsoft.AspNetCore.ResponseCompression;
 
+// Load .env file into environment variables before builder initialization
+foreach (var envPath in new[] { ".env", "../.env", Path.Combine(AppContext.BaseDirectory, ".env") })
+{
+    if (System.IO.File.Exists(envPath))
+    {
+        try
+        {
+            foreach (var line in System.IO.File.ReadAllLines(envPath))
+            {
+                var trimmed = line.Trim();
+                if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith('#')) continue;
+                var eqIdx = trimmed.IndexOf('=');
+                if (eqIdx > 0)
+                {
+                    var k = trimmed[..eqIdx].Trim();
+                    var v = trimmed[(eqIdx + 1)..].Trim().Trim('"', '\'');
+                    if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(k)))
+                    {
+                        Environment.SetEnvironmentVariable(k, v);
+                    }
+                }
+            }
+        }
+        catch {}
+        break;
+    }
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 static string NormalizeConnectionString(string connectionString)
@@ -2697,6 +2725,7 @@ builder.Services.AddHttpClient<ICrossPlatformPublisher, InstagramPublisher>();
 builder.Services.AddHttpClient<ICrossPlatformPublisher, TikTokPublisher>();
 builder.Services.AddHttpClient<ICrossPlatformPublisher, TwitterPublisher>();
 builder.Services.AddHttpClient<ICrossPlatformPublisher, LinkedInPublisher>();
+builder.Services.AddHttpClient<ICrossPlatformPublisher, RedditPublisher>();
 builder.Services.AddHttpClient<ICrossPlatformPublisher, BlueskyPublisher>();
 builder.Services.AddScoped<ICrossPlatformPublisher, YouTubePublisher>();
 builder.Services.AddScoped<ISocialCrossPostRepository, SocialCrossPostRepository>();
@@ -3207,18 +3236,23 @@ bool IsStripePriceId(string? value) =>
     (value.Trim().StartsWith("price_", StringComparison.OrdinalIgnoreCase) ||
      value.Trim().StartsWith("prod_", StringComparison.OrdinalIgnoreCase));
 
-var stripePublishableKey = ResolveStripeConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY", "STRIPE__PUBLISHABLE__KEY");
-var stripeSecretKey = ResolveStripeConfig("Stripe:SecretKey", "STRIPE_RESTRICTED_KEY", "STRIPE__RESTRICTED__KEY", "Stripe:RestrictedKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY", "STRIPE__SECRET__KEY");
-var stripeWebhookSecret = ResolveStripeConfig("Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET", "STRIPE__WEBHOOK__SECTRET");
+var stripePublishableKey = SubscriptionService.ResolveConfig(app.Configuration, "Stripe:PublishableKey", "STRIPE__PUBLISHABLE__KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_PUBLISHABLE_API");
+var stripeSecretKey = SubscriptionService.ResolveStripeSecretKey(app.Configuration);
+var stripeWebhookSecret = SubscriptionService.ResolveConfig(app.Configuration, "Stripe:WebhookSecret", "STRIPE__WEBHOOK__SECTRET", "STRIPE__WEBHOOK__SECRET", "STRIPE_WEBHOOK_SECRET");
+
+if (!string.IsNullOrWhiteSpace(stripeSecretKey))
+{
+    Stripe.StripeConfiguration.ApiKey = stripeSecretKey;
+    app.Logger.LogInformation("Stripe API key initialized for checkout & subscriptions ({KeyPrefix}...).", stripeSecretKey[..Math.Min(stripeSecretKey.Length, 7)]);
+}
+else
+{
+    app.Logger.LogWarning("Stripe secret key is missing. Set STRIPE_SECRET_KEY, STRIPE_RESTRICTED_KEY, or STRIPE__RESTRICTED__KEY in .env.");
+}
 
 if (string.IsNullOrWhiteSpace(stripePublishableKey))
 {
     app.Logger.LogWarning("Stripe publishable key is missing. Set Stripe:PublishableKey or STRIPE_PUBLISHABLE_KEY.");
-}
-
-if (string.IsNullOrWhiteSpace(stripeSecretKey))
-{
-    app.Logger.LogWarning("Stripe secret key is missing. Set Stripe:SecretKey or STRIPE_SECRET_KEY.");
 }
 
 if (string.IsNullOrWhiteSpace(stripeWebhookSecret))

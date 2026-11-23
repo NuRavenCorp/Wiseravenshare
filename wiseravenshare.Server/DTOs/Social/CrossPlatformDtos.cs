@@ -12,11 +12,12 @@ public static class SocialPlatforms
     public const string TikTok = "tiktok";
     public const string Twitter = "twitter";
     public const string LinkedIn = "linkedin";
+    public const string Reddit = "reddit";
     public const string Bluesky = "bluesky";
 
     public static readonly IReadOnlyList<string> All =
     [
-        Facebook, Instagram, YouTube, TikTok, Twitter, LinkedIn, Bluesky
+        Facebook, Instagram, YouTube, TikTok, Twitter, LinkedIn, Reddit, Bluesky
     ];
 
     public static bool IsValid(string platform) =>

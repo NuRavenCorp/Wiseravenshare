@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Stripe;
 using Stripe.Checkout;
+using AppSubscriptionService = Wiseravenshare.Server.Services.SubscriptionService;
 using Wiseravenshare.Server.Services;
 
 namespace Wiseravenshare.Server.Controllers;
@@ -33,7 +34,7 @@ public class PaymentsController : ControllerBase
     [AllowAnonymous]
     public IActionResult GetPublicConfig()
     {
-        var publishableKey = ResolveConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY");
+        var publishableKey = ResolveConfig("Stripe:PublishableKey", "STRIPE__PUBLISHABLE__KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_PUBLISHABLE_API");
         return Ok(new
         {
             publishableKey,
@@ -116,9 +117,9 @@ public class PaymentsController : ControllerBase
     [AllowAnonymous]
     public IActionResult GetStripeHealth()
     {
-        var publishableKey = ResolveConfig("Stripe:PublishableKey", "STRIPE_PUBLISHABLE_API", "STRIPE_PUBLISHABLE_KEY");
-        var secretKey = ResolveConfig("Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
-        var webhookSecret = ResolveConfig("Stripe:WebhookSecret", "STRIPE_WEBHOOK_SECRET");
+        var publishableKey = ResolveConfig("Stripe:PublishableKey", "STRIPE__PUBLISHABLE__KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_PUBLISHABLE_API");
+        var secretKey = AppSubscriptionService.ResolveStripeSecretKey(_configuration);
+        var webhookSecret = AppSubscriptionService.ResolveConfig(_configuration, "Stripe:WebhookSecret", "STRIPE__WEBHOOK__SECTRET", "STRIPE__WEBHOOK__SECRET", "STRIPE_WEBHOOK_SECRET");
 
         var creatorProMonthly = ResolvePriceIdRaw("creator_pro", "monthly");
         var creatorProAnnual = ResolvePriceIdRaw("creator_pro", "annual");
@@ -250,7 +251,7 @@ public class PaymentsController : ControllerBase
     [HttpPost("checkout-session")]
     public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutSessionRequest request)
     {
-        var secretKey = ResolveConfig("Stripe:SecretKey", "STRIPE_SECRET_API", "STRIPE_RESTRICTED_API", "STRIPE_SECRET_KEY");
+        var secretKey = AppSubscriptionService.ResolveStripeSecretKey(_configuration);
         if (string.IsNullOrWhiteSpace(secretKey))
         {
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Stripe secret key is not configured." });
@@ -466,22 +467,7 @@ public class PaymentsController : ControllerBase
 
     private string ResolveConfig(string sectionKey, params string[] envKeys)
     {
-        var value = _configuration[sectionKey];
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            return value.Trim();
-        }
-
-        foreach (var envKey in envKeys)
-        {
-            value = _configuration[envKey];
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value.Trim();
-            }
-        }
-
-        return string.Empty;
+        return AppSubscriptionService.ResolveConfig(_configuration, sectionKey, envKeys);
     }
 
     private object BuildCatalogPlan(

@@ -11,6 +11,7 @@ import {
   Youtube,
   Twitter,
   Linkedin,
+  MessageCircle,
   Check,
   Loader2,
   Unlink,
@@ -83,6 +84,13 @@ const PLATFORM_META = {
     oauthSupported: true,
     capabilities: "Publish posts & updates to your professional network; cross-post content",
   },
+  reddit: {
+    Icon: MessageCircle,
+    label: "Reddit",
+    color: "text-orange-500",
+    oauthSupported: true,
+    capabilities: "Submit links or text posts to your connected subreddit destinations.",
+  },
 };
 
 const PLATFORM_URL_HINTS = {
@@ -93,6 +101,7 @@ const PLATFORM_URL_HINTS = {
   twitter: "https://x.com/yourhandle",
   bluesky: "https://bsky.app/profile/yourhandle.bsky.social",
   linkedin: "https://linkedin.com/in/yourhandle",
+  reddit: "https://reddit.com/user/yourusername",
 };
 
 const SHARING_SCOPES = [

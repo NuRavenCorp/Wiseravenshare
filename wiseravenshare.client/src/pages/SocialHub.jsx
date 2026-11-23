@@ -18,7 +18,7 @@ import PostsFeed from "@/components/feed/PostsFeed";
 import LiveNowCarousel from "@/components/live/LiveNowCarousel";
 
 // All supported platforms — order determines display sequence
-const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky", "linkedin"];
+const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "twitter", "bluesky", "linkedin", "reddit"];
 
 export default function SocialHub() {
   const [platformStatuses, setPlatformStatuses] = useState({});

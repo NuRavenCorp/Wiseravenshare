@@ -601,6 +601,154 @@ public class LinkedInPublisher : ICrossPlatformPublisher
     }
 }
 
+public class RedditPublisher : ICrossPlatformPublisher
+{
+    private const string RedditApiBase = "https://oauth.reddit.com";
+    private const string RedditUserAgent = "web:wiseravenshare:v1.0.0 (by /u/wiseravenshare_dev)";
+    private readonly HttpClient _httpClient;
+    private readonly IConfiguration _configuration;
+    private readonly UserStore? _userStore;
+
+    public RedditPublisher(HttpClient httpClient, IConfiguration configuration, IServiceProvider serviceProvider)
+    {
+        _httpClient = httpClient;
+        _configuration = configuration;
+        _userStore = serviceProvider.GetService<UserStore>();
+    }
+
+    public string Platform => SocialPlatforms.Reddit;
+
+    public bool IsConfigured()
+    {
+        return !string.IsNullOrWhiteSpace(_configuration["Social:Reddit:AccessToken"]);
+    }
+
+    public bool IsConfigured(Guid userId)
+    {
+        if (IsConfigured()) return true;
+        if (userId == Guid.Empty || _userStore is null) return false;
+
+        if ((_userStore.TryGetById(userId.ToString(), out var user) || _userStore.TryGetById(userId.ToString("N"), out user))
+            && user?.SocialFeeds?.Reddit?.Enabled == true)
+        {
+            return !string.IsNullOrWhiteSpace(user.SocialFeeds.Reddit.AccessToken)
+                || !string.IsNullOrWhiteSpace(user.SocialFeeds.Reddit.Username);
+        }
+
+        return false;
+    }
+
+    public async Task<CrossPlatformPublishResultDto> PublishAsync(CrossPlatformPublishRequest request)
+    {
+        var accessToken = _configuration["Social:Reddit:AccessToken"];
+        string subreddit = (_configuration["Social:Reddit:DefaultSubreddit"] ?? string.Empty).Trim();
+        if (request.UserId != Guid.Empty && _userStore != null)
+        {
+            if ((_userStore.TryGetById(request.UserId.ToString(), out var user) || _userStore.TryGetById(request.UserId.ToString("N"), out user))
+                && user?.SocialFeeds?.Reddit?.Enabled == true)
+            {
+                if (!string.IsNullOrWhiteSpace(user.SocialFeeds.Reddit.AccessToken))
+                {
+                    accessToken = user.SocialFeeds.Reddit.AccessToken;
+                }
+
+                if (string.IsNullOrWhiteSpace(subreddit))
+                {
+                    subreddit = user.SocialFeeds.Reddit.DestinationId;
+                    if (string.IsNullOrWhiteSpace(subreddit) && !string.IsNullOrWhiteSpace(user.SocialFeeds.Reddit.Username))
+                    {
+                        subreddit = $"u_{user.SocialFeeds.Reddit.Username.TrimStart('@')}";
+                    }
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return CrossPlatformErrors.NotConfigured(Platform, "Reddit access token is missing.");
+        }
+
+        if (string.IsNullOrWhiteSpace(subreddit))
+        {
+            return CrossPlatformErrors.Failed(Platform, "No target subreddit configured. Set Social:Reddit:DefaultSubreddit or connect a Reddit profile.");
+        }
+
+        var normalizedSubreddit = subreddit.Trim();
+        if (normalizedSubreddit.StartsWith("r/", StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedSubreddit = normalizedSubreddit[2..];
+        }
+
+        var title = request.Message.Truncate(280);
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = "Shared from WiseRavenShare";
+        }
+
+        var postKind = string.IsNullOrWhiteSpace(request.MediaUrl) ? "self" : "link";
+        var form = new Dictionary<string, string>
+        {
+            ["api_type"] = "json",
+            ["kind"] = postKind,
+            ["sr"] = normalizedSubreddit,
+            ["title"] = title,
+            ["resubmit"] = "true"
+        };
+        if (postKind == "link")
+        {
+            form["url"] = request.MediaUrl!;
+        }
+        else
+        {
+            form["text"] = request.Message.Truncate(40000);
+        }
+
+        using var requestMessage = new HttpRequestMessage(HttpMethod.Post, $"{RedditApiBase}/api/submit");
+        requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        requestMessage.Headers.UserAgent.ParseAdd(RedditUserAgent);
+        requestMessage.Content = new FormUrlEncodedContent(form);
+
+        using var response = await _httpClient.SendAsync(requestMessage);
+        var body = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+        {
+            return CrossPlatformErrors.Failed(Platform, $"Reddit publish failed ({(int)response.StatusCode}): {body}");
+        }
+
+        using var json = JsonDocument.Parse(body);
+        if (json.RootElement.TryGetProperty("json", out var jsonNode)
+            && jsonNode.TryGetProperty("errors", out var errorsNode)
+            && errorsNode.ValueKind == JsonValueKind.Array
+            && errorsNode.GetArrayLength() > 0)
+        {
+            return CrossPlatformErrors.Failed(Platform, $"Reddit publish rejected: {errorsNode}");
+        }
+
+        string? permalink = null;
+        if (json.RootElement.TryGetProperty("json", out var responseJson)
+            && responseJson.TryGetProperty("data", out var dataNode))
+        {
+            if (dataNode.TryGetProperty("url", out var urlNode))
+            {
+                permalink = urlNode.GetString();
+            }
+            if (string.IsNullOrWhiteSpace(permalink)
+                && dataNode.TryGetProperty("permalink", out var permNode)
+                && !string.IsNullOrWhiteSpace(permNode.GetString()))
+            {
+                permalink = $"https://www.reddit.com{permNode.GetString()}";
+            }
+        }
+
+        return new CrossPlatformPublishResultDto
+        {
+            Platform = Platform,
+            Success = true,
+            ExternalPostUrl = permalink
+        };
+    }
+}
+
 /// <summary>
 /// Publishes to Bluesky via AT Protocol com.atproto.repo.createRecord.
 /// Reads credentials from user profile or system configuration.

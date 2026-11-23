@@ -1,5 +1,6 @@
-import React from "react";
-import { ExternalLink, Clock, Rss, Globe } from "lucide-react";
+import React, { useState } from "react";
+import { ExternalLink, Clock, Rss, Globe, Share2 } from "lucide-react";
+import ShareMenu from "@/components/feed/ShareMenu";
 
 const PLATFORM_META = {
   facebook:  { label: "Facebook",  color: "text-blue-400",   bg: "bg-blue-500/10",   border: "border-blue-500/30"   },
@@ -26,6 +27,9 @@ function formatRelativeTime(dateStr) {
 
 export default function SocialFeedCard({ item, onRead }) {
   const meta = PLATFORM_META[item.platform?.toLowerCase()] || PLATFORM_META.rss;
+  const [shareOpen, setShareOpen] = useState(false);
+  const shareUrl = item.permalinkUrl || (typeof window !== "undefined" ? window.location.href : "");
+  const shareText = item.title || item.bodyText || item.sourceName || "WiseRavenShare";
 
   const handleClick = () => {
     if (!item.isRead && onRead) onRead(item.id);
@@ -119,9 +123,34 @@ export default function SocialFeedCard({ item, onRead }) {
             <Clock className="w-3 h-3 shrink-0" />
             <span>{formatRelativeTime(item.publishedAt)}</span>
           </div>
-          {item.permalinkUrl && (
-            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-          )}
+          <div
+            className="relative flex items-center gap-1"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setShareOpen((open) => !open);
+              }}
+              className="p-1 rounded-full text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
+              aria-label="Share item"
+              title="Share item"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+            </button>
+            {item.permalinkUrl && (
+              <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+            )}
+            <ShareMenu
+              open={shareOpen}
+              url={shareUrl}
+              text={shareText}
+              onClose={() => setShareOpen(false)}
+            />
+          </div>
         </div>
       </div>
 

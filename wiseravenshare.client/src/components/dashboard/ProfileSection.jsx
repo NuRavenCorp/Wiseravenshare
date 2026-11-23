@@ -47,7 +47,7 @@ function StatusBanner({ message, variant = "success" }) {
 }
 
 export default function ProfileSection() {
-  const { user, checkUserAuth } = useAuth();
+  const { user, checkUserAuth, updateActiveAvatar } = useAuth();
 
   const cacheKey = user?.id ? `wr_profile_cache_${user.id}` : "wr_profile_cache";
 
@@ -139,8 +139,22 @@ export default function ProfileSection() {
 
 
 
+  useEffect(() => {
+    const handleAvatarUpdated = (e) => {
+      const next = e.detail?.avatarUrl;
+      if (next && next !== avatar) {
+        setAvatar(next);
+      }
+    };
+    window.addEventListener("wr_avatar_updated", handleAvatarUpdated);
+    return () => window.removeEventListener("wr_avatar_updated", handleAvatarUpdated);
+  }, [avatar]);
+
   const handleRemoveAvatar = async () => {
     setAvatar("");
+    if (typeof updateActiveAvatar === "function") {
+      updateActiveAvatar("");
+    }
     try {
       const currentCache = { name, bio, location, website, avatar: "" };
       localStorage.setItem(cacheKey, JSON.stringify(currentCache));
@@ -165,6 +179,10 @@ export default function ProfileSection() {
   const handleSaveProfile = async () => {
     setSaving(true);
     setProfileMsg(null);
+
+    if (avatar && typeof updateActiveAvatar === "function") {
+      updateActiveAvatar(avatar.trim());
+    }
 
     // Retain / persist locally immediately
     try {
@@ -249,6 +267,9 @@ export default function ProfileSection() {
           disabled={saving}
           onChange={(newUrl) => {
             setAvatar(newUrl);
+            if (typeof updateActiveAvatar === "function") {
+              updateActiveAvatar(newUrl);
+            }
             try {
               const currentCache = {
                 name,
@@ -265,6 +286,9 @@ export default function ProfileSection() {
             const uploadedUrl = uploadRes?.avatarUrl || uploadRes?.avatar || "";
             if (uploadedUrl) {
               setAvatar(uploadedUrl);
+              if (typeof updateActiveAvatar === "function") {
+                updateActiveAvatar(uploadedUrl);
+              }
               try {
                 const currentCache = {
                   name,

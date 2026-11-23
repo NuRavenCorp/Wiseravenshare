@@ -56,6 +56,7 @@ public class PublishSocialContentRequest
     public bool PublishToTwitter { get; set; } = false;
     public bool PublishToBluesky { get; set; } = false;
     public bool PublishToLinkedIn { get; set; } = false;
+    public bool PublishToReddit { get; set; } = false;
     public bool PublishToWiseRavenStream { get; set; } = false;
     public string? FacebookPageId { get; set; }
     public string? TikTokUsername { get; set; }

@@ -234,8 +234,10 @@ export default function KaraokeTranscriber({
       });
     }
 
+    const rawTrackId = songMetadata?.trackId ? String(songMetadata.trackId) : null;
     const tokenPayload = {
-      trackId: songMetadata?.trackId || null,
+      trackId: isGuid(rawTrackId || "") ? songMetadata.trackId : null,
+      trackIdRaw: rawTrackId,
       songLanguage: songMetadata?.language || "",
       languageCodes: normalizeLanguageCodes(songMetadata?.languageCodes || []),
       microphoneProfile: songMetadata?.microphoneProfile || "close-vocal",

@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Collections.Concurrent;
 using WiseRavenShare.Server.Application.Services.Assistant;
 using Wiseravenshare.Server.Infrastructure.Data;
@@ -892,9 +893,57 @@ public sealed class ScorePerformanceRequest
     public string? SongTitle  { get; set; }
 }
 
+public sealed class FlexibleGuidConverter : JsonConverter<Guid?>
+{
+    public override Guid? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            return null;
+        }
+
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            var str = reader.GetString();
+            if (string.IsNullOrWhiteSpace(str))
+            {
+                return null;
+            }
+
+            if (Guid.TryParse(str, out var guid))
+            {
+                return guid;
+            }
+
+            return null;
+        }
+
+        if (reader.TokenType == JsonTokenType.Number)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    public override void Write(Utf8JsonWriter writer, Guid? value, JsonSerializerOptions options)
+    {
+        if (value.HasValue)
+        {
+            writer.WriteStringValue(value.Value.ToString());
+        }
+        else
+        {
+            writer.WriteNullValue();
+        }
+    }
+}
+
 public sealed class KaraokeStreamTokenRequest
 {
+    [JsonConverter(typeof(FlexibleGuidConverter))]
     public Guid? TrackId { get; set; }
+    public string? TrackIdRaw { get; set; }
     public string? SongLanguage { get; set; }
     public string[]? LanguageCodes { get; set; }
     public string? MicrophoneProfile { get; set; }

@@ -61,6 +61,7 @@ public sealed class SocialFeedSettings
     public SocialFeedConnection YouTube { get; set; } = new();
     public SocialFeedConnection Twitter { get; set; } = new();
     public SocialFeedConnection LinkedIn { get; set; } = new();
+    public SocialFeedConnection Reddit { get; set; } = new();
     public SocialFeedConnection Bluesky { get; set; } = new();
 }
 
@@ -134,6 +135,6 @@ public sealed class UpdateSocialFeedsRequest
     public SocialFeedConnection? YouTube { get; set; }
     public SocialFeedConnection? Twitter { get; set; }
     public SocialFeedConnection? LinkedIn { get; set; }
+    public SocialFeedConnection? Reddit { get; set; }
     public SocialFeedConnection? Bluesky { get; set; }
 }
-

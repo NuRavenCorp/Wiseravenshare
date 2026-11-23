@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Download, Loader2, Check, RefreshCw } from "lucide-react";
 
 export default function ImportPanel() {
-  const [items, setItems] = useState({ facebook: [], instagram: [], tiktok: [], twitter: [], bluesky: [], linkedin: [], youtube: [] });
+  const [items, setItems] = useState({ facebook: [], instagram: [], tiktok: [], twitter: [], bluesky: [], linkedin: [], reddit: [], youtube: [] });
   const [selected, setSelected] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -25,11 +25,12 @@ export default function ImportPanel() {
         twitter: data.twitter || data.x || [],
         bluesky: data.bluesky || [],
         linkedin: data.linkedin || [],
+        reddit: data.reddit || [],
         youtube: data.youtube || [],
       });
       setSelected(new Set());
     } catch {
-      setItems({ facebook: [], instagram: [], tiktok: [], twitter: [], bluesky: [], linkedin: [], youtube: [] });
+      setItems({ facebook: [], instagram: [], tiktok: [], twitter: [], bluesky: [], linkedin: [], reddit: [], youtube: [] });
     } finally {
       setLoading(false);
     }
@@ -51,6 +52,7 @@ export default function ImportPanel() {
       ...items.twitter,
       ...items.bluesky,
       ...(items.linkedin || []),
+      ...(items.reddit || []),
       ...(items.youtube || []),
     ];
     const chosen = all.filter((_, i) => selected.has(i));
@@ -82,6 +84,7 @@ export default function ImportPanel() {
     ...items.twitter,
     ...items.bluesky,
     ...(items.linkedin || []),
+    ...(items.reddit || []),
     ...(items.youtube || []),
   ];
 

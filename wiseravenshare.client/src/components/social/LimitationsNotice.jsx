@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { X, Info, Facebook, Instagram, Linkedin, Music2 } from "lucide-react";
+import { X, Info, Facebook, Instagram, Linkedin, Music2, MessageCircle } from "lucide-react";
 
 const STORAGE_KEY = "wrs_social_limitations_acknowledged_v1";
 
@@ -10,6 +10,7 @@ const LIMITATIONS = [
   { platform: "Instagram", icon: Instagram, limitation: "Log in at Instagram with your username/password. We need media permissions — just check the boxes Instagram shows you." },
   { platform: "TikTok", icon: Music2, limitation: "Log in at TikTok with your username/password and approve sharing permissions. Read-only sync is available even without upload access." },
   { platform: "LinkedIn", icon: Linkedin, limitation: "Log in at LinkedIn with your username/password, then grant the permissions shown to allow posting to your profile." },
+  { platform: "Reddit", icon: MessageCircle, limitation: "Log in at Reddit and approve identity + submit permissions so WiseRavenShare can publish to your configured subreddit destination." },
 ];
 
 export default function LimitationsNotice() {

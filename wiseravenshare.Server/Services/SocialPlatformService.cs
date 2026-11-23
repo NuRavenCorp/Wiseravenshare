@@ -408,7 +408,7 @@ public class SocialPlatformService : ISocialPlatformService
             response.Results.Add(await PublishToWiseRavenStreamAsync(message, request.VideoUrl, mediaType));
         }
 
-        if (request.PublishToTwitter || request.PublishToBluesky || request.PublishToLinkedIn)
+        if (request.PublishToTwitter || request.PublishToBluesky || request.PublishToLinkedIn || request.PublishToReddit)
         {
             var crossPlatform = _serviceProvider?.GetService<ICrossPlatformPublishService>();
             if (crossPlatform != null)
@@ -417,6 +417,7 @@ public class SocialPlatformService : ISocialPlatformService
                 if (request.PublishToTwitter) crossPlatforms.Add(SocialPlatforms.Twitter);
                 if (request.PublishToBluesky) crossPlatforms.Add(SocialPlatforms.Bluesky);
                 if (request.PublishToLinkedIn) crossPlatforms.Add(SocialPlatforms.LinkedIn);
+                if (request.PublishToReddit) crossPlatforms.Add(SocialPlatforms.Reddit);
 
                 try
                 {
@@ -485,11 +486,20 @@ public class SocialPlatformService : ISocialPlatformService
                         Error = "LinkedIn cross-platform service is not available."
                     });
                 }
+                if (request.PublishToReddit)
+                {
+                    response.Results.Add(new SocialPublishResultDto
+                    {
+                        Platform = "reddit",
+                        Success = false,
+                        Error = "Reddit cross-platform service is not available."
+                    });
+                }
             }
         }
 
         _logger.LogInformation(
-            "User {UserId} requested cross-post. Facebook={Facebook}, Instagram={Instagram}, TikTok={TikTok}, YouTube={YouTube}, Twitter={Twitter}, Bluesky={Bluesky}, LinkedIn={LinkedIn}, WiseRavenStream={WiseRavenStream}, MediaType={MediaType}",
+            "User {UserId} requested cross-post. Facebook={Facebook}, Instagram={Instagram}, TikTok={TikTok}, YouTube={YouTube}, Twitter={Twitter}, Bluesky={Bluesky}, LinkedIn={LinkedIn}, Reddit={Reddit}, WiseRavenStream={WiseRavenStream}, MediaType={MediaType}",
             userId,
             request.PublishToFacebook,
             request.PublishToInstagram,
@@ -498,6 +508,7 @@ public class SocialPlatformService : ISocialPlatformService
             request.PublishToTwitter,
             request.PublishToBluesky,
             request.PublishToLinkedIn,
+            request.PublishToReddit,
             request.PublishToWiseRavenStream,
             mediaType);
 

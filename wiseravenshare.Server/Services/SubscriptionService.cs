@@ -224,17 +224,26 @@ public class SubscriptionService : ISubscriptionService
         ["rights_pro"]      = ("price_1UVhkzGSLShTSiwXKgZDGra5", "price_1UPy4dGSLShTSiwXCNS7nFDe"),
     };
 
-    private static string ResolveStripeSecretKey(IConfiguration configuration)
+    public static string ResolveStripeSecretKey(IConfiguration configuration)
     {
-        var candidates = new[]
+        var candidates = new List<string?>
         {
-            configuration["Stripe:SecretKey"],
-            configuration["STRIPE_RESTRICTED_KEY"],
-            configuration["STRIPE__RESTRICTED__KEY"],
+            Environment.GetEnvironmentVariable("STRIPE__RESTRICTED__KEY"),
+            Environment.GetEnvironmentVariable("STRIPE_RESTRICTED_KEY"),
+            Environment.GetEnvironmentVariable("STRIPE_RESTRICTED_API"),
+            Environment.GetEnvironmentVariable("STRIPE__SECRET__KEY"),
+            Environment.GetEnvironmentVariable("STRIPE_SECRET_KEY"),
+            Environment.GetEnvironmentVariable("STRIPE_SECRET_API"),
+            configuration["STRIPE:RESTRICTED:KEY"],
+            configuration["STRIPE:RESTRICTED_KEY"],
             configuration["Stripe:RestrictedKey"],
-            configuration["STRIPE_RESTRICTED_API"],
-            configuration["STRIPE_SECRET_KEY"],
+            configuration["STRIPE__RESTRICTED__KEY"],
+            configuration["STRIPE_RESTRICTED_KEY"],
+            configuration["Stripe:SecretKey"],
+            configuration["STRIPE:SECRET:KEY"],
+            configuration["STRIPE:SECRET_KEY"],
             configuration["STRIPE__SECRET__KEY"],
+            configuration["STRIPE_RESTRICTED_API"],
             configuration["STRIPE_SECRET_API"]
         };
 
@@ -247,6 +256,24 @@ public class SubscriptionService : ISubscriptionService
                     trimmed.StartsWith("rk_", StringComparison.OrdinalIgnoreCase))
                 {
                     return trimmed;
+                }
+            }
+        }
+
+        // Search any configuration entry matching *STRIPE*KEY* or *STRIPE*SECRET*
+        foreach (var pair in configuration.AsEnumerable())
+        {
+            if (pair.Key.Contains("STRIPE", StringComparison.OrdinalIgnoreCase) &&
+                (pair.Key.Contains("KEY", StringComparison.OrdinalIgnoreCase) || pair.Key.Contains("SECRET", StringComparison.OrdinalIgnoreCase) || pair.Key.Contains("RESTRICTED", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!string.IsNullOrWhiteSpace(pair.Value))
+                {
+                    var trimmed = pair.Value.Trim();
+                    if (trimmed.StartsWith("sk_", StringComparison.OrdinalIgnoreCase) ||
+                        trimmed.StartsWith("rk_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return trimmed;
+                    }
                 }
             }
         }
@@ -384,7 +411,17 @@ public class SubscriptionService : ISubscriptionService
             .AsTracking()
             .FirstOrDefaultAsync(s => s.UserId == userId && !s.IsDeleted);
 
-        if (subscription == null || string.IsNullOrWhiteSpace(subscription.StripeCustomerId))
+        var customerId = subscription?.StripeCustomerId;
+        if (string.IsNullOrWhiteSpace(customerId))
+        {
+            var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId && !u.IsDeleted);
+            if (user != null && !string.IsNullOrWhiteSpace(user.Email))
+            {
+                customerId = await GetOrCreateCustomerIdAsync(userId, user.Email, user.DisplayName ?? user.Username ?? "User");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(customerId))
         {
             throw new NotFoundException("No Stripe customer found for this user.");
         }
@@ -392,7 +429,7 @@ public class SubscriptionService : ISubscriptionService
         var portalService = new BillingPortalSessionService();
         var portalSession = await portalService.CreateAsync(new BillingPortalSessionCreateOptions
         {
-            Customer = subscription.StripeCustomerId,
+            Customer = customerId,
             ReturnUrl = request.ReturnUrl
         });
 
@@ -788,15 +825,19 @@ public class SubscriptionService : ISubscriptionService
 
     private void EnsureStripeConfigured()
     {
-        if (string.IsNullOrWhiteSpace(_secretKey))
+        var key = !string.IsNullOrWhiteSpace(_secretKey)
+            ? _secretKey
+            : ResolveStripeSecretKey(_configuration);
+
+        if (string.IsNullOrWhiteSpace(key))
         {
             throw new InvalidOperationException("Stripe secret key is not configured.");
         }
 
-        StripeConfiguration.ApiKey = _secretKey;
+        StripeConfiguration.ApiKey = key;
     }
 
-    private static string ResolveConfig(IConfiguration configuration, string sectionKey, params string[] envKeys)
+    public static string ResolveConfig(IConfiguration configuration, string sectionKey, params string[] envKeys)
     {
         var value = configuration[sectionKey];
         if (!string.IsNullOrWhiteSpace(value))
@@ -806,7 +847,20 @@ public class SubscriptionService : ISubscriptionService
 
         foreach (var envKey in envKeys)
         {
+            value = Environment.GetEnvironmentVariable(envKey);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+
             value = configuration[envKey];
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+
+            var colonKey = envKey.Replace("__", ":");
+            value = configuration[colonKey];
             if (!string.IsNullOrWhiteSpace(value))
             {
                 return value.Trim();

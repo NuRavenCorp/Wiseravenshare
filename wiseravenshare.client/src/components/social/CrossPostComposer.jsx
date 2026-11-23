@@ -16,6 +16,7 @@ import {
   Facebook,
   Twitter,
   Linkedin,
+  MessageCircle,
   Cloud,
   Music2,
   ExternalLink,
@@ -42,6 +43,7 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
   const [postToTwitter, setPostToTwitter] = useState(false);
   const [postToBluesky, setPostToBluesky] = useState(false);
   const [postToLinkedIn, setPostToLinkedIn] = useState(false);
+  const [postToReddit, setPostToReddit] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -112,6 +114,7 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
   const twitterConnected = isConnected("twitter");
   const blueskyConnected = isConnected("bluesky");
   const linkedinConnected = isConnected("linkedin");
+  const redditConnected = isConnected("reddit");
 
   const hasAnyConnection =
     fbConnected ||
@@ -120,7 +123,8 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
     youtubeConnected ||
     twitterConnected ||
     blueskyConnected ||
-    linkedinConnected;
+    linkedinConnected ||
+    redditConnected;
 
   const fbPages = activeAccounts?.facebook?.pages || [];
   const tiktokAccounts = activeAccounts?.tiktok?.accounts || [];
@@ -136,6 +140,7 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
       if (twitterConnected) setPostToTwitter(true);
       if (blueskyConnected) setPostToBluesky(true);
       if (linkedinConnected) setPostToLinkedIn(true);
+      if (redditConnected) setPostToReddit(true);
 
       setPageId((curr) => curr || activeAccounts?.facebook?.selectedPageId || fbPages[0]?.id || "");
       setTiktokUsername((curr) => curr || activeAccounts?.tiktok?.selectedUsername || tiktokAccounts[0]?.username || "");
@@ -153,6 +158,7 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
     twitterConnected,
     blueskyConnected,
     linkedinConnected,
+    redditConnected,
     activeAccounts,
     fbPages,
     tiktokAccounts,
@@ -182,7 +188,8 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
               settled?.tiktok?.success ||
               settled?.twitter?.success ||
               settled?.bluesky?.success ||
-              settled?.linkedin?.success;
+              settled?.linkedin?.success ||
+              settled?.reddit?.success;
 
             if (anySuccess) {
               setContent("");
@@ -211,7 +218,8 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
     (postToYouTube && youtubeConnected) ||
     (postToTwitter && twitterConnected) ||
     (postToBluesky && blueskyConnected) ||
-    (postToLinkedIn && linkedinConnected);
+    (postToLinkedIn && linkedinConnected) ||
+    (postToReddit && redditConnected);
 
   const selectedTargetsCount = [
     postToFacebook && fbConnected,
@@ -221,6 +229,7 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
     postToTwitter && twitterConnected,
     postToBluesky && blueskyConnected,
     postToLinkedIn && linkedinConnected,
+    postToReddit && redditConnected,
   ].filter(Boolean).length;
 
   const twitterOverLimit = postToTwitter && content.length > 280;
@@ -246,6 +255,7 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
         publishToTwitter: Boolean(postToTwitter && twitterConnected),
         publishToBluesky: Boolean(postToBluesky && blueskyConnected),
         publishToLinkedIn: Boolean(postToLinkedIn && linkedinConnected),
+        publishToReddit: Boolean(postToReddit && redditConnected),
         queue: true,
       };
 
@@ -277,7 +287,8 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
           res.data?.tiktok?.success ||
           res.data?.twitter?.success ||
           res.data?.bluesky?.success ||
-          res.data?.linkedin?.success;
+          res.data?.linkedin?.success ||
+          res.data?.reddit?.success;
 
         if (anySuccess) {
           setContent("");
@@ -301,7 +312,7 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
           </div>
           <h3 className="font-heading text-lg text-foreground">No Shared Social Accounts Connected Yet</h3>
           <p className="text-sm text-muted-foreground max-w-md mx-auto">
-            Connect your accounts in the <strong>Connect</strong> tab to cross-post to Facebook, Instagram, TikTok, YouTube, X (Twitter), Bluesky, and LinkedIn all in one go.
+            Connect your accounts in the <strong>Connect</strong> tab to cross-post to Facebook, Instagram, TikTok, YouTube, X (Twitter), Bluesky, LinkedIn, and Reddit all in one go.
           </p>
         </CardContent>
       </Card>
@@ -330,7 +341,7 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
             <button
               type="button"
               onClick={() => {
-                const totalConnected = [fbConnected, igConnected, tiktokConnected, youtubeConnected, twitterConnected, blueskyConnected, linkedinConnected].filter(Boolean).length;
+                const totalConnected = [fbConnected, igConnected, tiktokConnected, youtubeConnected, twitterConnected, blueskyConnected, linkedinConnected, redditConnected].filter(Boolean).length;
                 const shouldSelectAll = selectedTargetsCount < totalConnected;
                 if (fbConnected) setPostToFacebook(shouldSelectAll);
                 if (igConnected) setPostToInstagram(shouldSelectAll);
@@ -339,10 +350,11 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
                 if (twitterConnected) setPostToTwitter(shouldSelectAll);
                 if (blueskyConnected) setPostToBluesky(shouldSelectAll);
                 if (linkedinConnected) setPostToLinkedIn(shouldSelectAll);
+                if (redditConnected) setPostToReddit(shouldSelectAll);
               }}
               className="text-xs font-semibold text-primary hover:underline cursor-pointer"
             >
-              {selectedTargetsCount < [fbConnected, igConnected, tiktokConnected, youtubeConnected, twitterConnected, blueskyConnected, linkedinConnected].filter(Boolean).length
+              {selectedTargetsCount < [fbConnected, igConnected, tiktokConnected, youtubeConnected, twitterConnected, blueskyConnected, linkedinConnected, redditConnected].filter(Boolean).length
                 ? "Select All Connected Platforms"
                 : "Deselect All"}
             </button>
@@ -409,6 +421,22 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
                 <Linkedin className="w-4 h-4 text-blue-500 shrink-0" />
                 <span className="truncate flex-1 text-left">LinkedIn</span>
                 {postToLinkedIn ? <CheckCircle2 className="w-3.5 h-3.5 text-blue-400 shrink-0" /> : null}
+              </button>
+            )}
+
+            {redditConnected && (
+              <button
+                type="button"
+                onClick={() => setPostToReddit((v) => !v)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
+                  postToReddit
+                    ? "bg-orange-500/15 border-orange-500/40 text-orange-400 shadow-sm"
+                    : "border-border bg-card text-muted-foreground hover:text-foreground opacity-60"
+                }`}
+              >
+                <MessageCircle className="w-4 h-4 text-orange-500 shrink-0" />
+                <span className="truncate flex-1 text-left">Reddit</span>
+                {postToReddit ? <CheckCircle2 className="w-3.5 h-3.5 text-orange-400 shrink-0" /> : null}
               </button>
             )}
 
@@ -550,6 +578,24 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
                 <span className="text-xs text-muted-foreground">
                   {activeStatuses.linkedin.username}
                 </span>
+              )}
+
+              {postToReddit && redditConnected && (
+                <div className="p-3.5 rounded-lg border border-orange-500/20 bg-orange-500/5 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-orange-400 flex items-center gap-1.5">
+                      <MessageCircle className="w-3.5 h-3.5" /> Reddit
+                    </span>
+                    {activeStatuses?.reddit?.username && (
+                      <span className="text-xs text-muted-foreground">
+                        u/{activeStatuses.reddit.username.replace(/^@/, "")}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Publishes as a Reddit submission using your connected account and configured subreddit destination.
+                  </p>
+                </div>
               )}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -845,6 +891,29 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
                       <a href={result.linkedin.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-xs underline ml-1">
                         View Post <ExternalLink className="w-3 h-3" />
                       </a>
+                    )}
+
+                    {/* Reddit Result */}
+                    {result?.reddit && (
+                      <div className="text-sm">
+                        {result.reddit.queued && <p className="text-muted-foreground">Reddit: queued…</p>}
+                        {result.reddit.pending && <p className="text-muted-foreground">Reddit: processing…</p>}
+                        {result.reddit.success && (
+                          <p className="text-emerald-400 flex items-center gap-1.5">
+                            <Check className="w-4 h-4" /> Reddit: Posted successfully!
+                            {result.reddit.url && (
+                              <a href={result.reddit.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-xs underline ml-1">
+                                View Post <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </p>
+                        )}
+                        {result.reddit.error && (
+                          <p className="text-destructive flex items-center gap-1.5">
+                            <AlertCircle className="w-4 h-4" /> Reddit: {result.reddit.error}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </p>
                 )}

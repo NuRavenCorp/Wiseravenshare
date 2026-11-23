@@ -1226,7 +1226,7 @@ public sealed class FunctionCompatController : ControllerBase
 
         // When no targets are explicitly flagged true, auto-select all connected platforms for the user
         var anyExplicit = request.PublishToFacebook || request.PublishToInstagram || request.PublishToTikTok ||
-            request.PublishToYouTube || request.PublishToTwitter || request.PublishToBluesky || request.PublishToLinkedIn;
+            request.PublishToYouTube || request.PublishToTwitter || request.PublishToBluesky || request.PublishToLinkedIn || request.PublishToReddit;
 
         var pubFb = request.PublishToFacebook || (!anyExplicit && userFeeds?.Facebook?.Enabled == true);
         var pubIg = request.PublishToInstagram || (!anyExplicit && userFeeds?.Instagram?.Enabled == true);
@@ -1235,6 +1235,7 @@ public sealed class FunctionCompatController : ControllerBase
         var pubTw = request.PublishToTwitter || (!anyExplicit && userFeeds?.Twitter?.Enabled == true);
         var pubBs = request.PublishToBluesky || (!anyExplicit && userFeeds?.Bluesky?.Enabled == true);
         var pubLi = request.PublishToLinkedIn || (!anyExplicit && userFeeds?.LinkedIn?.Enabled == true);
+        var pubRd = request.PublishToReddit || (!anyExplicit && userFeeds?.Reddit?.Enabled == true);
 
         var publishRequest = new PublishSocialContentRequest
         {
@@ -1255,6 +1256,7 @@ public sealed class FunctionCompatController : ControllerBase
             PublishToTwitter = pubTw,
             PublishToBluesky = pubBs,
             PublishToLinkedIn = pubLi,
+            PublishToReddit = pubRd,
             PublishToWiseRavenStream = false,
             FacebookPageId = resolvedFbPageId,
             FacebookPageAccessToken = resolvedFbPageToken,
@@ -1438,6 +1440,12 @@ public sealed class FunctionCompatController : ControllerBase
                 connected = userFeeds?.LinkedIn?.Enabled == true || statuses.Any(s => s.Platform.Equals("linkedin", StringComparison.OrdinalIgnoreCase) && s.PublishConfigured),
                 username = userFeeds?.LinkedIn?.Username,
                 status = statuses.FirstOrDefault(s => s.Platform.Equals("linkedin", StringComparison.OrdinalIgnoreCase))
+            },
+            reddit = new
+            {
+                connected = userFeeds?.Reddit?.Enabled == true || statuses.Any(s => s.Platform.Equals("reddit", StringComparison.OrdinalIgnoreCase) && s.PublishConfigured),
+                username = userFeeds?.Reddit?.Username,
+                status = statuses.FirstOrDefault(s => s.Platform.Equals("reddit", StringComparison.OrdinalIgnoreCase))
             },
             providers = statuses
         });
@@ -2430,6 +2438,7 @@ public sealed class FunctionCompatController : ControllerBase
         if (request.PublishToTwitter) platforms.Add("twitter");
         if (request.PublishToBluesky) platforms.Add("bluesky");
         if (request.PublishToLinkedIn) platforms.Add("linkedin");
+        if (request.PublishToReddit) platforms.Add("reddit");
         if (request.PublishToWiseRavenStream) platforms.Add("wiseravenstream");
         return platforms;
     }
@@ -3303,6 +3312,7 @@ public sealed class SocialCrossPostsRequest
     public bool PublishToTwitter { get; set; }
     public bool PublishToBluesky { get; set; }
     public bool PublishToLinkedIn { get; set; }
+    public bool PublishToReddit { get; set; }
     public string? TikTokUsername { get; set; }
     public string? YouTubeChannelId { get; set; }
     public bool Queue { get; set; } = true;

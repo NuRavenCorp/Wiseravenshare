@@ -81,6 +81,17 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
         isActive: Boolean(item.isActive),
       }));
 
+      // Resolve current active avatar URL
+      const currentActive =
+        globalActiveAvatar ||
+        activeAvatar ||
+        me?.avatar ||
+        me?.avatarUrl ||
+        me?.avatar_uri ||
+        localStorage.getItem("wiseravenshare_active_avatar") ||
+        localStorage.getItem("wiseravenshare_guest_avatar") ||
+        "";
+
       // Merge and deduplicate by fileName or url
       const seen = new Set();
       const combined = [];
@@ -92,11 +103,24 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
         combined.push({
           ...item,
           url: resolveMediaUrl(item.url),
-          isActive: Boolean(
-            item.isActive ||
-            (me?.avatar && (me.avatar === item.url || me.avatar.endsWith(item.fileName)))
-          ),
+          isActive: false,
         });
+      }
+
+      // Mark exactly ONE matching active avatar
+      let matchedIndex = -1;
+      if (currentActive) {
+        matchedIndex = combined.findIndex((item) =>
+          item.url === currentActive ||
+          (item.fileName && currentActive.endsWith(item.fileName)) ||
+          currentActive.includes(item.fileName)
+        );
+      }
+      if (matchedIndex === -1 && combined.length > 0) {
+        matchedIndex = 0;
+      }
+      if (matchedIndex >= 0 && combined[matchedIndex]) {
+        combined[matchedIndex].isActive = true;
       }
 
       setAvatars(combined);
@@ -264,30 +288,44 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
   const handleSelectActive = async (avatar) => {
     setSelecting(avatar.url);
     setError("");
+
+    const resolved = resolveMediaUrl(avatar.url);
+    setActiveAvatar(resolved);
+    updateActiveAvatar(resolved);
+
+    try {
+      localStorage.setItem("wiseravenshare_active_avatar", resolved);
+      localStorage.setItem("wiseravenshare_guest_avatar", resolved);
+    } catch {}
+
+    const updatedAvatars = avatars.map((a) => ({
+      ...a,
+      isActive: a.url === avatar.url || a.fileName === avatar.fileName,
+    }));
+    setAvatars(updatedAvatars);
+
+    try {
+      localStorage.setItem("wiseravenshare_saved_avatars", JSON.stringify(updatedAvatars.slice(0, 50)));
+    } catch {}
+
+    window.dispatchEvent(
+      new CustomEvent("wr_avatar_updated", {
+        detail: { avatarUrl: resolved, fileName: avatar.fileName },
+      })
+    );
+    onAvatarSelected?.(resolved);
+
     try {
       await apiClient.users.selectAvatar(currentUser?.id || "me", {
         avatarUrl: avatar.url,
         fileName: avatar.fileName,
       });
 
-      const resolved = resolveMediaUrl(avatar.url);
-      setActiveAvatar(resolved);
-      updateActiveAvatar(resolved);
-
-      setAvatars((prev) =>
-        prev.map((a) => ({
-          ...a,
-          isActive: a.url === avatar.url || a.fileName === avatar.fileName,
-        }))
-      );
-
-      setSuccessMsg("Profile avatar updated!");
+      setSuccessMsg("Active avatar updated across the platform!");
       setTimeout(() => setSuccessMsg(""), 3000);
-
-      window.dispatchEvent(new CustomEvent("wr_avatar_updated", { detail: { avatarUrl: resolved } }));
-      onAvatarSelected?.(resolved);
     } catch (err) {
-      setError(err?.message || "Could not set avatar.");
+      console.warn("Could not sync avatar to server, kept local active avatar:", err);
+      // Keep local active avatar
     } finally {
       setSelecting(null);
     }
@@ -464,10 +502,13 @@ export default function SavedAvatarPhotoContainer({ onAvatarSelected, onAttachTo
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
             {avatars.map((avatar, idx) => {
-              const isActive =
-                avatar.isActive ||
-                activeAvatar === avatar.url ||
-                (activeAvatar && avatar.fileName && activeAvatar.endsWith(avatar.fileName));
+              const currentTarget = activeAvatar || globalActiveAvatar;
+              const matchesActive = currentTarget
+                ? avatar.url === currentTarget ||
+                  (avatar.fileName && currentTarget.endsWith(avatar.fileName)) ||
+                  (avatar.fileName && currentTarget.includes(avatar.fileName))
+                : avatar.isActive;
+              const isActive = Boolean(matchesActive);
 
               return (
                 <div

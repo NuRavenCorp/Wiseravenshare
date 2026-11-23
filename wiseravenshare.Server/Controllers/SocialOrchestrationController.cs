@@ -107,6 +107,7 @@ public sealed class SocialOrchestrationController : ControllerBase
             PublishToTwitter = targetPlatforms.Contains("twitter"),
             PublishToBluesky = targetPlatforms.Contains("bluesky"),
             PublishToLinkedIn = targetPlatforms.Contains("linkedin"),
+            PublishToReddit = targetPlatforms.Contains("reddit"),
             FacebookPageId = fbPageId,
             FacebookPageAccessToken = fbPageToken,
             TikTokUsername = ttUsername,
@@ -176,7 +177,8 @@ public sealed class SocialOrchestrationController : ControllerBase
             youtube = ConnectionStatus(feeds?.YouTube),
             twitter = ConnectionStatus(feeds?.Twitter),
             bluesky = ConnectionStatus(feeds?.Bluesky),
-            linkedin = ConnectionStatus(feeds?.LinkedIn)
+            linkedin = ConnectionStatus(feeds?.LinkedIn),
+            reddit = ConnectionStatus(feeds?.Reddit)
         });
     }
 
@@ -456,6 +458,8 @@ public sealed class SocialOrchestrationController : ControllerBase
             auto.Add("bluesky");
         if (feeds?.LinkedIn?.Enabled == true)
             auto.Add("linkedin");
+        if (feeds?.Reddit?.Enabled == true)
+            auto.Add("reddit");
 
         return auto;
     }
@@ -470,6 +474,7 @@ public sealed class SocialOrchestrationController : ControllerBase
         if (req.PublishToTwitter) list.Add("twitter");
         if (req.PublishToBluesky) list.Add("bluesky");
         if (req.PublishToLinkedIn) list.Add("linkedin");
+        if (req.PublishToReddit) list.Add("reddit");
         return list;
     }
 
