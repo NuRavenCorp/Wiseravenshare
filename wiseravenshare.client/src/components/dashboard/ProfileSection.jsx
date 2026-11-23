@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import AvatarUploadContainer from "@/components/ui/AvatarUploadContainer";
+import SavedAvatarPhotoContainer from "@/components/media/SavedAvatarPhotoContainer";
 import {
   Loader2,
   Save,
@@ -375,6 +376,28 @@ export default function ProfileSection() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── Saved Avatar & Photo Upload Vault ── */}
+      <div className="space-y-4">
+        <SavedAvatarPhotoContainer
+          onAvatarSelected={(url) => {
+            setAvatar(url);
+            try {
+              const currentCache = {
+                name,
+                bio,
+                location,
+                website,
+                avatar: url,
+              };
+              localStorage.setItem(cacheKey, JSON.stringify(currentCache));
+            } catch {}
+            checkUserAuth();
+            setProfileMsg({ text: "Active avatar updated from your vault.", variant: "success" });
+            setTimeout(() => setProfileMsg(null), 3500);
+          }}
+        />
       </div>
 
       {/* ── Password change ── */}

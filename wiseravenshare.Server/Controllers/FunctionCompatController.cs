@@ -1052,20 +1052,6 @@ public sealed class FunctionCompatController : ControllerBase
 
             if (!recipientId.HasValue)
             {
-                var profileMatch = await _db.UserProfiles.AsNoTracking()
-                    .Where(x => (x.Email != null && x.Email.ToLower() == normalizedTarget)
-                             || (x.Username != null && x.Username.ToLower() == normalizedTarget)
-                             || (x.DisplayName != null && x.DisplayName.ToLower() == normalizedTarget))
-                    .Select(x => (Guid?)x.UserId)
-                    .FirstOrDefaultAsync();
-                if (profileMatch.HasValue && profileMatch.Value != Guid.Empty)
-                {
-                    recipientId = profileMatch;
-                }
-            }
-
-            if (!recipientId.HasValue)
-            {
                 var configuredUsers = ReadConfiguredUsers();
                 var match = configuredUsers.FirstOrDefault(u =>
                     string.Equals(u.Email, recipientTarget, StringComparison.OrdinalIgnoreCase) ||
@@ -1074,7 +1060,7 @@ public sealed class FunctionCompatController : ControllerBase
                 var safeEmail = match != null ? match.Email : (recipientTarget.Contains('@') ? recipientTarget : $"{recipientTarget}@wiseravenshare.com");
                 var safeName = match != null ? match.Name : (recipientTarget.Contains('@') ? recipientTarget.Split('@')[0] : recipientTarget);
 
-                var newUser = new User
+                var newUser = new Wiseravenshare.Server.Entities.User
                 {
                     Id = Guid.NewGuid(),
                     Email = safeEmail,
