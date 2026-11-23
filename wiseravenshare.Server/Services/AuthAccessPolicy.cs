@@ -97,6 +97,11 @@ public static class AuthAccessPolicy
     /// </summary>
     public static bool ArePaywallsBypassed(IConfiguration? configuration)
     {
+        if (AccessGateService.Current != null)
+        {
+            return AccessGateService.Current.IsMasterGateOpen();
+        }
+
         if (configuration is null)
         {
             return false;
@@ -164,8 +169,17 @@ public static class AuthAccessPolicy
 
     public static bool HasPaywallBypassAccess(ClaimsPrincipal? user, IConfiguration? configuration)
     {
+        if (IsAllAccessAdmin(user))
+        {
+            return true;
+        }
+
+        if (AccessGateService.Current != null && AccessGateService.Current.HasAccess(user))
+        {
+            return true;
+        }
+
         return ArePaywallsBypassed(configuration)
-            || IsAllAccessAdmin(user)
             || HasCreatorPaywallBypassRole(user);
     }
 }

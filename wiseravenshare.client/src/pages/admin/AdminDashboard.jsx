@@ -20,9 +20,11 @@ import AdminFeatureReleases from "@/components/admin/AdminFeatureReleases";
 import AdminJournalism from "@/components/admin/AdminJournalism";
 import AdminEntityCatalog from "@/components/admin/AdminEntityCatalog";
 import AdminCommandCenter from "@/components/admin/AdminCommandCenter";
+import AdminAccessGates from "@/components/admin/AdminAccessGates";
 
 const tabs = [
   { id: "command-center", label: "Command Center", icon: ShieldAlert },
+  { id: "access-gates", label: "Master Gates & Keys", icon: KeyRound },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "metrics", label: "Site Metrics", icon: BarChart3 },
   { id: "crawler", label: "Crawler", icon: Radar },
@@ -87,6 +89,7 @@ export default function AdminDashboard() {
             {tabs.find((t) => t.id === active)?.label}
           </h1>
           {active === "command-center" && <AdminCommandCenter onOpenTab={setActive} />}
+          {active === "access-gates" && <AdminAccessGates />}
           {active === "overview" && <AdminOverview />}
           {active === "metrics" && <AdminMetrics />}
           {active === "crawler" && <AdminCrawler />}

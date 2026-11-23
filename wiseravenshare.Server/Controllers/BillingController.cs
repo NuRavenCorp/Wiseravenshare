@@ -95,15 +95,17 @@ public class BillingController : ControllerBase
         if (AuthAccessPolicy.HasPaywallBypassAccess(User, _configuration))
         {
             var now = DateTime.UtcNow;
+            var isMasterGate = AccessGateService.Current?.IsMasterGateOpen() ?? true;
             return Ok(new SubscriptionStatusDto
             {
                 HasActiveSubscription = true,
-                Status = "paywall_bypass",
-                PriceId = "bypass-pass",
+                Status = isMasterGate ? "master_gate_open" : "payment_granted",
+                PriceId = "all-access-pass",
+                PlanKey = "all_gates_unlocked",
                 CurrentPeriodEnd = now.AddYears(10),
                 CancelAtPeriodEnd = false,
-                StripeCustomerId = "bypass-pass",
-                StripeSubscriptionId = "bypass-pass"
+                StripeCustomerId = "all-access-pass",
+                StripeSubscriptionId = "all-access-pass"
             });
         }
 

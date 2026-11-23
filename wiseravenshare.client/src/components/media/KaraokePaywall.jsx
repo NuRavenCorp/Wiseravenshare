@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, Lock, RefreshCw, CheckCircle, Mic, Music2, FileText, Tv2, Share2, Wand2, Star } from "lucide-react";
 import { apiClient } from "@/api/client";
 
-const KARAOKE_PRICE = 4.99;
+const KARAOKE_PRICE = 1.50;
 const PAYWALL_BYPASS_TEAM_ROLES = new Set([
   "owner",
   "producer",

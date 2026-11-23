@@ -584,6 +584,19 @@ public class SubscriptionService : ISubscriptionService
 
     private async Task HandleCheckoutCompletedAsync(CheckoutSession session, string eventId)
     {
+        var targetUserId = session.Metadata != null && session.Metadata.TryGetValue("userId", out var u) ? u : session.ClientReferenceId;
+        var targetPlan = session.Metadata != null && session.Metadata.TryGetValue("plan", out var p) ? p : "all_gates_unlocked";
+        var targetEmail = session.CustomerDetails?.Email ?? session.CustomerEmail;
+
+        if (!string.IsNullOrWhiteSpace(targetUserId) || !string.IsNullOrWhiteSpace(targetEmail))
+        {
+            AccessGateService.Current?.RecordPaymentReceived(
+                targetUserId ?? string.Empty,
+                targetEmail,
+                targetPlan,
+                "stripe_checkout_completed");
+        }
+
         if (session.Mode != "subscription" || string.IsNullOrWhiteSpace(session.SubscriptionId) || string.IsNullOrWhiteSpace(session.CustomerId))
         {
             return;
@@ -708,6 +721,13 @@ public class SubscriptionService : ISubscriptionService
                 || string.Equals(status, "trialing", StringComparison.OrdinalIgnoreCase))
             {
                 _growthService.TrackEvent(subscription.UserId.ToString(), email, "subscription_activated", metadataPayload);
+
+                // Wire payment received to grant user access to all feature gates
+                AccessGateService.Current?.RecordPaymentReceived(
+                    subscription.UserId.ToString(),
+                    email,
+                    subscription.PlanKey ?? resolvedPlanKey,
+                    "stripe_subscription_active");
 
                 // Auto-release features based on tier
                 await ReleaseFeaturesByTierAsync(subscription.UserId, subscription.PlanKey ?? string.Empty);

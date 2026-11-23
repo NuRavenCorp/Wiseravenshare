@@ -41,6 +41,7 @@ import CookiePolicy from '@/pages/CookiePolicy';
 import AdminRoute from '@/components/AdminRoute';
 import CreatePostButton from '@/components/feed/CreatePostButton';
 import { MediaExperienceProvider } from '@/components/media/MediaExperience';
+import { AccessGateProvider } from '@/components/common/FeatureGate';
 
 // Adds bottom padding when the mini player is visible so content isn't hidden
 function PlayerBarSpacer() {
@@ -127,14 +128,16 @@ function App() {
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClientInstance}>
-        <Router>
-          <PlayerProvider>
-            <ScrollToTop />
-            <AuthenticatedApp />
-            <MiniPlayerBar />
-          </PlayerProvider>
-        </Router>
-        <Toaster />
+        <AccessGateProvider>
+          <Router>
+            <PlayerProvider>
+              <ScrollToTop />
+              <AuthenticatedApp />
+              <MiniPlayerBar />
+            </PlayerProvider>
+          </Router>
+          <Toaster />
+        </AccessGateProvider>
       </QueryClientProvider>
     </AuthProvider>
   )

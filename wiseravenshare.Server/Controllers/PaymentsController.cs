@@ -53,62 +53,80 @@ public class PaymentsController : ControllerBase
                 name: "IP Protection Basic",
                 tagline: "Proof-of-creation and DMCA starter protection",
                 badge: "Entry level",
-                defaultMonthlyAmount: 5,
-                defaultAnnualAmount: 50),
+                defaultMonthlyAmount: 1.50m,
+                defaultAnnualAmount: 15.00m,
+                originalMonthlyAmount: 5.00m,
+                originalAnnualAmount: 50.00m),
             BuildCatalogPlan(
                 planId: "rights_standard",
                 name: "IP Protection Standard",
                 tagline: "Monitoring and takedown support",
                 badge: "Popular",
-                defaultMonthlyAmount: 15,
-                defaultAnnualAmount: 150),
+                defaultMonthlyAmount: 4.50m,
+                defaultAnnualAmount: 45.00m,
+                originalMonthlyAmount: 15.00m,
+                originalAnnualAmount: 150.00m),
             BuildCatalogPlan(
                 planId: "rights_pro",
                 name: "IP Protection Pro",
                 tagline: "Full IP protection and licensing support",
                 badge: "Best value",
-                defaultMonthlyAmount: 30,
-                defaultAnnualAmount: 300),
+                defaultMonthlyAmount: 9.00m,
+                defaultAnnualAmount: 90.00m,
+                originalMonthlyAmount: 30.00m,
+                originalAnnualAmount: 300.00m),
             BuildCatalogPlan(
                 planId: "creator_pro",
                 name: "Creator Pro",
                 tagline: "For solo creators shipping consistently",
                 badge: "Most popular",
-                defaultMonthlyAmount: 19,
-                defaultAnnualAmount: 190),
+                defaultMonthlyAmount: 5.70m,
+                defaultAnnualAmount: 57.00m,
+                originalMonthlyAmount: 19.00m,
+                originalAnnualAmount: 190.00m),
             BuildCatalogPlan(
                 planId: "growth_suite",
                 name: "WRS Growth Suite",
                 tagline: "For creators scaling their audience",
                 badge: "Best for growth",
-                defaultMonthlyAmount: 49,
-                defaultAnnualAmount: 490),
+                defaultMonthlyAmount: 14.70m,
+                defaultAnnualAmount: 147.00m,
+                originalMonthlyAmount: 49.00m,
+                originalAnnualAmount: 490.00m),
             BuildCatalogPlan(
                 planId: "studio_plus",
                 name: "WRS Studio Plus",
                 tagline: "For teams and agencies",
                 badge: "For teams",
-                defaultMonthlyAmount: 99,
-                defaultAnnualAmount: 990),
+                defaultMonthlyAmount: 29.70m,
+                defaultAnnualAmount: 297.00m,
+                originalMonthlyAmount: 99.00m,
+                originalAnnualAmount: 990.00m),
             BuildCatalogPlan(
                 planId: "karaoke_pro",
                 name: "WRS Karaoke Pro",
                 tagline: "AI lyric extraction and unlimited karaoke sessions",
                 badge: "New",
-                defaultMonthlyAmount: 5,
-                defaultAnnualAmount: 50),
+                defaultMonthlyAmount: 1.50m,
+                defaultAnnualAmount: 15.00m,
+                originalMonthlyAmount: 5.00m,
+                originalAnnualAmount: 50.00m),
             BuildCatalogPlan(
                 planId: "podcast_pro",
                 name: "WRS Podcast Pro Bundle",
                 tagline: "Growth Suite + Studio Plus + priority support",
                 badge: "Best value",
-                defaultMonthlyAmount: 149,
-                defaultAnnualAmount: 1490)
+                defaultMonthlyAmount: 44.70m,
+                defaultAnnualAmount: 447.00m,
+                originalMonthlyAmount: 149.00m,
+                originalAnnualAmount: 1490.00m)
         };
 
         return Ok(new
         {
             source = "stripe_config",
+            discount = "70% OFF",
+            discountPercent = 70,
             plans = catalog
         });
     }
@@ -475,8 +493,10 @@ public class PaymentsController : ControllerBase
         string name,
         string tagline,
         string badge,
-        int defaultMonthlyAmount,
-        int defaultAnnualAmount)
+        decimal defaultMonthlyAmount,
+        decimal defaultAnnualAmount,
+        decimal? originalMonthlyAmount = null,
+        decimal? originalAnnualAmount = null)
     {
         var monthlyPriceId = ResolvePriceId(planId, "monthly");
         var annualPriceId = ResolvePriceId(planId, "annual");
@@ -487,17 +507,20 @@ public class PaymentsController : ControllerBase
             name,
             tagline,
             badge,
+            discountPercent = 70,
             monthly = new
             {
                 priceId = monthlyPriceId,
                 configured = !string.IsNullOrWhiteSpace(monthlyPriceId),
-                amountUsd = defaultMonthlyAmount
+                amountUsd = defaultMonthlyAmount,
+                originalAmountUsd = originalMonthlyAmount ?? Math.Round(defaultMonthlyAmount / 0.30m, 2)
             },
             annual = new
             {
                 priceId = annualPriceId,
                 configured = !string.IsNullOrWhiteSpace(annualPriceId),
-                amountUsd = defaultAnnualAmount
+                amountUsd = defaultAnnualAmount,
+                originalAmountUsd = originalAnnualAmount ?? Math.Round(defaultAnnualAmount / 0.30m, 2)
             }
         };
     }

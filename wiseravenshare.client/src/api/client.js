@@ -1430,6 +1430,38 @@ export const apiClient = {
       });
     },
   },
+  accessGates: {
+    getStatus() {
+      return requestJson("/api/access-gates/status", { method: "GET" });
+    },
+    toggle(open, reason = "") {
+      return requestJson("/api/access-gates/toggle", {
+        method: "POST",
+        body: JSON.stringify({ open, reason }),
+      });
+    },
+    getAdminSummary() {
+      return requestJson("/api/access-gates/admin-summary", { method: "GET" });
+    },
+    grantUser(identifier, reason = "") {
+      return requestJson("/api/access-gates/grant-user", {
+        method: "POST",
+        body: JSON.stringify({ identifier, reason }),
+      });
+    },
+    revokeUser(identifier, reason = "") {
+      return requestJson("/api/access-gates/revoke-user", {
+        method: "POST",
+        body: JSON.stringify({ identifier, reason }),
+      });
+    },
+    recordPayment(userId, email, planKey = "all_gates_unlocked") {
+      return requestJson("/api/access-gates/record-payment", {
+        method: "POST",
+        body: JSON.stringify({ userId, email, planKey }),
+      });
+    },
+  },
   payments: {
     getConfig() {
       return requestJson("/api/payments/config", {

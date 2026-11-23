@@ -57,16 +57,20 @@ public sealed class FeatureReleaseController : ControllerBase
         "free", "creator-pro", "copy-standard", "copy-pro", "growth-suite", "studio-plus", "podcast-pro", "admin"
     ];
 
-    // ── Pricing display catalog ───────────────────────────────────────────────
+    // ── Pricing display catalog (70% reduced pricing) ──────────────────────────
     private static readonly PricingPlanDisplay[] PricingPlans =
     [
-        new("free",          "Free",                 "Basic social platform",                      0,     0,   "Core Platform"),
-        new("creator-pro",   "Creator Pro",          "Enhanced profiles, media, scheduling",       1900,  19000,  "Core Platform"),
-        new("growth-suite",  "Growth Suite",         "Analytics, audience insights, trending",     4900,  49000,  "Core Platform"),
-        new("studio-plus",   "Studio Plus",          "Team workflows, collaboration, roles",       9900,  99000,  "Core Platform"),
-        new("podcast-pro",   "Podcast Pro Bundle",   "Full podcast studio (Growth + Studio Plus)", 14900, 149000, "Core Platform"),
-        new("copy-standard", "Copy Standard",        "Script templates and pipeline segments",     900,   9000,   "Copywriting"),
-        new("copy-pro",      "Copy Pro",             "AI-assisted script and copy generation",     2900,  29000,  "Copywriting"),
+        new("free",          "Free",                 "Basic social platform",                      0,     0,       "Core Platform"),
+        new("creator-pro",   "Creator Pro",          "Enhanced profiles, media, scheduling",       570,   5700,    "Core Platform"),
+        new("growth-suite",  "Growth Suite",         "Analytics, audience insights, trending",     1470,  14700,   "Core Platform"),
+        new("studio-plus",   "Studio Plus",          "Team workflows, collaboration, roles",       2970,  29700,   "Core Platform"),
+        new("podcast-pro",   "Podcast Pro Bundle",   "Full podcast studio (Growth + Studio Plus)", 4470,  44700,   "Core Platform"),
+        new("copy-standard", "Copy Standard",        "Script templates and pipeline segments",     270,   2700,    "Copywriting"),
+        new("copy-pro",      "Copy Pro",             "AI-assisted script and copy generation",     870,   8700,    "Copywriting"),
+        new("karaoke-pro",   "Karaoke Pro",          "AI lyric extraction and unlimited karaoke",  150,   1500,    "Audio & Music"),
+        new("rights-basic",  "IP Protection Basic",  "Proof-of-creation and DMCA starter",         150,   1500,    "Rights & IP"),
+        new("rights-standard","IP Protection Standard","Monitoring and takedown support",           450,   4500,    "Rights & IP"),
+        new("rights-pro",    "IP Protection Pro",    "Full IP protection and licensing support",   900,   9000,    "Rights & IP"),
     ];
 
     private readonly IFeatureCompartmentService _featureCompartmentService;
@@ -513,6 +517,7 @@ public sealed class FeatureReleaseController : ControllerBase
         var lockMap      = compartments.ToDictionary(c => c.Key, c => c.IsLocked, StringComparer.OrdinalIgnoreCase);
         var userOverrideMap = await LoadUserOverrideMapAsync(userId, cancellationToken);
 
+        var masterGateAccess = AccessGateService.Current?.HasAccess(User) ?? false;
         var accessible = TierCatalog.Select(entry =>
         {
             var isLocked       = lockMap.TryGetValue(entry.Key, out var l) && l;
@@ -525,7 +530,7 @@ public sealed class FeatureReleaseController : ControllerBase
             {
                 FeatureState.Disabled => false,
                 FeatureState.Enabled => true,
-                _ => !isLocked && hasTierAccess
+                _ => masterGateAccess || (!isLocked && hasTierAccess)
             };
 
             var reason = !canAccess
@@ -559,7 +564,8 @@ public sealed class FeatureReleaseController : ControllerBase
         {
             userTier,
             isAdmin,
-            hasActiveSubscription = sub?.HasActiveSubscription ?? isAdmin,
+            masterGateOpen = AccessGateService.Current?.IsMasterGateOpen() ?? true,
+            hasActiveSubscription = masterGateAccess || (sub?.HasActiveSubscription ?? isAdmin),
             features = accessible
         });
     }

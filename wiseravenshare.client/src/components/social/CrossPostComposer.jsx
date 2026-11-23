@@ -23,6 +23,7 @@ import {
   AlertCircle,
   CheckCircle2,
 } from "lucide-react";
+import FeatureGate from "@/components/common/FeatureGate";
 
 export default function CrossPostComposer({ accounts: propAccounts, platformStatuses: propPlatformStatuses, onRefreshStatuses }) {
   const [internalStatuses, setInternalStatuses] = useState(propPlatformStatuses || null);

@@ -2612,6 +2612,7 @@ builder.Services.AddSingleton<RefreshTokenStore>();
 builder.Services.AddSingleton<LiveStreamStateStore>();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<IEvolutionService, EvolutionService>();
+builder.Services.AddSingleton<AccessGateService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IFeatureAccessPolicyService, FeatureAccessPolicyService>();
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();

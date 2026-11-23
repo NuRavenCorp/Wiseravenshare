@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Shield, FileWarning, Plus, X, Scale, Gavel, CheckCircle2, AlertTriangle, Award } from "lucide-react";
 import CertificateModal from "@/components/media/CertificateModal";
+import FeatureGate from "@/components/common/FeatureGate";
 
 const RIGHTS_TYPES = ["original_work", "licensed", "assignment", "public_domain", "fair_use"];
 const LICENSE_TYPES = ["exclusive", "non_exclusive", "creative_commons", "royalty_free", "custom"];
@@ -111,80 +112,86 @@ export default function RightsManager() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="font-heading text-2xl text-foreground flex items-center gap-2">
-            <Scale className="w-6 h-6 text-accent" /> Media Rights & Copyright
-          </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Register ownership, track licensing, and manage infringement cases for proprietary media.
-          </p>
+    <FeatureGate
+      featureKey="rights_basic"
+      featureName="IP Protection & Copyright Suite"
+      description="Register ownership, generate blockchain certificates, and file DMCA infringement reports. Reduced by 70% during our special pricing event."
+    >
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="font-heading text-2xl text-foreground flex items-center gap-2">
+              <Scale className="w-6 h-6 text-accent" /> Media Rights & Copyright
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Register ownership, track licensing, and manage infringement cases for proprietary media.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={() => { setSelectedAsset(null); setShowRightForm(true); }} variant="outline" className="gap-2">
+              <Plus className="w-4 h-4" /> Register Rights
+            </Button>
+            <Button onClick={() => { setSelectedAsset(null); setShowReportForm(true); }} className="gap-2 bg-destructive hover:bg-destructive/90">
+              <FileWarning className="w-4 h-4" /> Report Infringement
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={() => { setSelectedAsset(null); setShowRightForm(true); }} variant="outline" className="gap-2">
-            <Plus className="w-4 h-4" /> Register Rights
-          </Button>
-          <Button onClick={() => { setSelectedAsset(null); setShowReportForm(true); }} className="gap-2 bg-destructive hover:bg-destructive/90">
-            <FileWarning className="w-4 h-4" /> Report Infringement
-          </Button>
+
+        <div className="flex gap-1 border-b border-border">
+          <button
+            onClick={() => setView("registry")}
+            className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
+              view === "registry" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Shield className="w-4 h-4 inline mr-2" /> Rights Registry ({rights.length})
+          </button>
+          <button
+            onClick={() => setView("reports")}
+            className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
+              view === "reports" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Gavel className="w-4 h-4 inline mr-2" /> Infringement Cases ({reports.length})
+          </button>
         </div>
+
+        {view === "registry" && (
+          <RightsList
+            rights={rights}
+            onReport={(r) => { setSelectedAsset(r); setShowReportForm(true); }}
+            onCertificate={(r) => { setCertRight(r); setShowCertForm(true); }}
+          />
+        )}
+
+        {view === "reports" && (
+          <ReportsList reports={reports} onUpdate={updateReportStatus} />
+        )}
+
+        {showRightForm && (
+          <RightFormModal
+            assets={assets}
+            selectedAsset={selectedAsset}
+            onSave={handleSaveRight}
+            onClose={() => { setShowRightForm(false); setSelectedAsset(null); }}
+          />
+        )}
+
+        {showReportForm && (
+          <ReportFormModal
+            assets={assets}
+            selectedAsset={selectedAsset}
+            rights={rights}
+            onSave={handleSaveReport}
+            onClose={() => { setShowReportForm(false); setSelectedAsset(null); }}
+          />
+        )}
+
+        {showCertForm && certRight && (
+          <CertificateModal right={certRight} onClose={() => { setShowCertForm(false); setCertRight(null); }} />
+        )}
       </div>
-
-      <div className="flex gap-1 border-b border-border">
-        <button
-          onClick={() => setView("registry")}
-          className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
-            view === "registry" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <Shield className="w-4 h-4 inline mr-2" /> Rights Registry ({rights.length})
-        </button>
-        <button
-          onClick={() => setView("reports")}
-          className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
-            view === "reports" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <Gavel className="w-4 h-4 inline mr-2" /> Infringement Cases ({reports.length})
-        </button>
-      </div>
-
-      {view === "registry" && (
-        <RightsList
-          rights={rights}
-          onReport={(r) => { setSelectedAsset(r); setShowReportForm(true); }}
-          onCertificate={(r) => { setCertRight(r); setShowCertForm(true); }}
-        />
-      )}
-
-      {view === "reports" && (
-        <ReportsList reports={reports} onUpdate={updateReportStatus} />
-      )}
-
-      {showRightForm && (
-        <RightFormModal
-          assets={assets}
-          selectedAsset={selectedAsset}
-          onSave={handleSaveRight}
-          onClose={() => { setShowRightForm(false); setSelectedAsset(null); }}
-        />
-      )}
-
-      {showReportForm && (
-        <ReportFormModal
-          assets={assets}
-          selectedAsset={selectedAsset}
-          rights={rights}
-          onSave={handleSaveReport}
-          onClose={() => { setShowReportForm(false); setSelectedAsset(null); }}
-        />
-      )}
-
-      {showCertForm && certRight && (
-        <CertificateModal right={certRight} onClose={() => { setShowCertForm(false); setCertRight(null); }} />
-      )}
-    </div>
+    </FeatureGate>
   );
 }
 
