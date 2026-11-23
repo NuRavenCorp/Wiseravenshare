@@ -321,7 +321,12 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
   }
 
   return (
-    <Card className="bg-card border-border">
+    <FeatureGate
+      featureKey="growth_suite"
+      featureName="Growth Suite: Multi-Platform Cross-Posting"
+      description="Publish content simultaneously across Facebook, Instagram, TikTok, YouTube, X (Twitter), Bluesky, LinkedIn, and Reddit with automated formatting."
+    >
+      <Card className="bg-card border-border">
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="font-heading text-lg flex items-center gap-2">
@@ -1005,5 +1010,6 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
         )}
       </CardContent>
     </Card>
+    </FeatureGate>
   );
 }
