@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { Link } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { Button } from "@/components/ui/button";
-import { Lock, Unlock, Sparkles, Shield, ArrowRight, Loader2, KeyRound } from "lucide-react";
+import { Lock, Unlock, Sparkles, Shield, ArrowRight, Loader2 } from "lucide-react";
 
 const AccessGateContext = createContext(null);
 
@@ -131,7 +131,7 @@ export default function FeatureGate({
         </Link>
         <Link to="/admin">
           <Button variant="outline" className="w-full sm:w-auto text-xs text-muted-foreground gap-1.5">
-            <KeyRound className="w-3.5 h-3.5" />
+            <Shield className="w-3.5 h-3.5" />
             <span>Admin Access</span>
           </Button>
         </Link>

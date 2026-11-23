@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiClient } from "@/api/client";
-import { Loader2, ShieldAlert, Lock, Unlock, Users, UserCheck, UserX, PauseCircle, Activity, KeyRound } from "lucide-react";
+import { Loader2, ShieldAlert, Lock, Unlock, Users, UserCheck, UserX, PauseCircle, Activity } from "lucide-react";
 
 const quickActions = [
   { id: "access-gates", label: "Master Gates & Keys" },
@@ -213,7 +213,7 @@ export default function AdminCommandCenter({ onOpenTab }) {
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="p-5 rounded-2xl border border-border bg-card/50 space-y-3">
           <div className="flex items-center gap-2">
-            <KeyRound className="w-4 h-4 text-primary" />
+            <ShieldAlert className="w-4 h-4 text-primary" />
             <h3 className="font-heading text-lg text-foreground">Login & access posture</h3>
           </div>
           <div className="space-y-2 text-sm">
@@ -339,4 +339,3 @@ export default function AdminCommandCenter({ onOpenTab }) {
     </div>
   );
 }
-

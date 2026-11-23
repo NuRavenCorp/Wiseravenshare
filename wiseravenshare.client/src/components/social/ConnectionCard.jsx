@@ -29,7 +29,6 @@ import {
   Globe,
   ChevronDown,
   ChevronUp,
-  KeyRound,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -610,7 +609,7 @@ export default function ConnectionCard({ platform, onStatusChange }) {
               <div className="space-y-3 rounded-lg border border-border p-3.5 bg-secondary/10">
                 <div className="space-y-1">
                   <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                    <KeyRound className="w-4 h-4 text-primary" /> Sign In &amp; Connect with {label}
+                    <ShieldCheck className="w-4 h-4 text-primary" /> Sign In &amp; Connect with {label}
                   </p>
                   <p className="text-[11px] text-muted-foreground">
                     {platform === "bluesky"

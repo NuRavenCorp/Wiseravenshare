@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { Feather, LayoutDashboard, Swords, ShieldCheck, Coins, Award, ArrowLeft, Users, DollarSign, BarChart3, Radar, UserPlus, FileX, Database, TrendingUp, ShieldAlert, Rocket, Newspaper, KeyRound } from "lucide-react";
+import { Feather, LayoutDashboard, Swords, ShieldCheck, Coins, Award, ArrowLeft, Users, DollarSign, BarChart3, Radar, UserPlus, FileX, Database, TrendingUp, ShieldAlert, Rocket, Newspaper } from "lucide-react";
 import AdminOverview from "@/components/admin/AdminOverview";
 import AdminChallenges from "@/components/admin/AdminChallenges";
 import AdminTruthScores from "@/components/admin/AdminTruthScores";
@@ -24,7 +24,7 @@ import AdminAccessGates from "@/components/admin/AdminAccessGates";
 
 const tabs = [
   { id: "command-center", label: "Command Center", icon: ShieldAlert },
-  { id: "access-gates", label: "Master Gates & Keys", icon: KeyRound },
+  { id: "access-gates", label: "Master Gates & Keys", icon: ShieldCheck },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "metrics", label: "Site Metrics", icon: BarChart3 },
   { id: "crawler", label: "Crawler", icon: Radar },

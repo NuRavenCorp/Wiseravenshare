@@ -11,7 +11,6 @@ import {
   Loader2,
   Save,
   Check,
-  KeyRound,
   AlertCircle,
   Upload,
   Camera,
@@ -427,7 +426,7 @@ export default function ProfileSection() {
       {/* ── Password change ── */}
       <div className="rounded-lg border border-border bg-card p-6 space-y-5">
         <div className="flex items-center gap-2">
-          <KeyRound className="w-4 h-4 text-primary" />
+          <Lock className="w-4 h-4 text-primary" />
           <h2 className="font-semibold text-foreground">Change Password</h2>
         </div>
 
@@ -465,7 +464,7 @@ export default function ProfileSection() {
         <StatusBanner message={pwMsg?.text} variant={pwMsg?.variant} />
 
         <Button onClick={handleChangePassword} disabled={changingPw} variant="secondary">
-          {changingPw ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+          {changingPw ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
           Update Password
         </Button>
       </div>

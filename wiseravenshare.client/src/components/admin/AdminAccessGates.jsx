@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
 import {
-  KeyRound,
   Lock,
   Unlock,
   ShieldCheck,
@@ -257,7 +256,7 @@ export default function AdminAccessGates() {
         <div className="lg:col-span-2 p-6 rounded-2xl border border-border bg-card/50 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <KeyRound className="w-5 h-5 text-primary" />
+              <ShieldCheck className="w-5 h-5 text-primary" />
               <h3 className="font-heading text-lg font-bold text-foreground">
                 All-Access Key Holders ({paidGrants.length})
               </h3>
