@@ -13,6 +13,7 @@ namespace Wiseravenshare.Server.Hubs;
 public sealed class GoLiveHub : Hub
 {
     private static readonly ConcurrentDictionary<string, int> ViewerCounts = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, HashSet<string>> ConnectionRooms = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, (int Peak, int Comments, int Reactions)> RoomStats = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, HashSet<string>> BannedUsers = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, int> SlowModeSeconds = new(StringComparer.OrdinalIgnoreCase);
@@ -24,8 +25,17 @@ public sealed class GoLiveHub : Hub
     private async Task HandleJoinAsync(string id)
     {
         var room = Normalize(id);
+        var rooms = ConnectionRooms.GetOrAdd(Context.ConnectionId, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var wasAdded = false;
+        lock (rooms)
+        {
+            wasAdded = rooms.Add(room);
+        }
+
         await Groups.AddToGroupAsync(Context.ConnectionId, Group(room));
-        var count = ViewerCounts.AddOrUpdate(room, 1, (_, c) => c + 1);
+        var count = wasAdded
+            ? ViewerCounts.AddOrUpdate(room, 1, (_, c) => c + 1)
+            : GetCurrentViewerCount(room);
 
         RecordViewerPeak(room, count);
 
@@ -39,11 +49,34 @@ public sealed class GoLiveHub : Hub
     private async Task HandleLeaveAsync(string id)
     {
         var room = Normalize(id);
+        if (ConnectionRooms.TryGetValue(Context.ConnectionId, out var rooms))
+        {
+            lock (rooms)
+            {
+                rooms.Remove(room);
+            }
+        }
+
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, Group(room));
         var count = ViewerCounts.AddOrUpdate(room, 0, (_, c) => Math.Max(0, c - 1));
 
-        await Clients.Group(Group(Group(room))).SendAsync("ViewerCount", count);
+        await Clients.Group(Group(room)).SendAsync("ViewerCount", count);
         await Clients.Group(Group(room)).SendAsync("ViewerCountUpdated", count);
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        if (ConnectionRooms.TryRemove(Context.ConnectionId, out var rooms))
+        {
+            foreach (var room in rooms)
+            {
+                var count = ViewerCounts.AddOrUpdate(room, 0, (_, c) => Math.Max(0, c - 1));
+                await Clients.Group(Group(room)).SendAsync("ViewerCount", count);
+                await Clients.Group(Group(room)).SendAsync("ViewerCountUpdated", count);
+            }
+        }
+
+        await base.OnDisconnectedAsync(exception);
     }
 
     public async Task SendReaction(string roomId, string emoji)

@@ -191,6 +191,7 @@ export default function GoLivePage() {
   const [peakViewers, setPeakViewers] = useState(0);
   const [summaryData, setSummaryData] = useState(null);
   const [activeStreamId, setActiveStreamId] = useState("");
+  const activeRoomId = (activeStreamId || roomId).toUpperCase();
 
   // References
   const previewRef = useRef(null);
@@ -466,21 +467,21 @@ export default function GoLivePage() {
       .start()
       .then(() => {
         setHubReady(true);
-        return hub.invoke("JoinRoom", roomId);
+        return hub.invoke("JoinRoom", activeRoomId);
       })
       .catch(() => setHubReady(false));
 
     hub.onreconnected(() => {
       setHubReady(true);
-      hub.invoke("JoinRoom", roomId).catch(() => {});
+      hub.invoke("JoinRoom", activeRoomId).catch(() => {});
     });
 
     hub.onclose(() => setHubReady(false));
 
     return () => {
-      hub.invoke("LeaveRoom", roomId).catch(() => {}).finally(() => hub.stop());
+      hub.invoke("LeaveRoom", activeRoomId).catch(() => {}).finally(() => hub.stop());
     };
-  }, [roomId, toast]);
+  }, [activeRoomId, toast]);
 
   // Initial preview start
   useEffect(() => {
@@ -649,7 +650,7 @@ export default function GoLivePage() {
       setRecPhase("done");
       setActiveStreamId("");
       try {
-        const summary = await apiClient.live.end(currentStreamIdRef.current || roomId);
+        const summary = await apiClient.live.end(currentStreamIdRef.current || activeRoomId);
         setSummaryData(summary);
       } catch {}
     }
@@ -662,7 +663,7 @@ export default function GoLivePage() {
     if (!msg || !hubRef.current || !hubReady) return;
     setChatInput("");
     try {
-      await hubRef.current.invoke("SendComment", roomId, msg);
+      await hubRef.current.invoke("SendComment", activeRoomId, msg);
     } catch {
       /* ignore */
     }
@@ -671,7 +672,7 @@ export default function GoLivePage() {
   const handleSendReaction = async (emoji) => {
     if (!hubRef.current || !hubReady) return;
     try {
-      await hubRef.current.invoke("SendReaction", roomId, emoji);
+      await hubRef.current.invoke("SendReaction", activeRoomId, emoji);
     } catch {
       /* ignore */
     }
@@ -680,13 +681,13 @@ export default function GoLivePage() {
   // 10. Moderation Actions
   const handlePinComment = async (comment) => {
     try {
-      await hubRef.current?.invoke("PinComment", roomId, comment);
+      await hubRef.current?.invoke("PinComment", activeRoomId, comment);
     } catch {}
   };
 
   const handleDeleteComment = async (commentId) => {
     try {
-      await hubRef.current?.invoke("DeleteComment", roomId, commentId);
+      await hubRef.current?.invoke("DeleteComment", activeRoomId, commentId);
     } catch {}
   };
 
@@ -695,7 +696,7 @@ export default function GoLivePage() {
     const confirm = window.confirm("Are you sure you want to mute this user from commenting?");
     if (!confirm) return;
     try {
-      await hubRef.current?.invoke("BanUserFromStream", roomId, targetUserId);
+      await hubRef.current?.invoke("BanUserFromStream", activeRoomId, targetUserId);
     } catch {}
   };
 
@@ -706,7 +707,7 @@ export default function GoLivePage() {
       const guestKey = `cohost_${generateStreamId().slice(0, 8)}`;
       await hubRef.current?.invoke(
         "ApproveCoHost",
-        roomId,
+        activeRoomId,
         guestJoinRequest.ConnectionId || guestJoinRequest.connectionId,
         guestKey
       );
@@ -719,7 +720,7 @@ export default function GoLivePage() {
   const handleRemoveGuest = async () => {
     if (!activeGuest) return;
     try {
-      await hubRef.current?.invoke("RemoveCoHost", roomId, activeGuest.guestStreamKey);
+      await hubRef.current?.invoke("RemoveCoHost", activeRoomId, activeGuest.guestStreamKey);
       setActiveGuest(null);
       toast({ title: "Co-host removed." });
     } catch {}
@@ -727,13 +728,14 @@ export default function GoLivePage() {
 
   const handleRequestToJoin = async () => {
     try {
-      await hubRef.current?.invoke("RequestToJoin", roomId);
+      await hubRef.current?.invoke("RequestToJoin", activeRoomId);
       toast({ title: "Request sent", description: "The broadcast host has been notified." });
     } catch {}
   };
 
   const copyShareLink = () => {
-    const url = `${window.location.origin}/go-live/${roomId}`;
+    const shareTarget = activeStreamId || roomId;
+    const url = `${window.location.origin}/go-live/${encodeURIComponent(shareTarget)}`;
     navigator.clipboard.writeText(url).then(() => {
       setCopiedKey(true);
       toast({ title: "Stream link copied to clipboard!" });
@@ -841,8 +843,8 @@ export default function GoLivePage() {
           {/* ── MODE 1: SMART TV LEAN-BACK PLAYER ─────────────────────────────── */}
           {mode === "tv" && (
             <LiveTvPlayer
-              streamId={roomId}
-              hlsUrl={hlsUrl || `/api/live/${roomId}/index.m3u8`}
+              streamId={activeRoomId}
+              hlsUrl={hlsUrl || `/api/live/${encodeURIComponent(activeRoomId)}/playback`}
               title={streamTitle}
               onExit={() => setMode("broadcast")}
             />

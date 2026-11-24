@@ -17,8 +17,12 @@ export default function LiveTvPlayer({ streamId, hlsUrl, title, onExit }) {
     if (!video || !hlsUrl) return;
 
     let hlsInstance = null;
+    const isHlsStream = /\.m3u8($|\?)/i.test(hlsUrl);
 
-    if (Hls.isSupported()) {
+    if (!isHlsStream) {
+      video.src = hlsUrl;
+      video.play().catch(() => {});
+    } else if (Hls.isSupported()) {
       const hls = new Hls({
         lowLatencyMode: true,
         liveSyncDurationCount: 2,
@@ -39,6 +43,10 @@ export default function LiveTvPlayer({ streamId, hlsUrl, title, onExit }) {
     return () => {
       if (hlsInstance) {
         hlsInstance.destroy();
+      }
+      if (video) {
+        video.removeAttribute("src");
+        video.load();
       }
     };
   }, [hlsUrl]);

@@ -2227,7 +2227,12 @@ CREATE INDEX IF NOT EXISTS idx_regional_trend_country_cat
 
 // â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 var clientOrigin = builder.Configuration["CLIENT_ORIGIN"];
+var mobileClientOrigin = builder.Configuration["MOBILE_CLIENT_ORIGIN"];
 var configuredClientOrigins = (clientOrigin ?? string.Empty)
+    .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
+var configuredMobileClientOrigins = (mobileClientOrigin ?? string.Empty)
     .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
@@ -2235,6 +2240,8 @@ var fallbackClientOrigins = new[]
 {
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
     "https://localhost:5173",
     "https://127.0.0.1:5173",
     "http://localhost:5242",
@@ -2245,9 +2252,11 @@ var fallbackClientOrigins = new[]
     "https://www.wise-ravens.com",
     "https://cdn.wise-ravens.com",
     "https://wiseravenshare.com",
-    "https://www.wiseravenshare.com"
+    "https://www.wiseravenshare.com",
+    "https://nuravencorp.github.io"
 };
 var allowedClientOrigins = configuredClientOrigins
+    .Concat(configuredMobileClientOrigins)
     .Concat(fallbackClientOrigins)
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
@@ -3606,6 +3615,15 @@ var latestEntryJsAsset = frontendDistExists
     ? ResolveLatestFrontendAsset(frontendAssetsPath, "index-*.js")
     : null;
 
+var configuredMobileDistPath = app.Configuration["MobileWeb:DistPath"] ?? app.Configuration["MOBILE_WEB_DIST_PATH"];
+var mobileDistPath = !string.IsNullOrWhiteSpace(configuredMobileDistPath)
+    ? Path.GetFullPath(configuredMobileDistPath)
+    : Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "..", "wiseravenshare-mobile", "01-wiseravenshare-mobile-web", "dist"));
+var mobileDistExists = Directory.Exists(mobileDistPath);
+var mobileIndexFile = mobileDistExists
+    ? ResolvePreferredFrontendIndex(mobileDistPath)
+    : "index.html";
+
 static string ResolvePreferredFrontendIndex(string distPath)
 {
     var fileNames = Directory.EnumerateFiles(distPath, "*", SearchOption.TopDirectoryOnly)
@@ -3665,6 +3683,23 @@ static bool IsSensitiveRequestPath(PathString requestPath)
     return fileName.StartsWith(".env", StringComparison.OrdinalIgnoreCase)
         || string.Equals(fileName, "secrets.json", StringComparison.OrdinalIgnoreCase)
         || string.Equals(fileName, "launchSettings.json", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsMobileUserAgent(string? userAgent)
+{
+    if (string.IsNullOrWhiteSpace(userAgent))
+    {
+        return false;
+    }
+
+    var ua = userAgent.Trim();
+    return ua.Contains("Android", StringComparison.OrdinalIgnoreCase)
+        || ua.Contains("iPhone", StringComparison.OrdinalIgnoreCase)
+        || ua.Contains("iPad", StringComparison.OrdinalIgnoreCase)
+        || ua.Contains("iPod", StringComparison.OrdinalIgnoreCase)
+        || ua.Contains("Windows Phone", StringComparison.OrdinalIgnoreCase)
+        || ua.Contains("Mobile", StringComparison.OrdinalIgnoreCase)
+        || ua.Contains("Mobi", StringComparison.OrdinalIgnoreCase);
 }
 
 app.Use(async (context, next) =>
@@ -3746,6 +3781,73 @@ app.Use(async (context, next) =>
         if (hasRecursiveReturnTo || queryRaw.Length > 4096)
         {
             context.Response.Redirect(path);
+            return;
+        }
+    }
+
+    await next();
+});
+app.Use(async (context, next) =>
+{
+    if (!mobileDistExists)
+    {
+        await next();
+        return;
+    }
+
+    if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+    {
+        await next();
+        return;
+    }
+
+    if (!IsMobileUserAgent(context.Request.Headers.UserAgent.ToString()))
+    {
+        await next();
+        return;
+    }
+
+    var requestPath = context.Request.Path.Value ?? string.Empty;
+    if (requestPath.StartsWith("/api", StringComparison.OrdinalIgnoreCase)
+        || requestPath.StartsWith("/hubs", StringComparison.OrdinalIgnoreCase)
+        || requestPath.StartsWith("/uploads", StringComparison.OrdinalIgnoreCase)
+        || requestPath.StartsWith("/health", StringComparison.OrdinalIgnoreCase)
+        || requestPath.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase))
+    {
+        await next();
+        return;
+    }
+
+    var normalizedRelative = requestPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+    if (string.IsNullOrWhiteSpace(normalizedRelative))
+    {
+        normalizedRelative = mobileIndexFile;
+    }
+
+    var mobileCandidate = Path.GetFullPath(Path.Combine(mobileDistPath, normalizedRelative));
+    var inMobileRoot = mobileCandidate.StartsWith(mobileDistPath, StringComparison.OrdinalIgnoreCase);
+    if (inMobileRoot && File.Exists(mobileCandidate))
+    {
+        var contentTypeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+        if (!contentTypeProvider.TryGetContentType(mobileCandidate, out var contentType))
+        {
+            contentType = "application/octet-stream";
+        }
+
+        context.Response.Headers.CacheControl = "public,max-age=300";
+        context.Response.ContentType = contentType;
+        await context.Response.SendFileAsync(mobileCandidate);
+        return;
+    }
+
+    if (!Path.HasExtension(requestPath))
+    {
+        var mobileIndexPath = Path.Combine(mobileDistPath, mobileIndexFile);
+        if (File.Exists(mobileIndexPath))
+        {
+            context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            context.Response.ContentType = "text/html; charset=utf-8";
+            await context.Response.SendFileAsync(mobileIndexPath);
             return;
         }
     }
