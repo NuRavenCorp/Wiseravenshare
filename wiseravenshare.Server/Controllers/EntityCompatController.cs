@@ -1493,6 +1493,7 @@ private async Task<EntityFilterResponse> FilterJournalismReportsAsync(
     Guid userId, JsonElement body, int limit, CancellationToken cancellationToken)
 {
     await EnsureJournalismReportStorageAsync(cancellationToken);
+    await PromotePendingJournalismReportsForCirculationAsync(cancellationToken);
     var status = ReadString(body, "query.verification_status");
     var statusIn = TryReadStringArray(body, "query.verification_status.$in");
     var sort = ReadString(body, "options.sort");
@@ -1529,6 +1530,49 @@ private async Task<EntityFilterResponse> FilterJournalismReportsAsync(
     var rows = await query.Take(limit).ToListAsync(cancellationToken);
     var items = rows.Select(MapJournalismReportRow).Cast<object>().ToList();
     return new EntityFilterResponse { Items = items, Total = items.Count };
+}
+
+private async Task PromotePendingJournalismReportsForCirculationAsync(CancellationToken cancellationToken)
+{
+    var pending = await _db.CompatJournalismReports
+        .AsNoTracking()
+        .Where(r => r.VerificationStatus == "under_review")
+        .OrderBy(r => r.CreatedDate)
+        .Take(100)
+        .Select(r => new
+        {
+            r.Id,
+            r.PostId,
+            r.Headline,
+            r.Description,
+            r.SourceUrl,
+            r.Region
+        })
+        .ToListAsync(cancellationToken);
+
+    foreach (var report in pending)
+    {
+        try
+        {
+            await _journalismIntegrityAgent.EvaluateAndApplyAsync(
+                new JournalismIntegrityEvaluationRequest
+                {
+                    ReportId = report.Id,
+                    PostId = report.PostId,
+                    Headline = report.Headline,
+                    Description = report.Description,
+                    SourceUrl = report.SourceUrl,
+                    Region = report.Region,
+                    ApplyDecision = true
+                },
+                canApplyDecision: true,
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Pending journalism report {ReportId} could not be promoted for circulation.", report.Id);
+        }
+    }
 }
 
 private async Task<IActionResult> CreateJournalismReportCompat(JsonElement payload)

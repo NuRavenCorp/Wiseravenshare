@@ -27,17 +27,23 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
     private static readonly Regex WordRegex = new(@"[\p{L}\p{N}]+", RegexOptions.Compiled);
 
     private readonly AppDbContext _db;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<JournalismIntegrityAgentService> _logger;
     private readonly NuRavenCorpLlmChatService _nuRavenCorpLlmChatService;
+    private readonly IJournalismAgentRegistryService _journalismAgentRegistryService;
 
     public JournalismIntegrityAgentService(
         AppDbContext db,
+        IConfiguration configuration,
         ILogger<JournalismIntegrityAgentService> logger,
-        NuRavenCorpLlmChatService nuRavenCorpLlmChatService)
+        NuRavenCorpLlmChatService nuRavenCorpLlmChatService,
+        IJournalismAgentRegistryService journalismAgentRegistryService)
     {
         _db = db;
+        _configuration = configuration;
         _logger = logger;
         _nuRavenCorpLlmChatService = nuRavenCorpLlmChatService;
+        _journalismAgentRegistryService = journalismAgentRegistryService;
     }
 
     public async Task<JournalismIntegrityEvaluationResult> EvaluateAsync(
@@ -269,8 +275,14 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
                 : "rejected";
         var recommended = heuristicRecommended;
         var approvalScore = Math.Round(score, 2);
+        var registration = await _journalismAgentRegistryService.EnsureRegisteredAsync(cancellationToken);
+        if (!registration.IsRegistered)
+        {
+            factors.Add(Factor("journalism_agent_registration", -12, "Assigned journalism agent registration is unavailable."));
+            messages.Add($"NuRavenCorp journalism agent registration is unavailable: {registration.FailureReason ?? "unknown reason"}.");
+        }
 
-        var llmDecision = await TryEvaluateViaNuRavenCorpLlmAsync(material, cancellationToken);
+        var llmDecision = await TryEvaluateViaNuRavenCorpLlmAsync(material, registration, cancellationToken);
         if (llmDecision is not null)
         {
             recommended = llmDecision.RecommendedStatus;
@@ -283,6 +295,20 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
             messages.Add("NuRavenCorpLLM unavailable; fallback integrity heuristics applied.");
         }
 
+        if (recommended == "verified" && !registration.IsRegistered)
+        {
+            recommended = "under_review";
+            messages.Add("Verification held: assigned NuRavenCorp journalism agent is not registered.");
+        }
+
+        var instantVerifyEnabled = IsInstantVerificationEnabled();
+        if (instantVerifyEnabled && registration.IsRegistered)
+        {
+            recommended = "verified";
+            approvalScore = Math.Max(approvalScore, 96);
+            messages.Add("Assigned journalism agent instant-verified this report for immediate circulation.");
+        }
+
         return new JournalismIntegrityEvaluationResult
         {
             ReportId = material.ReportId,
@@ -293,8 +319,15 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
             Reasons = factors.OrderBy(f => f.Weight).Take(6).Select(f => f.Reason).ToList(),
             Factors = factors.OrderBy(f => f.Name).ToList(),
             Messages = messages,
+            AgentRegistration = registration,
             EvaluatedAtUtc = DateTime.UtcNow
         };
+    }
+
+    private bool IsInstantVerificationEnabled()
+    {
+        var configured = _configuration["Journalism:InstantVerifyAssignedAgent"] ?? "true";
+        return bool.TryParse(configured.Trim(), out var enabled) ? enabled : true;
     }
 
     private async Task<FactorEvaluation> EvaluateRepetitionAsync(
@@ -537,7 +570,7 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
             row.QueueStatus = "queued_for_consumption";
             row.IsImmediatelyAvailable = true;
             row.ApprovedAtUtc = DateTime.UtcNow;
-            row.ApprovedBy = "nuravencorpllm-agent";
+            row.ApprovedBy = result.AgentRegistration?.DisplayKey ?? "nuravencorpllm-agent";
             return;
         }
 
@@ -552,6 +585,7 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
 
     private async Task<NuRavenCorpDecision?> TryEvaluateViaNuRavenCorpLlmAsync(
         JournalismMaterial material,
+        JournalismAgentRegistrationResult registration,
         CancellationToken cancellationToken)
     {
         var prompt = string.Join("\n", [
@@ -559,6 +593,9 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
             "Decide if this report should be available to end users immediately.",
             "Respond with JSON only and no markdown.",
             "Schema: {\"recommended_status\":\"verified|under_review|rejected\",\"overall_score\":0-100,\"reason\":\"short reason\"}",
+            $"Registered journalism approval agent id: {registration.AgentId ?? "unknown"}",
+            $"Registered journalism approval agent name: {registration.AgentName ?? "unknown"}",
+            $"Registered journalism approval persona: {registration.Persona ?? "unknown"}",
             $"Headline: {material.Headline}",
             $"Description: {material.Description}",
             $"Source URL: {material.SourceUrl}",
@@ -698,6 +735,7 @@ public sealed class JournalismIntegrityEvaluationResult
     public List<string> Reasons { get; set; } = [];
     public List<IntegrityFactor> Factors { get; set; } = [];
     public List<string> Messages { get; set; } = [];
+    public JournalismAgentRegistrationResult? AgentRegistration { get; set; }
     public bool AppliedToReport { get; set; }
     public DateTime EvaluatedAtUtc { get; set; }
 }

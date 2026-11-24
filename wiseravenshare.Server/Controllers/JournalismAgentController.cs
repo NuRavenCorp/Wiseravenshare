@@ -73,6 +73,16 @@ public sealed class JournalismAgentController : ControllerBase
                     reason = f.Reason
                 }),
                 messages = result.Messages,
+                agentRegistration = result.AgentRegistration is null ? null : new
+                {
+                    isRegistered = result.AgentRegistration.IsRegistered,
+                    agentId = result.AgentRegistration.AgentId,
+                    agentName = result.AgentRegistration.AgentName,
+                    persona = result.AgentRegistration.Persona,
+                    source = result.AgentRegistration.Source,
+                    failureReason = result.AgentRegistration.FailureReason,
+                    registeredAtUtc = result.AgentRegistration.RegisteredAtUtc
+                },
                 appliedToReport = result.AppliedToReport,
                 evaluatedAtUtc = result.EvaluatedAtUtc
             });

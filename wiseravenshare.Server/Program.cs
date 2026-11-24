@@ -2920,6 +2920,7 @@ if (enableHostedServices)
     builder.Services.AddHostedService(sp => sp.GetRequiredService<Wiseravenshare.Server.Services.Currency.CurrencyAgentService>());
 }
 builder.Services.AddScoped<ITruthEngineService, TruthEngineService>();
+builder.Services.AddScoped<IJournalismAgentRegistryService, JournalismAgentRegistryService>();
 builder.Services.AddScoped<IJournalismIntegrityAgentService, JournalismIntegrityAgentService>();
 builder.Services.AddHttpClient("ExternalVerifier");
 builder.Services.AddSingleton<IExternalVerificationService, ExternalVerificationService>();
