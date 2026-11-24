@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/AuthContext";
-import { useBrandLogo } from "@/lib/branding";
 import { apiClient, resolveMediaUrl } from "@/api/client";
 import {
   Camera,
@@ -19,7 +18,6 @@ import { Button } from "@/components/ui/button";
 
 export default function TopLeftAvatarLogoContainer({ className = "" }) {
   const { user, isAuthenticated, activeAvatar, updateActiveAvatar, checkUserAuth } = useAuth();
-  const brandLogoUrl = useBrandLogo();
   const fileInputRef = useRef(null);
 
   // States
@@ -54,12 +52,23 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
   const videoRef = useRef(null);
   const mediaStreamRef = useRef(null);
 
+  const pickUserAvatar = useCallback((candidateUser) => {
+    if (!candidateUser) return "";
+    return (
+      candidateUser.avatar ||
+      candidateUser.avatarUrl ||
+      candidateUser.avatar_uri ||
+      candidateUser.avatar_url ||
+      candidateUser.profilePhotoUrl ||
+      candidateUser.profile_photo_url ||
+      ""
+    );
+  }, []);
+
   const resolveCurrentAvatar = useCallback(() => {
     const fromUser =
       activeAvatar ||
-      user?.avatar ||
-      user?.avatarUrl ||
-      user?.avatar_uri ||
+      pickUserAvatar(user) ||
       "";
 
     if (fromUser) {
@@ -83,7 +92,7 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
     } catch {
       return "";
     }
-  }, [activeAvatar, user?.avatar, user?.avatarUrl, user?.avatar_uri]);
+  }, [activeAvatar, user, pickUserAvatar]);
 
   // Sync avatar on mount, when auth state changes, or when activeAvatar changes
   useEffect(() => {
@@ -122,8 +131,9 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
     };
 
     const handleAvatarUpdated = (e) => {
-      if (e.detail?.avatarUrl) {
-        setAvatarUrl(e.detail.avatarUrl);
+      const nextAvatar = e.detail?.avatarUrl || e.detail?.avatar || e.detail?.url || "";
+      if (nextAvatar) {
+        setAvatarUrl(nextAvatar);
       } else {
         setAvatarUrl(resolveCurrentAvatar());
       }
@@ -329,12 +339,6 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
                 setAvatarUrl("");
               }}
             />
-          ) : brandLogoUrl ? (
-            <img
-              src={resolveMediaUrl(brandLogoUrl)}
-              alt="WiseRavenShare Logo"
-              className="w-full h-full object-cover rounded-full"
-            />
           ) : (
             <User className="w-6 h-6 text-primary" />
           )}
@@ -431,8 +435,6 @@ export default function TopLeftAvatarLogoContainer({ className = "" }) {
               <div className="w-16 h-16 rounded-full border-2 border-primary/40 overflow-hidden shrink-0 bg-background flex items-center justify-center">
                 {avatarUrl ? (
                   <img src={resolveMediaUrl(avatarUrl)} alt="Current Avatar" className="w-full h-full object-cover" />
-                ) : brandLogoUrl ? (
-                  <img src={resolveMediaUrl(brandLogoUrl)} alt="Default Logo" className="w-full h-full object-cover" />
                 ) : (
                   <User className="w-8 h-8 text-muted-foreground" />
                 )}
