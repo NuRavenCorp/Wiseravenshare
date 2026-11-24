@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { apiClient } from "@/api/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -50,7 +50,10 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
   const [result, setResult] = useState(null);
   const [jobId, setJobId] = useState("");
   const [jobState, setJobState] = useState("");
-  const [initializedTargets, setInitializedTargets] = useState(false);
+
+  // Tracks which platforms were connected on the previous render so we can
+  // detect and auto-enable any newly connected platform.
+  const prevConnectedRef = useRef(new Set());
 
   // Sync prop changes
   useEffect(() => {
@@ -131,39 +134,50 @@ export default function CrossPostComposer({ accounts: propAccounts, platformStat
   const tiktokAccounts = activeAccounts?.tiktok?.accounts || [];
   const youtubeChannels = activeAccounts?.youtube?.channels || [];
 
-  // Initialize targets once connections are resolved
+  // Auto-enable toggles for any platform that just became connected.
+  // Runs on every change to the connected set so it works both on initial load
+  // AND when the user connects a new account after the page has already loaded.
   useEffect(() => {
-    if (hasAnyConnection && !initializedTargets) {
-      if (fbConnected) setPostToFacebook(true);
-      if (igConnected) setPostToInstagram(true);
-      if (tiktokConnected) setPostToTikTok(true);
-      if (youtubeConnected) setPostToYouTube(true);
-      if (twitterConnected) setPostToTwitter(true);
-      if (blueskyConnected) setPostToBluesky(true);
-      if (linkedinConnected) setPostToLinkedIn(true);
-      if (redditConnected) setPostToReddit(true);
+    const platformMap = [
+      ["facebook",  fbConnected,       setPostToFacebook],
+      ["instagram", igConnected,       setPostToInstagram],
+      ["tiktok",    tiktokConnected,   setPostToTikTok],
+      ["youtube",   youtubeConnected,  setPostToYouTube],
+      ["twitter",   twitterConnected,  setPostToTwitter],
+      ["bluesky",   blueskyConnected,  setPostToBluesky],
+      ["linkedin",  linkedinConnected, setPostToLinkedIn],
+      ["reddit",    redditConnected,   setPostToReddit],
+    ];
 
-      setPageId((curr) => curr || activeAccounts?.facebook?.selectedPageId || fbPages[0]?.id || "");
-      setTiktokUsername((curr) => curr || activeAccounts?.tiktok?.selectedUsername || tiktokAccounts[0]?.username || "");
-      setYouTubeChannelId((curr) => curr || activeAccounts?.youtube?.selectedChannelId || youtubeChannels[0]?.id || "");
+    const prev = prevConnectedRef.current;
+    const next = new Set();
 
-      setInitializedTargets(true);
+    for (const [key, connected, setter] of platformMap) {
+      if (connected) {
+        next.add(key);
+        // Enable toggle for any platform that is newly connected
+        if (!prev.has(key)) {
+          setter(true);
+        }
+      }
     }
+
+    // Auto-fill per-platform details for newly connected accounts
+    if (!prev.has("facebook") && fbConnected) {
+      setPageId((curr) => curr || activeAccounts?.facebook?.selectedPageId || fbPages[0]?.id || "");
+    }
+    if (!prev.has("tiktok") && tiktokConnected) {
+      setTiktokUsername((curr) => curr || activeAccounts?.tiktok?.selectedUsername || tiktokAccounts[0]?.username || "");
+    }
+    if (!prev.has("youtube") && youtubeConnected) {
+      setYouTubeChannelId((curr) => curr || activeAccounts?.youtube?.selectedChannelId || youtubeChannels[0]?.id || "");
+    }
+
+    prevConnectedRef.current = next;
   }, [
-    hasAnyConnection,
-    initializedTargets,
-    fbConnected,
-    igConnected,
-    tiktokConnected,
-    youtubeConnected,
-    twitterConnected,
-    blueskyConnected,
-    linkedinConnected,
-    redditConnected,
-    activeAccounts,
-    fbPages,
-    tiktokAccounts,
-    youtubeChannels,
+    fbConnected, igConnected, tiktokConnected, youtubeConnected,
+    twitterConnected, blueskyConnected, linkedinConnected, redditConnected,
+    activeAccounts, fbPages, tiktokAccounts, youtubeChannels,
   ]);
 
   // Polling for queued background jobs

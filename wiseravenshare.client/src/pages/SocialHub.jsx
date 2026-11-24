@@ -22,6 +22,7 @@ const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "twitter", "blu
 
 export default function SocialHub() {
   const [platformStatuses, setPlatformStatuses] = useState({});
+  const [platformAccounts, setPlatformAccounts] = useState({});
   // Don't block the page on this — load statuses in the background.
   // The Feed tab renders immediately; Connect tab shows statuses when ready.
 
@@ -34,9 +35,22 @@ export default function SocialHub() {
     }
   }, []);
 
+  const fetchAccounts = useCallback(async () => {
+    try {
+      const res = await apiClient.functions.invoke("SocialGetAccounts");
+      if (res?.data) setPlatformAccounts(res.data);
+    } catch {
+      // non-critical — CrossPostComposer will fall back to its own fetch
+    }
+  }, []);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.allSettled([fetchStatuses(), fetchAccounts()]);
+  }, [fetchStatuses, fetchAccounts]);
+
   useEffect(() => {
-    fetchStatuses();
-  }, [fetchStatuses]);
+    refreshAll();
+  }, [refreshAll]);
 
   const connectedCount = Object.values(platformStatuses).filter(s => s?.connected).length;
 
@@ -131,7 +145,7 @@ export default function SocialHub() {
                   <ConnectionCard
                     key={platform}
                     platform={platform}
-                    onStatusChange={fetchStatuses}
+                    onStatusChange={refreshAll}
                   />
                 ))}
               </div>
@@ -142,7 +156,7 @@ export default function SocialHub() {
             <PostComposer />
           </TabsContent>
           <TabsContent value="push">
-            <CrossPostComposer platformStatuses={platformStatuses} onRefreshStatuses={fetchStatuses} />
+            <CrossPostComposer platformStatuses={platformStatuses} accounts={platformAccounts} onRefreshStatuses={refreshAll} />
           </TabsContent>
           <TabsContent value="pull">
             <ImportPanel />
