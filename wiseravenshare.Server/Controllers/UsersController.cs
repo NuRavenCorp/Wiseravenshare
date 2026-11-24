@@ -381,6 +381,26 @@ public sealed class UsersController : ControllerBase
         var allowedExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
         var avatarMap = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
+        // Include current user avatar first — this covers blob-stored avatars that
+        // won't appear in local folder scans but are the user's active photo.
+        if (user != null && !string.IsNullOrWhiteSpace(user.Avatar))
+        {
+            var activeAvatarUrl = user.Avatar.Trim();
+            var activeFileName = Path.GetFileName(activeAvatarUrl);
+            if (!string.IsNullOrWhiteSpace(activeFileName)
+                && allowedExts.Contains(Path.GetExtension(activeFileName)))
+            {
+                avatarMap[activeFileName] = new
+                {
+                    fileName = activeFileName,
+                    url = activeAvatarUrl,
+                    size = 0L,
+                    createdAt = DateTime.UtcNow,
+                    isActive = true
+                };
+            }
+        }
+
         foreach (var dir in localFolders)
         {
             if (!Directory.Exists(dir)) continue;
