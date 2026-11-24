@@ -16,6 +16,7 @@ import {
   Camera,
   Trash2,
   Link as LinkIcon,
+  Lock,
   User as UserIcon,
   Users,
   UserPlus,

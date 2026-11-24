@@ -59,7 +59,16 @@ public sealed class MediaBlobController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Invalid signature." });
         }
 
-        if (!isTrustedSignedRequest)
+        // Avatar images are public profile assets — allow anonymous access.
+        var isPublicAvatarPath = normalizedKey.Contains("avatars/", StringComparison.OrdinalIgnoreCase)
+            && (normalizedKey.Contains("avatar_", StringComparison.OrdinalIgnoreCase)
+                || normalizedKey.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
+                || normalizedKey.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)
+                || normalizedKey.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+                || normalizedKey.EndsWith(".webp", StringComparison.OrdinalIgnoreCase)
+                || normalizedKey.EndsWith(".gif", StringComparison.OrdinalIgnoreCase));
+
+        if (!isTrustedSignedRequest && !isPublicAvatarPath)
         {
             if (userId == Guid.Empty)
             {
