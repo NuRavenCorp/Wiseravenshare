@@ -283,10 +283,17 @@ public class AppDbContext : DbContext
             entity.Property(x => x.ImageUrl).HasColumnName("image_url").HasColumnType("text");
             entity.Property(x => x.SourceUrl).HasColumnName("source_url").HasColumnType("text");
             entity.Property(x => x.VerificationStatus).HasColumnName("verification_status").HasColumnType("text");
+            entity.Property(x => x.IsBlocked).HasColumnName("is_blocked");
+            entity.Property(x => x.QueueStatus).HasColumnName("queue_status").HasColumnType("text");
+            entity.Property(x => x.IsImmediatelyAvailable).HasColumnName("is_immediately_available");
+            entity.Property(x => x.ApprovedAtUtc).HasColumnName("approved_at_utc");
+            entity.Property(x => x.ApprovedBy).HasColumnName("approved_by").HasColumnType("text");
             entity.Property(x => x.CreatedDate).HasColumnName("created_date");
             entity.Property(x => x.UpdatedDate).HasColumnName("updated_date");
 
             entity.HasIndex(x => x.VerificationStatus);
+            entity.HasIndex(x => x.IsImmediatelyAvailable);
+            entity.HasIndex(x => x.QueueStatus);
             entity.HasIndex(x => x.CreatedDate);
         });
 

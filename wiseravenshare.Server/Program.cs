@@ -2766,6 +2766,7 @@ else
     builder.Services.AddHttpClient<IOllamaChatService, GradientChatService>();
 }
 builder.Services.AddHttpClient<IUserAiConnectorChatService, UserAiConnectorChatService>();
+builder.Services.AddHttpClient<Wiseravenshare.Server.Services.AiAssistant.NuRavenCorpLlmChatService>();
 // RavenAssistant – named client for the voter-alliance-style NuRavenCorpLLM bridge.
 builder.Services.AddHttpClient("RavenAssistant", client =>
 {

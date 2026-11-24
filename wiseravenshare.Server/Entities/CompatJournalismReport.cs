@@ -12,6 +12,12 @@ public sealed class CompatJournalismReport
     public string? SourceUrl { get; set; }
     /// <summary>under_review | verified | rejected</summary>
     public string VerificationStatus { get; set; } = "under_review";
+    public bool IsBlocked { get; set; } = true;
+    /// <summary>pending_review | queued_for_consumption | rejected</summary>
+    public string QueueStatus { get; set; } = "pending_review";
+    public bool IsImmediatelyAvailable { get; set; }
+    public DateTime? ApprovedAtUtc { get; set; }
+    public string? ApprovedBy { get; set; }
     public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedDate { get; set; } = DateTime.UtcNow;
 }

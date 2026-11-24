@@ -800,10 +800,16 @@ public class SubscriptionService : ISubscriptionService
     {
         var existing = await _dbContext.Set<UserSubscription>()
             .AsTracking()
-            .FirstOrDefaultAsync(s => s.UserId == userId && !s.IsDeleted);
+            .FirstOrDefaultAsync(s => s.UserId == userId);
 
         if (existing != null && !string.IsNullOrWhiteSpace(existing.StripeCustomerId))
         {
+            if (existing.IsDeleted)
+            {
+                existing.IsDeleted = false;
+                existing.UpdatedAt = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync();
+            }
             return existing.StripeCustomerId;
         }
 
@@ -836,11 +842,28 @@ public class SubscriptionService : ISubscriptionService
         else
         {
             existing.StripeCustomerId = customer.Id;
+            existing.IsDeleted = false;
             existing.UpdatedAt = DateTime.UtcNow;
         }
 
-        await _dbContext.SaveChangesAsync();
-        return customer.Id;
+        try
+        {
+            await _dbContext.SaveChangesAsync();
+            return customer.Id;
+        }
+        catch (DbUpdateException)
+        {
+            // Handle rare races / pre-existing soft-deleted rows with unique constraints.
+            var fallback = await _dbContext.Set<UserSubscription>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.UserId == userId);
+            if (fallback is not null && !string.IsNullOrWhiteSpace(fallback.StripeCustomerId))
+            {
+                return fallback.StripeCustomerId;
+            }
+
+            throw new InvalidOperationException("Failed to store Stripe customer mapping for this account.");
+        }
     }
 
     private void EnsureStripeConfigured()

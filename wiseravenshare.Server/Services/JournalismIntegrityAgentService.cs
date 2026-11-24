@@ -1,7 +1,9 @@
 using System.Text.RegularExpressions;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Wiseravenshare.Server.Entities;
 using Wiseravenshare.Server.Infrastructure.Data;
+using Wiseravenshare.Server.Services.AiAssistant;
 
 namespace Wiseravenshare.Server.Services;
 
@@ -26,13 +28,16 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
 
     private readonly AppDbContext _db;
     private readonly ILogger<JournalismIntegrityAgentService> _logger;
+    private readonly NuRavenCorpLlmChatService _nuRavenCorpLlmChatService;
 
     public JournalismIntegrityAgentService(
         AppDbContext db,
-        ILogger<JournalismIntegrityAgentService> logger)
+        ILogger<JournalismIntegrityAgentService> logger,
+        NuRavenCorpLlmChatService nuRavenCorpLlmChatService)
     {
         _db = db;
         _logger = logger;
+        _nuRavenCorpLlmChatService = nuRavenCorpLlmChatService;
     }
 
     public async Task<JournalismIntegrityEvaluationResult> EvaluateAsync(
@@ -76,7 +81,27 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
             return result;
         }
 
-        row.VerificationStatus = result.RecommendedStatus;
+        ApplyPublicationOutcome(row, result);
+        if (!string.IsNullOrWhiteSpace(row.PostId) && Guid.TryParse(row.PostId, out var postId))
+        {
+            var post = await _db.Posts.FirstOrDefaultAsync(p => p.Id == postId, cancellationToken);
+            if (post is not null)
+            {
+                if (result.RecommendedStatus == "verified")
+                {
+                    post.IsDeleted = false;
+                    post.DeletedAt = null;
+                    post.IsSensitive = false;
+                    post.TruthStatus = "verified";
+                }
+                else
+                {
+                    post.IsDeleted = true;
+                    post.DeletedAt = DateTime.UtcNow;
+                }
+            }
+        }
+
         row.UpdatedDate = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
         result.AppliedToReport = true;
@@ -237,17 +262,32 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
         }
 
         score = Math.Clamp(score, 0, 100);
-        var recommended = score >= 75
+        var heuristicRecommended = score >= 75
             ? "verified"
             : score >= 50
                 ? "under_review"
                 : "rejected";
+        var recommended = heuristicRecommended;
+        var approvalScore = Math.Round(score, 2);
+
+        var llmDecision = await TryEvaluateViaNuRavenCorpLlmAsync(material, cancellationToken);
+        if (llmDecision is not null)
+        {
+            recommended = llmDecision.RecommendedStatus;
+            approvalScore = llmDecision.OverallScore;
+            factors.Add(Factor("nuravencorpllm_decision", 0, llmDecision.Reason));
+            messages.Add("Final approval decision assigned by NuRavenCorpLLM agent.");
+        }
+        else
+        {
+            messages.Add("NuRavenCorpLLM unavailable; fallback integrity heuristics applied.");
+        }
 
         return new JournalismIntegrityEvaluationResult
         {
             ReportId = material.ReportId,
             PostId = material.PostId,
-            OverallScore = Math.Round(score, 2),
+            OverallScore = approvalScore,
             ApprovedForPublication = recommended == "verified",
             RecommendedStatus = recommended,
             Reasons = factors.OrderBy(f => f.Weight).Take(6).Select(f => f.Reason).ToList(),
@@ -487,6 +527,153 @@ public sealed class JournalismIntegrityAgentService : IJournalismIntegrityAgentS
             return string.Empty;
         }
     }
+
+    private void ApplyPublicationOutcome(CompatJournalismReport row, JournalismIntegrityEvaluationResult result)
+    {
+        row.VerificationStatus = result.RecommendedStatus;
+        if (result.RecommendedStatus == "verified")
+        {
+            row.IsBlocked = false;
+            row.QueueStatus = "queued_for_consumption";
+            row.IsImmediatelyAvailable = true;
+            row.ApprovedAtUtc = DateTime.UtcNow;
+            row.ApprovedBy = "nuravencorpllm-agent";
+            return;
+        }
+
+        row.IsBlocked = true;
+        row.IsImmediatelyAvailable = false;
+        row.ApprovedAtUtc = null;
+        row.ApprovedBy = null;
+        row.QueueStatus = result.RecommendedStatus == "rejected"
+            ? "rejected"
+            : "pending_review";
+    }
+
+    private async Task<NuRavenCorpDecision?> TryEvaluateViaNuRavenCorpLlmAsync(
+        JournalismMaterial material,
+        CancellationToken cancellationToken)
+    {
+        var prompt = string.Join("\n", [
+            "You are NuRavenCorpLLM acting as the final journalism approval agent.",
+            "Decide if this report should be available to end users immediately.",
+            "Respond with JSON only and no markdown.",
+            "Schema: {\"recommended_status\":\"verified|under_review|rejected\",\"overall_score\":0-100,\"reason\":\"short reason\"}",
+            $"Headline: {material.Headline}",
+            $"Description: {material.Description}",
+            $"Source URL: {material.SourceUrl}",
+            $"Region: {material.Region}",
+            $"Linked Truth Status: {material.TruthStatus ?? "unknown"}"
+        ]);
+
+        try
+        {
+            var response = await _nuRavenCorpLlmChatService.ChatAsync(new AiChatRequest
+            {
+                Message = prompt,
+                Model = "nuravencorpllm-assistant",
+                UseCrawlerContext = false
+            });
+
+            if (!response.Success || string.IsNullOrWhiteSpace(response.Reply))
+            {
+                return null;
+            }
+
+            var jsonPayload = TryExtractJsonObject(response.Reply);
+            if (string.IsNullOrWhiteSpace(jsonPayload))
+            {
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(jsonPayload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var statusRaw = doc.RootElement.TryGetProperty("recommended_status", out var statusNode)
+                ? statusNode.GetString()
+                : null;
+            var reason = doc.RootElement.TryGetProperty("reason", out var reasonNode)
+                ? reasonNode.GetString()
+                : "Approval decision returned by NuRavenCorpLLM.";
+            var normalizedStatus = NormalizeRecommendedStatus(statusRaw);
+            if (normalizedStatus is null)
+            {
+                return null;
+            }
+
+            double score = 50;
+            if (doc.RootElement.TryGetProperty("overall_score", out var scoreNode))
+            {
+                if (scoreNode.ValueKind == JsonValueKind.Number && scoreNode.TryGetDouble(out var numeric))
+                {
+                    score = numeric;
+                }
+                else if (scoreNode.ValueKind == JsonValueKind.String && double.TryParse(scoreNode.GetString(), out var parsed))
+                {
+                    score = parsed;
+                }
+            }
+
+            return new NuRavenCorpDecision(
+                normalizedStatus,
+                Math.Round(Math.Clamp(score, 0, 100), 2),
+                string.IsNullOrWhiteSpace(reason) ? "Approval decision returned by NuRavenCorpLLM." : reason.Trim());
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "NuRavenCorpLLM approval decision could not be parsed.");
+            return null;
+        }
+    }
+
+    private static string? NormalizeRecommendedStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return null;
+        }
+
+        return status.Trim().ToLowerInvariant() switch
+        {
+            "verified" or "approve" or "approved" => "verified",
+            "under_review" or "review" or "pending" => "under_review",
+            "rejected" or "reject" => "rejected",
+            _ => null
+        };
+    }
+
+    private static string? TryExtractJsonObject(string rawReply)
+    {
+        var text = rawReply.Trim();
+        if (text.Length == 0)
+        {
+            return null;
+        }
+
+        if (text.StartsWith("```", StringComparison.Ordinal))
+        {
+            var cleaned = text.Replace("```json", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace("```", string.Empty, StringComparison.Ordinal)
+                .Trim();
+            text = cleaned;
+        }
+
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        if (start < 0 || end <= start)
+        {
+            return null;
+        }
+
+        return text[start..(end + 1)];
+    }
 }
 
 public sealed class JournalismIntegrityEvaluationRequest
@@ -537,3 +724,8 @@ internal sealed record FactorEvaluation(
     double ScoreAdjustment,
     List<IntegrityFactor> Factors,
     List<string> Messages);
+
+internal sealed record NuRavenCorpDecision(
+    string RecommendedStatus,
+    double OverallScore,
+    string Reason);

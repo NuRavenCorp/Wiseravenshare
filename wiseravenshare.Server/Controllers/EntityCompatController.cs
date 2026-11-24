@@ -38,6 +38,7 @@ public sealed partial class EntityCompatController : ControllerBase
     private readonly GrowthService _growthService;
     private readonly IWiseCoinService _wiseCoinService;
     private readonly TeamStore _teamStore;
+    private readonly IJournalismIntegrityAgentService _journalismIntegrityAgent;
     private readonly ILogger<EntityCompatController> _logger;
 
     public EntityCompatController(
@@ -48,6 +49,7 @@ public sealed partial class EntityCompatController : ControllerBase
         GrowthService growthService,
         IWiseCoinService wiseCoinService,
         TeamStore teamStore,
+        IJournalismIntegrityAgentService journalismIntegrityAgent,
         ILogger<EntityCompatController> logger)
     {
         _db = db;
@@ -57,6 +59,7 @@ public sealed partial class EntityCompatController : ControllerBase
         _growthService = growthService;
         _wiseCoinService = wiseCoinService;
         _teamStore = teamStore;
+        _journalismIntegrityAgent = journalismIntegrityAgent;
         _logger = logger;
     }
 
@@ -1456,11 +1459,30 @@ private async Task EnsureJournalismReportStorageAsync(CancellationToken cancella
             image_url TEXT NULL,
             source_url TEXT NULL,
             verification_status TEXT NOT NULL DEFAULT 'under_review',
+            is_blocked BOOLEAN NOT NULL DEFAULT TRUE,
+            queue_status TEXT NOT NULL DEFAULT 'pending_review',
+            is_immediately_available BOOLEAN NOT NULL DEFAULT FALSE,
+            approved_at_utc TIMESTAMPTZ NULL,
+            approved_by TEXT NULL,
             created_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_date TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        ALTER TABLE app_data.compat_journalism_reports
+            ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT TRUE;
+        ALTER TABLE app_data.compat_journalism_reports
+            ADD COLUMN IF NOT EXISTS queue_status TEXT NOT NULL DEFAULT 'pending_review';
+        ALTER TABLE app_data.compat_journalism_reports
+            ADD COLUMN IF NOT EXISTS is_immediately_available BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE app_data.compat_journalism_reports
+            ADD COLUMN IF NOT EXISTS approved_at_utc TIMESTAMPTZ NULL;
+        ALTER TABLE app_data.compat_journalism_reports
+            ADD COLUMN IF NOT EXISTS approved_by TEXT NULL;
         CREATE INDEX IF NOT EXISTS ix_compat_journalism_reports_verification_status
             ON app_data.compat_journalism_reports(verification_status);
+        CREATE INDEX IF NOT EXISTS ix_compat_journalism_reports_available
+            ON app_data.compat_journalism_reports(is_immediately_available);
+        CREATE INDEX IF NOT EXISTS ix_compat_journalism_reports_queue_status
+            ON app_data.compat_journalism_reports(queue_status);
         CREATE INDEX IF NOT EXISTS ix_compat_journalism_reports_created_date
             ON app_data.compat_journalism_reports(created_date DESC);
         """,
@@ -1474,8 +1496,14 @@ private async Task<EntityFilterResponse> FilterJournalismReportsAsync(
     var status = ReadString(body, "query.verification_status");
     var statusIn = TryReadStringArray(body, "query.verification_status.$in");
     var sort = ReadString(body, "options.sort");
+    var isAdmin = AuthAccessPolicy.IsAllAccessAdmin(User) || User.IsInRole("Admin");
 
     var query = _db.CompatJournalismReports.AsNoTracking();
+    if (!isAdmin)
+    {
+        query = query.Where(x => !x.IsBlocked && x.IsImmediatelyAvailable);
+    }
+
     if (statusIn is { Length: > 0 })
     {
         var normalized = statusIn
@@ -1530,14 +1558,52 @@ private async Task<IActionResult> CreateJournalismReportCompat(JsonElement paylo
         Region = ReadString(payload, "region"),
         ImageUrl = ReadString(payload, "image_url"),
         SourceUrl = ReadString(payload, "source_url"),
-        VerificationStatus = ReadString(payload, "verification_status") is { Length: > 0 } s ? s : "under_review",
+        VerificationStatus = "under_review",
+        IsBlocked = true,
+        QueueStatus = "pending_review",
+        IsImmediatelyAvailable = false,
         CreatedDate = now,
         UpdatedDate = now,
     };
 
     _db.CompatJournalismReports.Add(row);
+    if (!string.IsNullOrWhiteSpace(row.PostId) && Guid.TryParse(row.PostId, out var postId))
+    {
+        var post = await _db.Posts.FirstOrDefaultAsync(p => p.Id == postId);
+        if (post is not null)
+        {
+            post.IsDeleted = true;
+            post.DeletedAt = now;
+            post.TruthStatus = "pending";
+            post.UpdatedAt = now;
+        }
+    }
     await _db.SaveChangesAsync();
-    return Ok(MapJournalismReportRow(row));
+
+    try
+    {
+        await _journalismIntegrityAgent.EvaluateAndApplyAsync(
+            new JournalismIntegrityEvaluationRequest
+            {
+                ReportId = row.Id,
+                PostId = row.PostId,
+                Headline = row.Headline,
+                Description = row.Description,
+                SourceUrl = row.SourceUrl,
+                Region = row.Region,
+                ApplyDecision = true
+            },
+            canApplyDecision: true);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogWarning(ex, "NuRavenCorpLLM approval failed for journalism report {ReportId}. Report remains blocked.", row.Id);
+    }
+
+    var refreshed = await _db.CompatJournalismReports
+        .AsNoTracking()
+        .FirstOrDefaultAsync(x => x.Id == row.Id);
+    return Ok(MapJournalismReportRow(refreshed ?? row));
 }
 
 private async Task<IActionResult> UpdateJournalismReportCompat(string id, JsonElement payload)
@@ -1567,11 +1633,54 @@ private async Task<IActionResult> UpdateJournalismReportCompat(string id, JsonEl
         return BadRequest(new { message = "verification_status must be under_review, verified, or rejected." });
     }
 
-    row.VerificationStatus = normalizedStatus;
-    row.UpdatedDate = DateTime.UtcNow;
+    if (normalizedStatus == "under_review")
+    {
+        row.VerificationStatus = "under_review";
+        row.IsBlocked = true;
+        row.IsImmediatelyAvailable = false;
+        row.QueueStatus = "pending_review";
+        row.ApprovedAtUtc = null;
+        row.ApprovedBy = null;
+        row.UpdatedDate = DateTime.UtcNow;
 
-    await _db.SaveChangesAsync();
-    return Ok(MapJournalismReportRow(row));
+        if (!string.IsNullOrWhiteSpace(row.PostId) && Guid.TryParse(row.PostId, out var postId))
+        {
+            var post = await _db.Posts.FirstOrDefaultAsync(p => p.Id == postId);
+            if (post is not null)
+            {
+                post.IsDeleted = true;
+                post.DeletedAt = row.UpdatedDate;
+                post.UpdatedAt = row.UpdatedDate;
+            }
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(MapJournalismReportRow(row));
+    }
+
+    var evaluation = await _journalismIntegrityAgent.EvaluateAndApplyAsync(
+        new JournalismIntegrityEvaluationRequest
+        {
+            ReportId = row.Id,
+            PostId = row.PostId,
+            Headline = row.Headline,
+            Description = row.Description,
+            SourceUrl = row.SourceUrl,
+            Region = row.Region,
+            ApplyDecision = true
+        },
+        canApplyDecision: true);
+
+    var refreshed = await _db.CompatJournalismReports
+        .AsNoTracking()
+        .FirstOrDefaultAsync(x => x.Id == row.Id);
+
+    if (normalizedStatus != evaluation.RecommendedStatus)
+    {
+        Response.Headers.Append("X-Approval-Decision", evaluation.RecommendedStatus);
+    }
+
+    return Ok(MapJournalismReportRow(refreshed ?? row));
 }
 
 private static object MapJournalismReportRow(CompatJournalismReport row)
@@ -1587,6 +1696,11 @@ private static object MapJournalismReportRow(CompatJournalismReport row)
         image_url = row.ImageUrl,
         source_url = row.SourceUrl,
         verification_status = row.VerificationStatus,
+        is_blocked = row.IsBlocked,
+        queue_status = row.QueueStatus,
+        is_immediately_available = row.IsImmediatelyAvailable,
+        approved_at_utc = row.ApprovedAtUtc,
+        approved_by = row.ApprovedBy,
         created_date = row.CreatedDate,
         updated_date = row.UpdatedDate,
     };
